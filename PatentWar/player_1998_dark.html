@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>player 1998</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; width:2560px; height:1440px; }
+canvas { display:block; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap">
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+const W = 2560, H = 1440;
+const MONO = '"Share Tech Mono", "Courier New", monospace';
+
+// ── dark palette — charcoal/near-black, like old dark IDE or dim CRT in a dark room
+const C = {
+  deskBg:    '#1a1a1a',   // almost-black desktop
+  deskGrid:  '#222222',
+  winBg:     '#2d2d2d',   // dark grey window chrome
+  winBorder: '#444444',
+  winTitle:  '#1c3a5a',   // dark navy titlebar
+  winTitleHi:'#2a5080',
+  winTitleIn:'#303030',   // inactive = just dark grey
+  edBg:      '#1e1e1e',   // very dark editor bg (like vim default)
+  edGutter:  '#252525',
+  edCurLine: '#2a2a3a',
+  edText:    '#c8c8c8',
+  edComment: '#5a7a5a',
+  edPP:      '#8a6020',   // preprocessor brownish
+  edKeyword: '#5a8ab0',   // muted blue keywords
+  edNum:     '#8a7a60',
+  taskbar:   '#252525',
+  taskBtn:   '#333333',
+  taskBtnAct:'#1c3a5a',
+  termBg:    '#0d0d0d',
+  termText:  '#b0b0b0',
+  termGreen: '#3a9a3a',
+  termYellow:'#9a9a20',
+  termCmd:   '#4a8a4a',
+  shadow:    'rgba(0,0,0,0.7)',
+};
+
+// ── syntax colors for dark theme
+function lineColor(line) {
+  if (!line.trim()) return C.edText;
+  if (line.match(/^\s*\/\*/) || line.match(/^\s*\*/) || line.match(/^\s*\/\//)) return C.edComment;
+  if (line.match(/^\s*#/)) return C.edPP;
+  if (line.match(/^\s*(int|void|char|double|float|long|unsigned|static|return|if|else|for|while|struct|typedef|sizeof)\b/)) return C.edKeyword;
+  return C.edText;
+}
+
+const MAIN_C = [
+  '/* mpeg1_play.c  --  jerome rota, 1998        */',
+  '/* compile: gcc -o play mpeg1_play.c -lm      */',
+  '',
+  '#include <stdio.h>',
+  '#include <stdlib.h>',
+  '#include <string.h>',
+  '#include <math.h>',
+  '#include "mpeg1.h"',
+  '',
+  '#define BLOCK_SIZE    8',
+  '#define MB_SIZE      16',
+  '#define SYNC_WORD    0x000001',
+  '',
+  'static int quant_matrix[64] = {',
+  '    16, 11, 10, 16, 24, 40, 51, 61,',
+  '    12, 12, 14, 19, 26, 58, 60, 55,',
+  '    14, 13, 16, 24, 40, 57, 69, 56,',
+  '    14, 17, 22, 29, 51, 87, 80, 62,',
+  '    18, 22, 37, 56, 68,109,103, 77,',
+  '    24, 35, 55, 64, 81,104,113, 92,',
+  '    49, 64, 78, 87,103,121,120,101,',
+  '    72, 92, 95, 98,112,100,103, 99',
+  '};',
+  '',
+  'void idct_8x8(int block[64])',
+  '{',
+  '    int i, j, k;',
+  '    double tmp[64];',
+  '    double s, c;',
+  '',
+  '    for (i = 0; i < 8; i++) {',
+  '        for (j = 0; j < 8; j++) {',
+  '            s = 0.0;',
+  '            for (k = 0; k < 8; k++) {',
+  '                c = (k==0) ? 1.0/sqrt(2.0) : 1.0;',
+  '                s += c * block[i*8+k]',
+  '                       * cos((2*j+1)*k*M_PI/16.0);',
+  '            }',
+  '            tmp[i*8+j] = s * 0.5;',
+  '        }',
+  '    }',
+  '    for (j = 0; j < 8; j++) {',
+  '        for (i = 0; i < 8; i++) {',
+  '            s = 0.0;',
+  '            for (k = 0; k < 8; k++) {',
+  '                c = (k==0) ? 1.0/sqrt(2.0) : 1.0;',
+  '                s += c * tmp[k*8+j]',
+  '                       * cos((2*i+1)*k*M_PI/16.0);',
+  '            }',
+  '            block[i*8+j] = (int)(s * 0.5 + 0.5);',
+  '        }',
+  '    }',
+  '}',
+  '',
+  'int read_bits(FILE *f, int n, int *buf, int *pos)',
+  '{',
+  '    int val = 0, i;',
+  '    for (i = 0; i < n; i++) {',
+  '        if (*pos == 0) {',
+  '            *buf = fgetc(f);',
+  '            *pos = 8;',
+  '        }',
+  '        val = (val<<1) | ((*buf >> --(*pos)) & 1);',
+  '    }',
+  '    return val;',
+  '}',
+  '',
+  'void decode_macroblock(FILE *f, FrameBuffer *fb,',
+  '                       int mb_x, int mb_y,',
+  '                       int *bitbuf, int *bitpos)',
+  '{',
+  '    int block[64];',
+  '    int x, y, i, q;',
+  '',
+  '    q = read_bits(f, 5, bitbuf, bitpos);',
+  '',
+  '    for (i = 0; i < 6; i++) {',
+  '        memset(block, 0, sizeof(block));',
+  '        read_dct_coeffs(f, block, bitbuf, bitpos);',
+  '        dequantize(block, quant_matrix, q);',
+  '        idct_8x8(block);',
+  '        copy_block(fb, block, mb_x, mb_y, i);',
+  '    }',
+  '}',
+  '',
+  'int main(int argc, char *argv[])',
+  '{',
+  '    FILE       *f;',
+  '    FrameBuffer fb;',
+  '    int         mb_x, mb_y;',
+  '    int         bitbuf = 0, bitpos = 0;',
+  '    long        sync;',
+  '',
+  '    if (argc < 2) {',
+  '        fprintf(stderr, "usage: play <file.mpg>\\n");',
+  '        return 1;',
+  '    }',
+  '    f = fopen(argv[1], "rb");',
+  '    if (!f) { perror("fopen"); return 1; }',
+  '',
+  '    init_framebuffer(&fb, 352, 240);',
+  '',
+  '    while (!feof(f)) {',
+  '        sync = read_bits(f,24,&bitbuf,&bitpos);',
+  '        if (sync != SYNC_WORD) continue;',
+  '',
+  '        for (mb_y=0; mb_y<fb.h/MB_SIZE; mb_y++)',
+  '        for (mb_x=0; mb_x<fb.w/MB_SIZE; mb_x++)',
+  '            decode_macroblock(f, &fb,',
+  '                mb_x, mb_y,',
+  '                &bitbuf, &bitpos);',
+  '',
+  '        render_frame(&fb);',
+  '    }',
+  '    fclose(f);',
+  '    free_framebuffer(&fb);',
+  '    return 0;',
+  '}',
+];
+
+const HEADER = [
+  '/* mpeg1.h -- frame buffer & codec API */',
+  '',
+  'typedef unsigned char  u8;',
+  'typedef unsigned short u16;',
+  'typedef unsigned int   u32;',
+  '',
+  'typedef struct {',
+  '    u8  *y, *cb, *cr;',
+  '    int  w,   h;',
+  '    int  stride;',
+  '} FrameBuffer;',
+  '',
+  'void init_framebuffer(',
+  '        FrameBuffer *fb,',
+  '        int w, int h);',
+  'void free_framebuffer(',
+  '        FrameBuffer *fb);',
+  'void render_frame(',
+  '        FrameBuffer *fb);',
+  '',
+  'void read_dct_coeffs(',
+  '        FILE *f, int *block,',
+  '        int *buf, int *pos);',
+  'void dequantize(',
+  '        int *block,',
+  '        int *matrix, int q);',
+  'void copy_block(',
+  '        FrameBuffer *fb,',
+  '        int *block,',
+  '        int mb_x, int mb_y,',
+  '        int plane);',
+];
+
+// longer compile output — more realistic, more frames
+const COMPILE_LINES = [
+  '$ gcc -Wall -O2 -o play mpeg1_play.c -lm',
+  '',
+  'mpeg1_play.c: In function `decode_macroblock\':',
+  'mpeg1_play.c:63: warning: implicit declaration',
+  '  of function `read_dct_coeffs\'',
+  'mpeg1_play.c:64: warning: implicit declaration',
+  '  of function `dequantize\'',
+  'mpeg1_play.c:66: warning: implicit declaration',
+  '  of function `copy_block\'',
+  '',
+  '$ ls -la play',
+  '-rwxr-xr-x  1 jerome jerome  18432 Nov 12 23:41 play',
+  '',
+  '$ ./play star_wars_trailer.mpg',
+  'init_framebuffer: 352x240 YCbCr 4:2:0',
+  'bitstream: found sequence header',
+  'frame 001/247 ... ok  [ 14.2 ms ]',
+  'frame 002/247 ... ok  [ 13.8 ms ]',
+  'frame 003/247 ... ok  [ 14.1 ms ]',
+  'frame 004/247 ... ok  [ 13.9 ms ]',
+  'frame 005/247 ... ok  [ 14.3 ms ]',
+  'frame 006/247 ... ok  [ 14.0 ms ]',
+  'frame 007/247 ... ok  [ 14.2 ms ]',
+  'frame 008/247 ... ok  [ 13.7 ms ]',
+];
+
+// ── timing
+let startTime = null;
+let raf = null;
+const DUR = 12.0;
+let t = 0;
+
+// ── dark win border (bevels adapted for dark)
+function darkBorder(x, y, w, h, raised) {
+  cx.lineWidth = 1;
+  cx.strokeStyle = raised ? '#555' : '#222';
+  cx.beginPath(); cx.moveTo(x,y+h); cx.lineTo(x,y); cx.lineTo(x+w,y); cx.stroke();
+  cx.strokeStyle = raised ? '#222' : '#555';
+  cx.beginPath(); cx.moveTo(x+w,y); cx.lineTo(x+w,y+h); cx.lineTo(x,y+h); cx.stroke();
+  cx.strokeStyle = raised ? '#484848' : '#181818';
+  cx.beginPath(); cx.moveTo(x+1,y+h-1); cx.lineTo(x+1,y+1); cx.lineTo(x+w-1,y+1); cx.stroke();
+  cx.strokeStyle = raised ? '#181818' : '#484848';
+  cx.beginPath(); cx.moveTo(x+w-1,y+1); cx.lineTo(x+w-1,y+h-1); cx.lineTo(x+1,y+h-1); cx.stroke();
+}
+
+function drawTitleBar(x, y, w, h, title, active) {
+  const grad = cx.createLinearGradient(x, y, x+w, y);
+  if (active) {
+    grad.addColorStop(0, '#1a3855');
+    grad.addColorStop(1, '#254a6e');
+  } else {
+    grad.addColorStop(0, '#282828');
+    grad.addColorStop(1, '#323232');
+  }
+  cx.fillStyle = grad;
+  cx.fillRect(x, y, w, h);
+  cx.fillStyle = active ? '#d0d8e0' : '#707070';
+  cx.font = `bold ${Math.floor(h*0.52)}px ${MONO}`;
+  cx.textAlign = 'left';
+  cx.fillText(title, x + 8, y + h*0.7);
+
+  // buttons
+  const bw = h - 6;
+  const bStartX = x + w - (bw+3)*3 - 3;
+  ['−','□','×'].forEach((lbl, i) => {
+    const bxi = bStartX + i*(bw+3);
+    cx.fillStyle = '#2d2d2d';
+    cx.fillRect(bxi, y+3, bw, bw);
+    darkBorder(bxi, y+3, bw, bw, true);
+    cx.fillStyle = active ? '#c0c8d0' : '#606060';
+    cx.font = `bold ${Math.floor(bw*0.55)}px ${MONO}`;
+    cx.textAlign = 'center';
+    cx.fillText(lbl, bxi + bw/2, y + bw*0.82);
+  });
+}
+
+function drawMenuBar(x, y, w, h, items) {
+  cx.fillStyle = '#2a2a2a';
+  cx.fillRect(x, y, w, h);
+  // bottom border
+  cx.strokeStyle = '#1a1a1a';
+  cx.lineWidth = 1;
+  cx.beginPath(); cx.moveTo(x,y+h-1); cx.lineTo(x+w,y+h-1); cx.stroke();
+  cx.fillStyle = '#aaa';
+  cx.font = `${Math.floor(h*0.6)}px ${MONO}`;
+  cx.textAlign = 'left';
+  let ox = x + 10;
+  items.forEach(item => {
+    cx.fillText(item, ox, y + h*0.72);
+    ox += cx.measureText(item).width + 28;
+  });
+}
+
+function drawScrollbar(x, y, w, h, pct) {
+  cx.fillStyle = '#222';
+  cx.fillRect(x, y, w, h);
+  // track dots
+  cx.fillStyle = '#2a2a2a';
+  for (let dy = 0; dy < h; dy += 4) {
+    for (let dx = 0; dx < w; dx += 4) {
+      if ((dx+dy)%8 === 0) cx.fillRect(x+dx, y+dy, 2, 2);
+    }
+  }
+  // thumb
+  const tH = Math.max(40, h * 0.25);
+  const tY = y + w + (h - 2*w - tH) * Math.min(1, Math.max(0, pct));
+  cx.fillStyle = '#404040';
+  cx.fillRect(x, tY, w, tH);
+  darkBorder(x, tY, w, tH, true);
+  // arrows
+  [y, y+h-w].forEach((ay, ai) => {
+    cx.fillStyle = '#383838';
+    cx.fillRect(x, ay, w, w);
+    darkBorder(x, ay, w, w, true);
+    cx.fillStyle = '#909090';
+    cx.font = `${Math.floor(w*0.65)}px ${MONO}`;
+    cx.textAlign = 'center';
+    cx.fillText(ai===0 ? '▲' : '▼', x+w/2, ay+w*0.78);
+  });
+}
+
+function drawEditorWindow(x, y, w, h, linesTyped, scrollFrac, caretOn) {
+  // drop shadow
+  cx.fillStyle = 'rgba(0,0,0,0.6)';
+  cx.fillRect(x+10, y+10, w, h);
+
+  cx.fillStyle = C.winBg;
+  cx.fillRect(x, y, w, h);
+  darkBorder(x, y, w, h, true);
+
+  const TH = 40;
+  drawTitleBar(x+2, y+2, w-4, TH, 'mpeg1_play.c - [source]', true);
+  drawMenuBar(x+2, y+TH+2, w-4, 30, ['File','Edit','View','Search','Project','Build','Debug','Help']);
+
+  // toolbar strip
+  const tbY = y+TH+32;
+  cx.fillStyle = '#292929';
+  cx.fillRect(x+2, tbY, w-4, 34);
+  cx.strokeStyle = '#1a1a1a'; cx.lineWidth=1;
+  cx.beginPath(); cx.moveTo(x+2,tbY+34); cx.lineTo(x+w-2,tbY+34); cx.stroke();
+  // fake toolbar icons
+  ['▶','■','⊞','⊟','✎','⇅'].forEach((ic, i) => {
+    const bx2 = x+8+i*42;
+    cx.fillStyle = '#333';
+    cx.fillRect(bx2, tbY+4, 30, 26);
+    darkBorder(bx2, tbY+4, 30, 26, true);
+    cx.fillStyle = '#888';
+    cx.font = `16px ${MONO}`;
+    cx.textAlign = 'center';
+    cx.fillText(ic, bx2+15, tbY+21);
+  });
+
+  const SBW = 24;
+  const edX = x+4, edY = y+TH+32+34+4, edW = w-8-SBW, edH = h-TH-32-34-32-8;
+
+  cx.fillStyle = C.edBg;
+  cx.fillRect(edX, edY, edW, edH);
+  darkBorder(edX, edY, edW, edH, false);
+
+  const GW = 68;
+  // gutter
+  cx.fillStyle = C.edGutter;
+  cx.fillRect(edX+2, edY+2, GW, edH-4);
+  cx.strokeStyle = '#333'; cx.lineWidth=1;
+  cx.beginPath(); cx.moveTo(edX+2+GW, edY+2); cx.lineTo(edX+2+GW, edY+edH-2); cx.stroke();
+
+  const FS = 23;
+  const LH = 30;
+  const maxVisible = Math.floor((edH-8) / LH);
+  const totalLines = MAIN_C.length;
+  const topLine = Math.floor(scrollFrac * Math.max(0, totalLines - maxVisible));
+
+  cx.save();
+  cx.beginPath();
+  cx.rect(edX+2, edY+2, edW-4, edH-4);
+  cx.clip();
+
+  for (let i = 0; i <= maxVisible; i++) {
+    const li = topLine + i;
+    if (li >= MAIN_C.length) break;
+    const ly = edY + 8 + i * LH;
+
+    // current line bg
+    if (li === linesTyped - 1 && linesTyped <= MAIN_C.length) {
+      cx.fillStyle = C.edCurLine;
+      cx.fillRect(edX+2+GW+2, ly - LH*0.82, edW - GW - 6, LH);
+    }
+
+    // line number
+    cx.fillStyle = li < linesTyped ? '#4a4a5a' : '#2a2a2a';
+    cx.font = `${FS-3}px ${MONO}`;
+    cx.textAlign = 'right';
+    cx.fillText((li+1).toString(), edX+2+GW-6, ly);
+
+    // code
+    if (li < linesTyped) {
+      cx.fillStyle = lineColor(MAIN_C[li]);
+      cx.font = `${FS}px ${MONO}`;
+      cx.textAlign = 'left';
+      cx.fillText(MAIN_C[li], edX + 2 + GW + 8, ly);
+    }
+  }
+
+  // caret
+  if (linesTyped > 0 && linesTyped <= MAIN_C.length) {
+    const curRow = linesTyped - 1 - topLine;
+    if (curRow >= 0 && curRow < maxVisible && caretOn) {
+      const ly = edY + 8 + curRow * LH;
+      cx.font = `${FS}px ${MONO}`;
+      const tw = cx.measureText(MAIN_C[linesTyped-1] || '').width;
+      cx.fillStyle = '#aaaacc';
+      cx.fillRect(edX+2+GW+8+tw, ly - LH*0.78, 2, LH*0.88);
+    }
+  }
+
+  cx.restore();
+
+  drawScrollbar(edX+edW, edY, SBW, edH, scrollFrac);
+
+  // status bar
+  const stY = y + h - 28;
+  cx.fillStyle = '#222';
+  cx.fillRect(x+2, stY, w-4, 26);
+  darkBorder(x+2, stY, w-4, 26, false);
+  cx.fillStyle = '#707070';
+  cx.font = `17px ${MONO}`;
+  cx.textAlign = 'left';
+  cx.fillText(`Ln ${linesTyped}  Col 1    C    Linux    UTF-8`, x+12, stY+18);
+  // right side info
+  cx.textAlign = 'right';
+  cx.fillText(`${MAIN_C.length} lines    1.2 KB`, x+w-12, stY+18);
+}
+
+function drawHeaderWindow(x, y, w, h, linesFrac) {
+  cx.fillStyle = 'rgba(0,0,0,0.5)';
+  cx.fillRect(x+8, y+8, w, h);
+
+  cx.fillStyle = C.winBg;
+  cx.fillRect(x, y, w, h);
+  darkBorder(x, y, w, h, true);
+
+  const TH = 34;
+  drawTitleBar(x+2, y+2, w-4, TH, 'mpeg1.h', false);
+  drawMenuBar(x+2, y+TH+2, w-4, 26, ['File','Edit','View','Help']);
+
+  const edX = x+4, edY = y+TH+28+4, edW = w-8, edH = h-TH-32-8;
+  cx.fillStyle = '#1a1a1a';
+  cx.fillRect(edX, edY, edW, edH);
+  darkBorder(edX, edY, edW, edH, false);
+
+  const FS = 21;
+  const LH = 27;
+  const maxV = Math.floor((edH-6)/LH);
+  const shown = Math.floor(linesFrac * HEADER.length);
+
+  cx.save();
+  cx.beginPath();
+  cx.rect(edX+2, edY+2, edW-4, edH-4);
+  cx.clip();
+  for (let i = 0; i < Math.min(shown, maxV); i++) {
+    cx.fillStyle = lineColor(HEADER[i]);
+    cx.font = `${FS}px ${MONO}`;
+    cx.textAlign = 'left';
+    cx.fillText(HEADER[i], edX+8, edY+8+i*LH+FS*0.82);
+  }
+  cx.restore();
+}
+
+function drawTerminal(x, y, w, h, linesShown, caretOn) {
+  cx.fillStyle = 'rgba(0,0,0,0.6)';
+  cx.fillRect(x+8, y+8, w, h);
+
+  cx.fillStyle = '#181818';
+  cx.fillRect(x, y, w, h);
+  darkBorder(x, y, w, h, true);
+
+  const TH = 34;
+  drawTitleBar(x+2, y+2, w-4, TH, 'bash — jerome@linux:~/src/mpeg1_player', true);
+
+  const edX = x+4, edY = y+TH+4, edW = w-8, edH = h-TH-8;
+  cx.fillStyle = C.termBg;
+  cx.fillRect(edX, edY, edW, edH);
+
+  const FS = 22;
+  const LH = 29;
+  cx.textAlign = 'left';
+
+  const shown = Math.min(linesShown, COMPILE_LINES.length);
+  for (let i = 0; i < shown; i++) {
+    const line = COMPILE_LINES[i];
+    let color = C.termText;
+    if (line.startsWith('$')) color = C.termCmd;
+    else if (line.includes('warning:')) color = C.termYellow;
+    else if (line.includes(' ok ')) color = C.termGreen;
+    else if (line.includes('-rwx') || line.includes('init_framebuffer') || line.includes('bitstream')) color = '#7a9aaa';
+    cx.fillStyle = color;
+    cx.font = `${FS}px ${MONO}`;
+    cx.fillText(line, edX+10, edY+10+(i*LH)+FS);
+  }
+
+  if (linesShown >= COMPILE_LINES.length && caretOn) {
+    const lastY = edY + 10 + (shown * LH) + FS;
+    cx.fillStyle = C.termGreen;
+    cx.fillRect(edX+10, lastY-FS+4, FS*0.55, FS);
+  }
+}
+
+function drawTaskbar(winNames) {
+  const TH = 38;
+  cx.fillStyle = C.taskbar;
+  cx.fillRect(0, H-TH, W, TH);
+  // top edge highlight
+  cx.strokeStyle = '#404040'; cx.lineWidth=1;
+  cx.beginPath(); cx.moveTo(0,H-TH); cx.lineTo(W,H-TH); cx.stroke();
+
+  // Start button
+  cx.fillStyle = '#1c3a5a';
+  cx.fillRect(4, H-TH+2, 96, TH-4);
+  darkBorder(4, H-TH+2, 96, TH-4, true);
+  cx.fillStyle = '#c0d0e0';
+  cx.font = `bold 20px ${MONO}`;
+  cx.textAlign = 'center';
+  cx.fillText('▶ Start', 52, H-TH+25);
+
+  winNames.forEach((name, i) => {
+    if (!name) return;
+    const bx = 108 + i * 250;
+    cx.fillStyle = i===0 ? '#303848' : '#2a2a2a';
+    cx.fillRect(bx, H-TH+3, 240, TH-6);
+    darkBorder(bx, H-TH+3, 240, TH-6, i!==0);
+    cx.fillStyle = i===0 ? '#c0c8d8' : '#888';
+    cx.font = `18px ${MONO}`;
+    cx.textAlign = 'left';
+    cx.fillText(name, bx+8, H-TH+24);
+  });
+
+  // clock
+  cx.fillStyle = '#1e1e1e';
+  cx.fillRect(W-90, H-TH+3, 86, TH-6);
+  darkBorder(W-90, H-TH+3, 86, TH-6, false);
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  cx.fillStyle = '#909090';
+  cx.font = `19px ${MONO}`;
+  cx.textAlign = 'center';
+  cx.fillText(`${hh}:${mm}`, W-47, H-TH+23);
+}
+
+function drawDesktop() {
+  cx.fillStyle = C.deskBg;
+  cx.fillRect(0, 0, W, H);
+  // subtle dot grid
+  cx.fillStyle = C.deskGrid;
+  for (let y = 0; y < H; y += 32) {
+    for (let x = 0; x < W; x += 32) {
+      cx.fillRect(x, y, 1, 1);
+    }
+  }
+  // desktop icons (faint)
+  const icons = [
+    { label: 'My Computer',  x: 40, y: 40 },
+    { label: 'Recycle Bin',  x: 40, y: 160 },
+    { label: 'src/',         x: 40, y: 280 },
+  ];
+  icons.forEach(ic => {
+    cx.fillStyle = '#333';
+    cx.fillRect(ic.x+8, ic.y, 40, 36);
+    darkBorder(ic.x+8, ic.y, 40, 36, true);
+    cx.fillStyle = '#505060';
+    cx.font = `17px ${MONO}`;
+    cx.textAlign = 'center';
+    cx.fillText(ic.label, ic.x+28, ic.y+52);
+  });
+}
+
+function drawCRT() {
+  cx.save();
+  cx.globalAlpha = 0.03;
+  cx.fillStyle = '#000';
+  for (let y = 0; y < H; y += 3) {
+    cx.fillRect(0, y, W, 1);
+  }
+  cx.restore();
+}
+
+// ── main render
+function render(ts) {
+  if (!startTime) startTime = ts;
+  t = Math.min((ts - startTime) / 1000, DUR);
+
+  const EW = 1420, EH = 1120;
+  const EX = 100,  EY = 60;
+  const HW = 840,  HH = 620;
+  const HX = W - HW - 80, HY = 50;
+  const TW = 840,  TH2 = 440;
+  const TX = W - TW - 80, TY = HY + HH + 20;
+
+  // 12s total: slower typing, more frames
+  const LINES_PER_SEC = 6.5;
+  const linesTyped = Math.min(MAIN_C.length, Math.floor(Math.max(0, t - 0.4) * LINES_PER_SEC) + 1);
+  const scrollFrac = linesTyped > 32 ? Math.min(1, (linesTyped - 32) / (MAIN_C.length - 32)) : 0;
+
+  const headerFrac = Math.min(1, Math.max(0, (t - 1.2) / 5.5));
+
+  // terminal starts at ~9.5s now
+  const termStart = 9.5;
+  const termLines = Math.floor(Math.max(0, (t - termStart) / 0.22));
+
+  const caretOn = Math.floor(t * 2) % 2 === 0;
+
+  drawDesktop();
+
+  if (t > 1.2) {
+    drawHeaderWindow(HX, HY, HW, HH, headerFrac);
+  }
+  if (t > termStart) {
+    drawTerminal(TX, TY, TW, TH2, termLines, caretOn);
+  }
+
+  drawEditorWindow(EX, EY, EW, EH, linesTyped, scrollFrac, caretOn);
+
+  const tbNames = [
+    'mpeg1_play.c',
+    t > 1.2 ? 'mpeg1.h' : '',
+    t > termStart ? 'bash' : '',
+  ];
+  drawTaskbar(tbNames);
+  drawCRT();
+
+  if (t < DUR) raf = requestAnimationFrame(render);
+}
+
+function restart() {
+  if (raf) cancelAnimationFrame(raf);
+  startTime = null;
+  t = 0;
+  raf = requestAnimationFrame(render);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К') restart();
+});
+
+setTimeout(restart, 300);
+</script>
+</body>
+</html>

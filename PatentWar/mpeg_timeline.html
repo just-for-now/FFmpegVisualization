@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>MPEG</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;}
+canvas{position:absolute;top:0;left:0;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<!-- warp overlay canvas (luminance line only) -->
+<canvas id="wc" style="position:absolute;top:0;left:0;pointer-events:none;z-index:10;"></canvas>
+<!-- SVG feDisplacementMap warp filter -->
+<svg style="position:absolute;width:0;height:0;overflow:hidden;" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="warp-filter" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence id="warp-turb" type="fractalNoise" baseFrequency="0 0.04" numOctaves="2" seed="1" result="noise"/>
+      <feDisplacementMap id="warp-disp" in="SourceGraphic" in2="noise" scale="0" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
+<!-- warp backdrop div — clipped to scanline band, backdrop-filter warps canvas behind it -->
+<div id="warp-bd" style="position:absolute;left:0;width:100%;pointer-events:none;z-index:9;opacity:0;
+  backdrop-filter:url(#warp-filter);-webkit-backdrop-filter:url(#warp-filter);"></div>
+<script>
+const CW=2560,CH=1440;
+const cv=document.getElementById('c');
+cv.width=CW;cv.height=CH;
+const g=cv.getContext('2d');
+
+function fit(){
+  const s=Math.min(innerWidth/CW,innerHeight/CH);
+  cv.style.width=CW*s+'px';cv.style.height=CH*s+'px';
+  cv.style.left=(innerWidth-CW*s)/2+'px';cv.style.top=(innerHeight-CH*s)/2+'px';
+}
+fit();addEventListener('resize',fit);
+
+// ═══ PALETTE ═══════════════════════════════════════════
+const CY='#fcec0c';
+const CR='#e50004';
+const CW2='#ffffff';
+
+// ═══ SEGMENT DATA ═══════════════════════════════════════
+const SEGS=[
+  {id:'mpeg1',dur:14,start:0},
+  {id:'mpeg2',dur:14,start:14},
+  {id:'mpeg3',dur:9, start:28},
+  {id:'mp3',  dur:10.5, start:37},
+  {id:'mpeg4',dur:14,start:47.5},
+];
+const TOTAL=61.5;
+const BPM=90,BEAT=60/BPM;
+
+const SD={
+  mpeg1:{
+    ac:CY,
+    year:'1993',title:'MPEG-1',sub:'ISO/IEC 11172',
+    tagline:'ПЕРВОЕ ВИДЕО НА CD',
+    desc:['Впервые: видео + стереозвук в 1.5 Мбит/с.',
+          'Ровно столько, сколько читает CD-ROM.'],
+    why:'До MPEG-1 видео на компьютере почти не существовало',
+    cards:[
+      {k:'БИТРЕЙТ',   v:'1.5 Мбит/с',    n:'= скорость CD-ROM 1×'},
+      {k:'РАЗРЕШЕНИЕ',v:'352 × 240',      n:'NTSC SIF · лучше VHS'},
+      {k:'АУДИО',     v:'Layer I/II/III', n:'MP1 · MP2 · MP3'},
+      {k:'СТАНДАРТ',  v:'ISO/IEC 11172',  n:'август 1993'},
+      {k:'СЖАТИЕ',    v:'DCT + МС',       n:'дискр. косинус + движ.'},
+      {k:'НОСИТЕЛЬ',  v:'Video CD',       n:'80 мин на 1 диске'},
+    ],
+    extra:[
+      'Над стандартом: 29 экспертов из 14 стран',
+      'Первая встреча MPEG — май 1988, Оттава',
+      'Разработка: 4.5 года · 20 встреч',
+      'Используется: CD-i · VCD · PlayStation 1',
+    ],
+    where:'Video CD · CD-ROM · PlayStation 1 · Ранний интернет',
+    media:'cd',
+  },
+  mpeg2:{
+    ac:CR,
+    year:'1995',title:'MPEG-2',sub:'ISO/IEC 13818 · H.262',
+    tagline:'ФУНДАМЕНТ НА ДЕСЯТИЛЕТИЕ',
+    desc:['DVD, цифровое ТВ, спутник.',
+          'Эфирное ТВ на нём работает до сих пор.'],
+    why:'Именно он сейчас в вашем телевизоре',
+    cards:[
+      {k:'БИТРЕЙТ',   v:'до 9.8 Мбит/с',  n:'на DVD · до 15 для HDTV'},
+      {k:'РАЗРЕШЕНИЕ',v:'720×480 / 1080i', n:'SDTV и HDTV'},
+      {k:'АУДИО',     v:'Dolby Digital',   n:'AC-3 · 5.1 каналов'},
+      {k:'СТАНДАРТ',  v:'ISO/IEC 13818',   n:'H.262 · 1995'},
+      {k:'ПАТЕНТЫ',   v:'1048 патентов',   n:'Sony · Thomson · Mitsubishi'},
+      {k:'ЛИЦЕНЗИЯ',  v:'$0.35 / устр.',   n:'за каждый плеер'},
+    ],
+    extra:[
+      'Используется: DVD · DVB · ATSC · ISDB · HDV',
+      '2 часа фильма = 4–8 Гб на DVD',
+      'Backward compatible с MPEG-1',
+      'Эфирное ТВ США и Европы: до сих пор MPEG-2',
+    ],
+    where:'DVD · Спутниковое ТВ · Цифровое вещание · Blu-ray',
+    media:'dvd',
+  },
+  mpeg3:{
+    ac:'#444',
+    year:'—',title:'MPEG-3',sub:'ОТМЕНЁН ДО ВЫХОДА',
+    tagline:'СТАНДАРТ КОТОРОГО НЕТ',
+    desc:['Разрабатывался для HDTV.',
+          'Пока делали — MPEG-2 сам справился.'],
+    why:'Закрыт без выпуска. Ни одной реализации в мире',
+    cards:[
+      {k:'СТАТУС',    v:'ЗАКРЫТ',         n:'не выпущен никогда'},
+      {k:'ЦЕЛЬ',      v:'HDTV',           n:'1920×1080 · 20+ Мбит/с'},
+      {k:'ПРИЧИНА',   v:'MPEG-2 = HDTV',  n:'задача уже решена'},
+      {k:'ПУТАНИЦА',  v:'MP3 ≠ MPEG-3',   n:'это MPEG-1 Audio Layer III'},
+      {k:'РЕАЛИЗ.',   v:'0 (НОЛЬ)',        n:'ни одного устройства'},
+      {k:'НАСЛЕДИЕ',  v:'НИЧЕГО',          n:'полностью вычеркнут'},
+    ],
+    extra:[
+      'MP3 = MPEG-1 Audio Layer III — часть первого стандарта',
+      'Путаницу создало название MP3 ≠ MPEG-3',
+      'Единственный стандарт MPEG без реализаций',
+      'Официально аннулирован рабочей группой',
+    ],
+    where:'Нигде — не существует ни одной реализации',
+    media:'ghost',
+  },
+  mp3:{
+    ac:CY,
+    year:'1993',title:'MP3',sub:'MPEG-1 AUDIO LAYER III',
+    tagline:'ЭТО ЧАСТЬ MPEG-1, НЕ MPEG-3',
+    desc:['Третий аудиослой внутри первого стандарта.',
+          'Изменил музыкальную индустрию навсегда.'],
+    why:'Napster · iPod · пиратство — всё из-за него',
+    cards:[
+      {k:'СЖАТИЕ',    v:'12:1',            n:'от несжатого PCM'},
+      {k:'БИТРЕЙТ',   v:'128–320 кбит/с',  n:'сладкая точка: 192'},
+      {k:'ЧАСТОТА',   v:'44.1 кГц',        n:'как аудио-CD'},
+      {k:'ПАТЕНТ',    v:'Fraunhofer IIS',  n:'Германия · с 1989'},
+      {k:'СВОБОДЕН',  v:'с 30.12.2017',    n:'все патенты истекли'},
+      {k:'ПОЛН. ИМЯ', v:'MPEG-1 Layer III',n:'ISO/IEC 11172-3'},
+    ],
+    extra:[
+      'Napster (1999): 80 млн пользователей за 3 года',
+      'iPod (2001): 1000 песен в кармане — реклама Apple',
+      'Fraunhofer заработал $100M+ на лицензировании',
+      'Алгоритм: психоакустическая модель + Хаффман',
+    ],
+    where:'Плееры · Интернет · iPod · Телефоны · Везде',
+    media:'walkman',
+  },
+  mpeg4:{
+    ac:CR,
+    year:'1998',title:'MPEG-4',sub:'ISO/IEC 14496 · H.264/AVC',
+    tagline:'ЭПОХА ИНТЕРНЕТА',
+    desc:['H.264 — самый используемый кодек в истории.',
+          '79% всего видео в мире прямо сейчас.'],
+    why:'YouTube · Netflix · Zoom · TikTok — всё на H.264',
+    cards:[
+      {k:'КОДЕК',     v:'H.264 / AVC',     n:'MPEG-4 Part 10'},
+      {k:'СЖАТИЕ',    v:'в 2× лучше',      n:'чем MPEG-2'},
+      {k:'РАЗРЕШЕНИЕ',v:'до 8K UHD',       n:'все форматы'},
+      {k:'РЫНОК',     v:'79% (2024)',       n:'самый используемый'},
+      {k:'СТАНДАРТ',  v:'ISO/IEC 14496',   n:'финал: март 2003'},
+      {k:'ФОРМАТ',    v:'.mp4 · .m4v',     n:'контейнер повсюду'},
+    ],
+    extra:[
+      'YouTube (2005) построен целиком на H.264',
+      'Blu-ray, Apple TV, Android — всё MPEG-4/H.264',
+      'H.264 используют: Zoom · Teams · FaceTime · Discord',
+      'x264 — открытый кодек, лучший в классе',
+    ],
+    where:'YouTube · Netflix · Zoom · TikTok · Blu-ray · Телефоны',
+    media:'browser',
+  },
+};
+
+// ═══ STATE ══════════════════════════════════════════════
+let T=0,lastTs=null,running=false,raf=null;
+let prevSeg=-1,flashA=0;
+let activeGlitch=0;
+
+// ═══ HELPERS ════════════════════════════════════════════
+function rr(x,y,w,h,r){
+  g.beginPath();g.moveTo(x+r,y);g.lineTo(x+w-r,y);
+  g.arcTo(x+w,y,x+w,y+r,r);g.lineTo(x+w,y+h-r);
+  g.arcTo(x+w,y+h,x+w-r,y+h,r);g.lineTo(x+r,y+h);
+  g.arcTo(x,y+h,x,y+h-r,r);g.lineTo(x,y+r);
+  g.arcTo(x,y,x+r,y,r);g.closePath();
+}
+function bpulse(){return Math.pow(Math.max(0,1-(T%BEAT)/BEAT),5);}
+function ease(x){return 1-Math.pow(1-Math.min(1,Math.max(0,x)),3);}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function segAlpha(segT,at,dur){return ease(clamp((segT-at)/dur,0,1));}
+
+// ═══ FLOATING SPECS ══════════════════════════════════════
+let floaters=[];
+function addFloat(x,y,txt,col){
+  floaters.push({x,y,txt,col,vx:(Math.random()-0.5)*40,vy:-50-Math.random()*60,life:2.5,ml:2.5});
+}
+function tickFloaters(dt){
+  floaters=floaters.filter(f=>f.life>0);
+  floaters.forEach(f=>{
+    f.x+=f.vx*dt;f.y+=f.vy*dt;f.vy*=0.97;f.life-=dt;
+    const a=clamp(f.life/f.ml,0,1)*clamp((f.ml-f.life)*2,0,1);
+    g.save();g.globalAlpha=a*0.9;g.fillStyle=f.col;
+    g.font='bold 34px IBM Plex Mono';g.textAlign='center';g.textBaseline='middle';
+    g.fillText(f.txt,f.x,f.y);g.restore();
+  });
+}
+
+// ═══ BG: HEX GRID ════════════════════════════════════════
+function drawHexGrid(col){
+  const sz=65,h=sz*Math.sqrt(3)/2;
+  g.save();g.strokeStyle=col;g.lineWidth=1;g.globalAlpha=0.045;
+  for(let row=-1;row<CH/h+1;row++){
+    for(let c=-1;c<CW/(sz*1.5)+1;c++){
+      const x=c*sz*1.5,y=row*h*2+(c%2===0?0:h);
+      g.beginPath();
+      for(let i=0;i<6;i++){const a=i*Math.PI/3;g.lineTo(x+Math.cos(a)*sz,y+Math.sin(a)*sz);}
+      g.closePath();g.stroke();
+    }
+  }
+  g.restore();
+}
+
+// ═══ BG: DATA RAIN (side margins only) ════════════════════
+const RAIN=[];
+for(let i=0;i<50;i++){
+  const side=i<25;
+  RAIN.push({
+    x:side?10+Math.random()*220:CW-230+Math.random()*220,
+    y:Math.random()*CH-CH,spd:80+Math.random()*250,
+    chars:Array.from({length:28},()=>Math.floor(Math.random()*16).toString(16).toUpperCase()),
+    t:0,side
+  });
+}
+function tickRain(dt){
+  RAIN.forEach(r=>{
+    r.y+=r.spd*dt;r.t-=dt;
+    if(r.t<0){r.chars.shift();r.chars.push(Math.floor(Math.random()*16).toString(16).toUpperCase());r.t=0.08+Math.random()*0.14;}
+    if(r.y>CH+600)r.y=-600;
+  });
+}
+function drawRain(col){
+  g.save();g.font='21px IBM Plex Mono';
+  RAIN.forEach(r=>{
+    r.chars.forEach((c,i)=>{
+      g.globalAlpha=i/r.chars.length*0.22;
+      g.fillStyle=col;g.fillText(c,r.x,r.y-i*25);
+    });
+  });
+  g.restore();
+}
+
+// ═══ OVERLAYS ════════════════════════════════════════════
+function drawScanlines(){
+  g.save();g.fillStyle='#000';g.globalAlpha=0.055;
+  for(let y=0;y<CH;y+=4)g.fillRect(0,y,CW,2);g.restore();
+}
+function drawVignette(){
+  // much weaker than before
+  const gr=g.createRadialGradient(CW/2,CH/2,CH*0.35,CW/2,CH/2,CH*0.9);
+  gr.addColorStop(0,'rgba(0,0,0,0)');gr.addColorStop(1,'rgba(0,0,0,0.45)');
+  g.save();g.fillStyle=gr;g.fillRect(0,0,CW,CH);g.restore();
+}
+
+// ═══ GLITCH (no canvas self-copy) ════════════════════════
+function hexToRgbArr(hex){
+  if(hex.length===4)hex='#'+hex[1]+hex[1]+hex[2]+hex[2]+hex[3]+hex[3];
+  return[parseInt(hex.slice(1,3),16)||0,parseInt(hex.slice(3,5),16)||0,parseInt(hex.slice(5,7),16)||0];
+}
+function drawGlitch(col){
+  const[r2,gg2,b2]=hexToRgbArr(col);
+  g.save();
+  // 1) horizontal color bands
+  const N=4+Math.floor(Math.random()*5);
+  for(let i=0;i<N;i++){
+    const y=Math.random()*CH,h=1+Math.random()*16;
+    g.globalAlpha=0.05+Math.random()*0.12;
+    g.fillStyle=Math.random()<0.6?col:'#fff';
+    g.fillRect(0,y,CW,h);
+  }
+  // 2) jumping scan lines (offset stripes — no self-copy)
+  for(let i=0;i<4;i++){
+    const y=Math.random()*CH,h=1+Math.random()*6;
+    const shift=(Math.random()-0.5)*180;
+    g.globalAlpha=0.4+Math.random()*0.5;
+    g.strokeStyle=col;g.lineWidth=h;
+    g.beginPath();g.moveTo(shift,y);g.lineTo(CW+shift,y);g.stroke();
+  }
+  // 3) RGB split — pure color rect offsets
+  g.globalCompositeOperation='screen';
+  const sh=14+Math.random()*20;
+  g.globalAlpha=0.1;g.fillStyle=`rgb(${r2},0,0)`;g.fillRect(sh,0,CW,CH);
+  g.globalAlpha=0.1;g.fillStyle=`rgb(0,0,${b2||180})`;g.fillRect(-sh,0,CW,CH);
+  g.globalCompositeOperation='source-over';
+  // 4) pixel static strip via ImageData
+  const noiseY=Math.floor(Math.random()*(CH-80));
+  const noiseH=6+Math.floor(Math.random()*45);
+  const img=g.createImageData(CW,noiseH);
+  for(let p=0;p<img.data.length;p+=4){
+    if(Math.random()<0.25){
+      const v=Math.random()<0.5?255:0;
+      img.data[p]=v;img.data[p+1]=v;img.data[p+2]=v;
+      img.data[p+3]=Math.floor(Math.random()*180);
+    }else img.data[p+3]=0;
+  }
+  g.putImageData(img,0,noiseY);
+  // 5) occasional bright flash line
+  if(Math.random()<0.35){
+    g.globalAlpha=0.6+Math.random()*0.4;
+    g.strokeStyle='#fff';g.lineWidth=1.5;
+    g.beginPath();g.moveTo(0,Math.random()*CH);g.lineTo(CW,Math.random()*CH);g.stroke();
+  }
+  g.restore();
+}
+
+// ═══ HEX COLOR HELPER ════════════════════════════════════
+function hexToRgb(hex){
+  const[r,gg,b]=hexToRgbArr(hex);return `${r},${gg},${b}`;
+}
+
+// ═══ TOP BAR ════════════════════════════════════════════
+function drawTopBar(col){
+  g.save();
+  g.fillStyle='#060606';g.fillRect(0,0,CW,68);
+  g.strokeStyle=col;g.lineWidth=1.5;g.globalAlpha=0.2;
+  g.beginPath();g.moveTo(0,68);g.lineTo(CW,68);g.stroke();g.globalAlpha=1;
+  g.font='bold 50px Bebas Neue';g.fillStyle=col;g.textBaseline='middle';g.textAlign='left';
+  g.fillText('MPEG',18,34);
+  g.font='22px IBM Plex Mono';g.fillStyle='#3a3a3a';
+  g.fillText('ИСТОРИЯ СТАНДАРТОВ',105,26);g.fillText('1993 — 1998',105,48);
+  g.font='34px IBM Plex Mono';g.fillStyle='#fff';g.globalAlpha=0.45;g.textAlign='center';
+  g.fillText('ИСТОРИЯ ВИДЕОКОДЕКОВ',CW/2,34);
+  g.font='24px IBM Plex Mono';g.fillStyle='#2a2a2a';g.globalAlpha=0.9;g.textAlign='right';
+  g.fillText(T.toFixed(1)+'s',CW-18,34);
+  // bye for now
+  g.font='400 22px IBM Plex Mono';g.fillStyle='#888';g.globalAlpha=0.85;
+  g.fillText('by for now',CW-18,56);
+  g.restore();
+}
+
+// ═══ TICKER ══════════════════════════════════════════════
+const TICKSTR='   ISO/IEC 11172  ·  1.5 Мбит/с  ·  VIDEO CD  ·  ISO/IEC 13818  ·  H.262  ·  DVD  ·  MPEG-3 ОТМЕНЁН  ·  MP3 ≠ MPEG-3  ·  MPEG-1 AUDIO LAYER III  ·  Fraunhofer IIS  ·  ISO/IEC 14496  ·  H.264/AVC  ·  79% РЫНКА  ·  YOUTUBE  ·  NETFLIX  ·  ';
+function drawTicker(col){
+  const th=52,spd=200,len=TICKSTR.length*20;
+  const off=(T*spd)%len;
+  g.save();
+  g.fillStyle='#060606';g.fillRect(0,CH-th,CW,th);
+  g.strokeStyle=col;g.lineWidth=1.5;g.globalAlpha=0.2;
+  g.beginPath();g.moveTo(0,CH-th);g.lineTo(CW,CH-th);g.stroke();
+  g.globalAlpha=0.6;g.font='bold 26px IBM Plex Mono';g.fillStyle=col;g.textBaseline='middle';
+  g.fillText(TICKSTR+TICKSTR,-off,CH-th/2);
+  g.restore();
+}
+
+// ═══ SEGMENT PROGRESS BAR ════════════════════════════════
+function drawSegBar(col){
+  const bh=7,by=CH-52-bh;
+  g.save();
+  // filled segments
+  SEGS.forEach(s=>{
+    const x=(s.start/TOTAL)*CW,w=(s.dur/TOTAL)*CW;
+    const done=T>=s.start+s.dur,active=T>=s.start&&T<s.start+s.dur;
+    const d=SD[s.id];
+    g.fillStyle=done?d.ac+'66':(active?d.ac:'#242424');
+    g.fillRect(x+1,by,w-2,bh);
+    if(active){
+      const p=(T-s.start)/s.dur;
+      g.globalAlpha=0.35;g.fillStyle='#fff';g.fillRect(x+1,by,(w-2)*p,bh);g.globalAlpha=1;
+    }
+  });
+  // segment labels above bar — all visible, active is bright
+  SEGS.forEach(s=>{
+    const x=(s.start/TOTAL)*CW,w=(s.dur/TOTAL)*CW;
+    const done=T>=s.start+s.dur;
+    const active=T>=s.start&&T<s.start+s.dur;
+    const d=SD[s.id];
+    if(active){
+      // active: full color, big, with underline glow
+      g.font='bold 26px IBM Plex Mono';
+      g.fillStyle=d.ac;g.globalAlpha=1;
+    } else if(done){
+      g.font='20px IBM Plex Mono';
+      g.fillStyle=d.ac;g.globalAlpha=0.55;
+    } else {
+      g.font='20px IBM Plex Mono';
+      g.fillStyle='#666';g.globalAlpha=1;
+    }
+    g.textAlign='center';g.textBaseline='bottom';
+    g.fillText(s.id.toUpperCase(),x+w/2,by-5);
+    g.globalAlpha=1;
+  });
+  g.restore();
+}
+
+// ═══ PHYSICAL MEDIA ══════════════════════════════════════
+
+// CD (MPEG-1) — bright silver, white printed label, thin rainbow band near edge
+function drawCD(px,py,r,spin,col){
+  g.save();
+  const gr=g.createRadialGradient(px-r*0.4,py-r*0.4,r*0.04,px,py,r);
+  gr.addColorStop(0,'#fafafa');gr.addColorStop(0.18,'#e2e2e2');
+  gr.addColorStop(0.6,'#bbb');gr.addColorStop(1,'#5a5a5a');
+  g.beginPath();g.arc(px,py,Math.max(1,r),0,Math.PI*2);g.fillStyle=gr;g.fill();
+  // thin iridescent band near outer edge only (r*0.68 to r*0.96)
+  for(let i=0;i<72;i++){
+    const a0=(i/72)*Math.PI*2+spin*1.8,a1=((i+0.9)/72)*Math.PI*2+spin*1.8;
+    const hue=(i/72*360+spin*60)%360;
+    g.save();g.globalAlpha=0.22+Math.sin(i*0.7)*0.06;
+    g.fillStyle=`hsl(${hue},95%,68%)`;
+    g.beginPath();
+    g.moveTo(px+Math.cos(a0)*r*0.68,py+Math.sin(a0)*r*0.68);
+    g.arc(px,py,Math.max(1,r*0.96),a0,a1);
+    g.arc(px,py,Math.max(1,r*0.68),a1,a0,true);
+    g.closePath();g.fill();g.restore();
+  }
+  // polycarbonate grooves
+  [0.70,0.75,0.80,0.85,0.90,0.94].forEach(f=>{
+    g.save();g.globalAlpha=0.15;g.strokeStyle='#fff';g.lineWidth=1;
+    g.beginPath();g.arc(px,py,Math.max(1,r*f),0,Math.PI*2);g.stroke();g.restore();
+  });
+  // large white printed label
+  g.save();
+  g.beginPath();g.arc(px,py,Math.max(1,r*0.46),0,Math.PI*2);
+  const lg=g.createRadialGradient(px-r*0.1,py-r*0.12,0,px,py,r*0.46);
+  lg.addColorStop(0,'#f6f3e8');lg.addColorStop(1,'#ddd9c5');
+  g.fillStyle=lg;g.fill();
+  g.strokeStyle='#ccc';g.lineWidth=2;g.stroke();
+  g.fillStyle='#111';g.font=`bold ${r*0.13}px Bebas Neue`;
+  g.textAlign='center';g.textBaseline='middle';g.fillText('VIDEO CD',px,py-r*0.13);
+  g.fillStyle=col;g.font=`bold ${r*0.085}px Bebas Neue`;g.fillText('MPEG-1',px,py+r*0.04);
+  g.fillStyle='#666';g.font=`${r*0.058}px IBM Plex Mono`;g.fillText('1.5 Мбит/с · 1993',px,py+r*0.19);
+  g.fillStyle='#999';g.font=`${r*0.044}px IBM Plex Mono`;g.fillText('ISO/IEC 11172',px,py+r*0.33);
+  g.restore();
+  // clear polycarbonate hub area
+  g.save();
+  const hrg=g.createRadialGradient(px,py,r*0.09,px,py,r*0.185);
+  hrg.addColorStop(0,'rgba(210,225,255,0.5)');hrg.addColorStop(1,'rgba(255,255,255,0)');
+  g.beginPath();g.arc(px,py,Math.max(1,r*0.185),0,Math.PI*2);g.fillStyle=hrg;g.fill();g.restore();
+  // center hole
+  g.save();g.beginPath();g.arc(px,py,Math.max(1,r*0.075),0,Math.PI*2);
+  g.fillStyle='#000';g.fill();g.strokeStyle='#bbb';g.lineWidth=2;g.stroke();g.restore();
+  // edge highlight
+  g.save();g.globalAlpha=0.3;g.strokeStyle='#fff';g.lineWidth=2.5;
+  g.beginPath();g.arc(px,py,Math.max(1,r*0.985),Math.PI*1.1,Math.PI*1.85);g.stroke();g.restore();
+  g.restore();
+}
+
+// DVD (MPEG-2) — darker gunmetal, full-disc vivid holographic, navy hub
+function drawDVD(px,py,r,spin,col){
+  g.save();
+  const gr=g.createRadialGradient(px-r*0.15,py-r*0.3,r*0.02,px,py,r);
+  gr.addColorStop(0,'#cecece');gr.addColorStop(0.28,'#a0a0a0');
+  gr.addColorStop(0.72,'#606060');gr.addColorStop(1,'#282828');
+  g.beginPath();g.arc(px,py,Math.max(1,r),0,Math.PI*2);g.fillStyle=gr;g.fill();
+  // full-disc holographic — denser & more saturated than CD
+  for(let i=0;i<160;i++){
+    const a0=(i/160)*Math.PI*2+spin*0.7,a1=((i+0.94)/160)*Math.PI*2+spin*0.7;
+    const hue=(i/160*360+spin*22)%360;
+    g.save();g.globalAlpha=0.38+Math.sin(i*0.6+spin)*0.12;
+    g.fillStyle=`hsl(${hue},100%,55%)`;
+    g.beginPath();
+    g.moveTo(px+Math.cos(a0)*r*0.43,py+Math.sin(a0)*r*0.43);
+    g.arc(px,py,Math.max(1,r*0.97),a0,a1);
+    g.arc(px,py,Math.max(1,r*0.43),a1,a0,true);
+    g.closePath();g.fill();g.restore();
+  }
+  // dual-layer shimmer ring
+  g.save();g.globalAlpha=0.09;g.strokeStyle='#fff';g.lineWidth=9;
+  g.beginPath();g.arc(px,py,Math.max(1,r*0.52),0,Math.PI*2);g.stroke();g.restore();
+  [0.44,0.55,0.68,0.80,0.90,0.96].forEach(f=>{
+    g.save();g.globalAlpha=0.07;g.strokeStyle='#fff';g.lineWidth=2;
+    g.beginPath();g.arc(px,py,Math.max(1,r*f),0,Math.PI*2);g.stroke();g.restore();
+  });
+  // dark navy hub — larger
+  g.save();g.beginPath();g.arc(px,py,Math.max(1,r*0.43),0,Math.PI*2);
+  const hg=g.createRadialGradient(px-r*0.1,py-r*0.12,0,px,py,r*0.43);
+  hg.addColorStop(0,'#1e1e32');hg.addColorStop(1,'#080814');
+  g.fillStyle=hg;g.fill();
+  g.strokeStyle=col+'66';g.lineWidth=4;g.stroke();
+  g.fillStyle=col;g.font=`bold ${r*0.26}px Bebas Neue`;
+  g.textAlign='center';g.textBaseline='middle';g.fillText('DVD',px,py-r*0.08);
+  g.fillStyle='#4a4a6a';g.font=`${r*0.075}px IBM Plex Mono`;
+  g.fillText('MPEG-2 · 1995',px,py+r*0.15);g.restore();
+  // center hole
+  g.save();g.beginPath();g.arc(px,py,Math.max(1,r*0.075),0,Math.PI*2);
+  g.fillStyle='#000';g.fill();g.strokeStyle='#444';g.lineWidth=3;g.stroke();g.restore();
+  // dark outer bevel
+  g.save();g.globalAlpha=0.55;g.strokeStyle='#000';g.lineWidth=6;
+  g.beginPath();g.arc(px,py,Math.max(1,r*0.99),0,Math.PI*2);g.stroke();
+  g.globalAlpha=0.18;g.strokeStyle='#fff';g.lineWidth=2;
+  g.beginPath();g.arc(px,py,Math.max(1,r*0.985),Math.PI*0.75,Math.PI*1.55);g.stroke();
+  g.restore();
+  g.restore();
+}
+
+// GHOST
+function drawGhost(px,py,r,t){
+  const bob=Math.sin(t*2.5)*r*0.04;
+  g.save();
+  g.save();g.globalAlpha=0.25;
+  g.beginPath();g.ellipse(px,py+r*0.78,r*0.48,r*0.11,0,0,Math.PI*2);
+  g.fillStyle='#000';g.fill();g.restore();
+  g.strokeStyle='#3a3a3a';g.lineWidth=7;g.fillStyle='#181818';
+  g.beginPath();g.arc(px,py+bob-r*0.1,r*0.54,Math.PI,0);
+  for(let i=0;i<=10;i++){
+    const wx=px+Math.cos(Math.PI-i/10*Math.PI)*r*0.54;
+    const wy=py+bob+r*0.44+Math.sin(i*1.8+t*4.5)*r*0.07;
+    g.lineTo(wx,wy);
+  }
+  g.closePath();g.fill();g.stroke();
+  [px-r*0.19,px+r*0.19].forEach(ex=>{
+    const ey=py+bob-r*0.08,er=r*0.085;
+    g.strokeStyle='#4a4a4a';g.lineWidth=8;
+    g.beginPath();g.moveTo(ex-er,ey-er);g.lineTo(ex+er,ey+er);
+    g.moveTo(ex+er,ey-er);g.lineTo(ex-er,ey+er);g.stroke();
+  });
+  g.strokeStyle=CR;g.lineWidth=22;g.lineCap='round';g.globalAlpha=0.92;
+  g.beginPath();g.moveTo(px-r*0.78,py-r*0.68);g.lineTo(px+r*0.78,py+r*0.64);
+  g.moveTo(px+r*0.78,py-r*0.68);g.lineTo(px-r*0.78,py+r*0.64);g.stroke();
+  g.save();g.translate(px,py+r*0.9);g.rotate(-0.1);
+  g.strokeStyle='#000';g.lineWidth=12;g.font=`bold ${r*0.28}px Bebas Neue`;
+  g.textAlign='center';g.textBaseline='middle';
+  g.strokeText('ОТМЕНЁН',0,0);g.fillStyle=CR;g.fillText('ОТМЕНЁН',0,0);g.restore();
+  g.restore();
+}
+
+// WALKMAN
+function drawWalkman(px,py,scale,t,col){
+  const bw=scale,bh=scale*1.32;
+  const x=px-bw/2,y=py-bh/2;
+  g.save();
+  const bg=g.createLinearGradient(x,y,x+bw,y+bh);
+  bg.addColorStop(0,'#2c2c2c');bg.addColorStop(1,'#141414');
+  g.fillStyle=bg;rr(x,y,bw,bh,scale*0.065);g.fill();
+  g.strokeStyle='#3a3a3a';g.lineWidth=4;rr(x,y,bw,bh,scale*0.065);g.stroke();
+  // screen
+  const sx=x+scale*0.065,sy=y+scale*0.065,sw=bw-scale*0.13,sh=scale*0.34;
+  g.fillStyle='#070e08';rr(sx,sy,sw,sh,scale*0.02);g.fill();
+  g.strokeStyle='#1e1e1e';g.lineWidth=2.5;rr(sx,sy,sw,sh,scale*0.02);g.stroke();
+  g.save();g.beginPath();rr(sx,sy,sw,sh,scale*0.02);g.clip();
+  // waveform
+  g.strokeStyle=col;g.lineWidth=3.5;g.globalAlpha=0.9;
+  g.beginPath();
+  for(let i=0;i<=120;i++){
+    const wx=sx+i/120*sw;
+    const env=Math.sin(i/120*Math.PI);
+    const wy=sy+sh/2+Math.sin(i/120*9*Math.PI+t*6.5)*env*sh*0.34;
+    i===0?g.moveTo(wx,wy):g.lineTo(wx,wy);
+  }
+  g.stroke();
+  // freq bars (subtle)
+  for(let i=0;i<32;i++){
+    const bx2=sx+i/32*sw,bh2=(0.15+0.6*Math.abs(Math.sin(i*0.9+t*5)))*sh*0.38;
+    g.globalAlpha=0.25;g.fillStyle=col;
+    g.fillRect(bx2,sy+sh-bh2,sw/32-2,bh2);
+  }
+  g.globalAlpha=0.85;g.fillStyle=col;g.font=`bold ${scale*0.1}px Bebas Neue`;
+  g.textAlign='center';g.textBaseline='top';g.fillText('MP3',px,sy+sh*0.06);
+  g.fillStyle='#666';g.font=`${scale*0.062}px IBM Plex Mono`;
+  g.textBaseline='bottom';g.fillText('128 kbps · 44.1 kHz',px,sy+sh*0.94);
+  g.restore();
+  // reels
+  const ry=y+scale*0.545;
+  [-1,1].forEach(side=>{
+    const rx=px+side*scale*0.215,rr2=scale*0.12;
+    g.fillStyle='#0f0f0f';g.strokeStyle='#333';g.lineWidth=4;
+    g.beginPath();g.arc(rx,ry,Math.max(1,rr2),0,Math.PI*2);g.fill();g.stroke();
+    for(let i=0;i<6;i++){
+      const a=(i/6)*Math.PI*2+t*2.8*side;
+      g.strokeStyle='#3a3a3a';g.lineWidth=3.5;
+      g.beginPath();g.moveTo(rx,ry);
+      g.lineTo(rx+Math.cos(a)*rr2*0.68,ry+Math.sin(a)*rr2*0.68);g.stroke();
+    }
+    g.fillStyle='#252525';g.beginPath();g.arc(rx,ry,Math.max(1,rr2*0.26),0,Math.PI*2);g.fill();
+  });
+  g.strokeStyle='#3a2600';g.lineWidth=8;
+  g.beginPath();g.moveTo(px-scale*0.095,ry+scale*0.075);g.lineTo(px+scale*0.095,ry+scale*0.075);g.stroke();
+  // buttons
+  const btns=[{l:'◀◀',dx:-0.32},{l:'■',dx:-0.107},{l:'▶',dx:0.107,hl:true},{l:'▶▶',dx:0.32}];
+  const by2=y+bh-scale*0.092;
+  btns.forEach(b=>{
+    const bx2=px+scale*b.dx,sz2=b.hl?scale*0.068:scale*0.052;
+    g.fillStyle=b.hl?col:'#1e1e1e';g.strokeStyle='#3a3a3a';g.lineWidth=2.5;
+    g.beginPath();g.arc(bx2,by2,Math.max(1,sz2),0,Math.PI*2);g.fill();g.stroke();
+    g.fillStyle=b.hl?'#000':col;g.font=`${scale*0.052}px IBM Plex Mono`;
+    g.textAlign='center';g.textBaseline='middle';g.fillText(b.l,bx2,by2);
+  });
+  g.restore();
+}
+
+// BROWSER (full size, centered)
+function drawBrowser(px,py,bw,bh,t,col){
+  const bx=px-bw/2,by=py-bh/2;
+  const scale=bw/900;
+  g.save();
+  // shadow
+  g.save();g.globalAlpha=0.5;
+  g.shadowColor=col;g.shadowBlur=60;
+  g.fillStyle='#000';rr(bx+4,by+4,bw,bh,scale*12);g.fill();g.restore();
+  // body
+  g.fillStyle='#191919';rr(bx,by,bw,bh,scale*12);g.fill();
+  g.strokeStyle='#2e2e2e';g.lineWidth=4;rr(bx,by,bw,bh,scale*12);g.stroke();
+  // titlebar
+  g.fillStyle='#222';rr(bx,by,bw,scale*44,scale*12);g.fill();
+  [{c:'#ff5f57',ox:0.042},{c:'#febc2e',ox:0.082},{c:'#28c840',ox:0.122}].forEach(b=>{
+    g.fillStyle=b.c;g.beginPath();g.arc(bx+bw*b.ox,by+scale*22,scale*11,0,Math.PI*2);g.fill();
+  });
+  // url bar
+  g.fillStyle='#0d0d0d';rr(bx+bw*0.19,by+scale*10,bw*0.62,scale*24,scale*4);g.fill();
+  g.fillStyle='#444';g.font=`${scale*14}px IBM Plex Mono`;g.textAlign='left';g.textBaseline='middle';
+  g.fillText('youtube.com / netflix.com / zoom.us',bx+bw*0.205,by+scale*22);
+  // video area
+  const vx=bx+scale*18,vy=by+scale*54,vw=bw-scale*36,vh=bh-scale*72;
+  g.fillStyle='#000';rr(vx,vy,vw,vh,scale*4);g.fill();
+  // macroblock grid (compression artifact)
+  const mb=scale*32;
+  g.save();g.beginPath();rr(vx,vy,vw,vh,scale*4);g.clip();
+  for(let xi=0;xi<Math.ceil(vw/mb);xi++){
+    for(let yi=0;yi<Math.ceil(vh/mb);yi++){
+      const cx2=vx+xi*mb+mb/2,cy2=vy+yi*mb+mb/2;
+      const dist=Math.sqrt((cx2-px)**2+(cy2-py)**2);
+      const a=Math.max(0,0.07-dist/2400);
+      if(a>0.004){
+        const hue=(xi*4+yi*6+t*18)%360;
+        g.globalAlpha=a*0.8;g.strokeStyle=`hsl(${hue},80%,55%)`;g.lineWidth=1;
+        g.strokeRect(vx+xi*mb,vy+yi*mb,mb,mb);
+      }
+    }
+  }
+  g.restore();
+  // center loading ring
+  const cx2=px,cy2=py+scale*10;
+  const rOuter=scale*95;
+  g.strokeStyle='#1c1c1c';g.lineWidth=scale*18;
+  g.beginPath();g.arc(cx2,cy2,Math.max(1,rOuter),0,Math.PI*2);g.stroke();
+  const arc=(0.45+0.3*Math.sin(t*1.4))*Math.PI*2;
+  g.strokeStyle=col;g.lineWidth=scale*18;g.lineCap='round';
+  g.beginPath();g.arc(cx2,cy2,Math.max(1,rOuter),t*2.8-Math.PI/2,t*2.8-Math.PI/2+arc);g.stroke();
+  // inner text
+  g.fillStyle=CW2;g.font=`bold ${scale*54}px Bebas Neue`;
+  g.textAlign='center';g.textBaseline='middle';g.fillText('H.264',cx2,cy2-scale*14);
+  g.fillStyle='#555';g.font=`${scale*18}px IBM Plex Mono`;
+  g.fillText('AVC · MPEG-4 Part 10',cx2,cy2+scale*24);
+  // progress bar
+  const pbY=by+bh-scale*22;
+  g.fillStyle='#0d0d0d';g.fillRect(bx+scale*18,pbY,bw-scale*36,scale*10);
+  g.fillStyle=col;g.fillRect(bx+scale*18,pbY,(bw-scale*36)*((t*0.28)%1),scale*10);
+  // metrics overlay top-right
+  const mx=bx+bw-scale*220,my=vy+scale*16;
+  g.save();g.globalAlpha=0.85;g.fillStyle='#000';
+  rr(mx,my,scale*200,scale*72,scale*4);g.fill();
+  g.strokeStyle=col+'44';g.lineWidth=1.5;rr(mx,my,scale*200,scale*72,scale*4);g.stroke();
+  g.fillStyle=col;g.font=`bold ${scale*13}px IBM Plex Mono`;
+  g.textAlign='left';g.textBaseline='top';
+  g.fillText('79% РЫНКА',mx+scale*10,my+scale*10);
+  g.fillStyle='#666';g.font=`${scale*11}px IBM Plex Mono`;
+  g.fillText('YOUTUBE · NETFLIX',mx+scale*10,my+scale*28);
+  g.fillText('ZOOM · TIKTOK',mx+scale*10,my+scale*44);g.restore();
+  g.restore();
+}
+
+// ═══ MP3 LAYER DIAGRAM (central icon for mp3 segment) ════
+function drawMP3Diagram(cx,cy,segT,col){
+  const w=680,h=520;
+  const x=cx-w/2,y=cy-h/2;
+  g.save();
+
+  // ── parent block: MPEG-1
+  const topH=80,topW=380;
+  const topX=cx-topW/2,topY=y;
+  g.fillStyle='#111';rr(topX,topY,topW,topH,12);g.fill();
+  g.strokeStyle=CY+'88';g.lineWidth=2.5;rr(topX,topY,topW,topH,12);g.stroke();
+  g.fillStyle=CY;g.font='bold 36px Bebas Neue';g.textAlign='center';g.textBaseline='middle';
+  g.fillText('MPEG-1',cx,topY+topH/2-8);
+  g.fillStyle='#555';g.font='700 18px IBM Plex Mono';
+  g.fillText('ISO/IEC 11172',cx,topY+topH/2+16);
+
+  // ── connector line down
+  g.strokeStyle='#333';g.lineWidth=2;
+  g.beginPath();g.moveTo(cx,topY+topH);g.lineTo(cx,topY+topH+30);g.stroke();
+
+  // ── "AUDIO LAYERS" label
+  g.fillStyle='#444';g.font='700 20px IBM Plex Mono';g.textBaseline='top';
+  g.fillText('АУДИО СЛОИ',cx,topY+topH+34);
+
+  // ── three layer rows
+  const layers=[
+    {name:'LAYER I',  alias:'MP1',note:'192 кбит/с · DCC · студия',     col:'#333',acl:'#555',hl:false},
+    {name:'LAYER II', alias:'MP2',note:'256 кбит/с · DVD · цифровое ТВ', col:'#2a2a2a',acl:'#555',hl:false},
+    {name:'LAYER III',alias:'MP3',note:'128 кбит/с · интернет · плееры', col:CY+'22',acl:CY,hl:true},
+  ];
+  const rowH=108,rowW=w,rowY=topY+topH+62;
+  // horizontal branch line
+  g.strokeStyle='#2a2a2a';g.lineWidth=2;
+  g.beginPath();g.moveTo(x,rowY);g.lineTo(x+w,rowY);g.stroke();
+
+  layers.forEach((l,i)=>{
+    const ry=rowY+i*(rowH+10);
+    const rowRev=Math.min(1,Math.max(0,(segT-0.3-i*0.35)/0.4));
+    g.save();g.globalAlpha=rowRev;
+    // bg
+    if(l.hl){
+      g.fillStyle=CY+'18';rr(x,ry,rowW,rowH,10);g.fill();
+      g.strokeStyle=CY+'66';g.lineWidth=3;rr(x,ry,rowW,rowH,10);g.stroke();
+    } else {
+      g.fillStyle='#0d0d0d';rr(x,ry,rowW,rowH,10);g.fill();
+      g.strokeStyle='#1e1e1e';g.lineWidth=1.5;rr(x,ry,rowW,rowH,10);g.stroke();
+    }
+    // accent left bar
+    g.fillStyle=l.acl;g.fillRect(x,ry+12,5,rowH-24);
+
+    // layer name
+    g.font=l.hl?'bold 40px Bebas Neue':'bold 34px Bebas Neue';
+    g.fillStyle=l.hl?CY:'#4a4a4a';g.textAlign='left';g.textBaseline='middle';
+    g.fillText(l.name,x+22,ry+rowH*0.38);
+
+    // alias badge
+    const badgeX=x+250,badgeW=120,badgeH=38;
+    g.fillStyle=l.hl?CY:'#1e1e1e';
+    rr(badgeX,ry+(rowH-badgeH)/2,badgeW,badgeH,8);g.fill();
+    g.font='700 22px IBM Plex Mono';
+    g.fillStyle=l.hl?'#000':'#444';g.textAlign='center';
+    g.fillText(l.alias,badgeX+badgeW/2,ry+rowH/2);
+
+    // note
+    g.font=l.hl?'700 22px IBM Plex Mono':'400 20px IBM Plex Mono';
+    g.fillStyle=l.hl?'#ccc':'#333';g.textAlign='left';
+    g.fillText(l.note,x+395,ry+rowH*0.38);
+
+    // for MP3 row: "← ЭТО MP3!" annotation
+    if(l.hl){
+      g.font='700 26px IBM Plex Mono';g.fillStyle=CY;
+      g.fillText('← ЭТО MP3!',x+395,ry+rowH*0.68);
+    }
+    g.restore();
+  });
+
+  // ── Big "≠ MPEG-3" stamp bottom right
+  const stampA=Math.min(1,Math.max(0,(segT-1.5)/0.5));
+  g.save();g.globalAlpha=stampA;
+  g.translate(cx+w*0.3,cy+h*0.45);g.rotate(-0.06);
+  g.strokeStyle='#000';g.lineWidth=10;g.font='bold 88px Bebas Neue';
+  g.textAlign='center';g.textBaseline='middle';
+  g.strokeText('≠ MPEG-3',0,0);g.fillStyle=CR;g.fillText('≠ MPEG-3',0,0);
+  g.restore();
+
+  g.restore();
+}
+
+
+// Layout: top bar = 68px, ticker = 52px, seg bar = 16px
+// Content area: y from 88 to CH-68 = 1440-120 = 1320px tall
+// Left panel: x=80..960 (width 880)
+// Icon zone: x=960..1760 (center 1360)
+// Right panel: x=1790..2480
+
+const LX=80;    // left text start
+const RX=1790;  // right cards start
+const RW=650;   // right cards width
+const TOP=90;   // content top
+const BOT=CH-70;// content bottom (above ticker)
+const ICON_CX=1350; // icon center x
+
+function drawLeft(d,segT){
+  const cy=TOP;
+  g.save();g.textAlign='left';
+
+  // ── PHASE 1: Year (0–0.35s)
+  const yearA=segAlpha(segT,0,0.32);
+
+  // ghost year
+  g.font='760px Bebas Neue';g.textBaseline='top';
+  g.fillStyle=d.ac;g.globalAlpha=0.05*yearA;
+  g.fillText(d.year,LX-10,cy-60);
+
+  // year label
+  g.globalAlpha=yearA;
+  g.font='700 54px IBM Plex Mono';g.fillStyle=d.ac;g.textBaseline='top';
+  g.fillText(d.year,LX,cy+4);
+
+  // ── PHASE 2: Title slides up (0.4–0.8s)
+  const titleA=segAlpha(segT,0.4,0.38);
+  if(titleA>0.01){
+    const slideY=(1-titleA)*90;
+    g.globalAlpha=titleA;
+    g.font='290px Bebas Neue';g.fillStyle=d.ac;
+    g.fillText(d.title,LX-6,cy+50+slideY);
+  }
+
+  // ── PHASE 3: Everything else (0.9s+)
+  const restA=segAlpha(segT,0.9,0.38);
+
+  if(restA>0.01){
+    g.globalAlpha=restA;
+    // sub
+    g.font='400 36px IBM Plex Mono';g.fillStyle='#3a3a3a';
+    g.fillText(d.sub,LX,cy+360);
+  }
+
+  // tagline (IBM Plex Mono 700 — proper Cyrillic bold)
+  const tagA=segAlpha(segT,1.1,0.4);
+  if(tagA>0.01){
+    g.globalAlpha=tagA;
+    g.font='700 64px IBM Plex Mono';g.fillStyle=CW2;
+    g.fillText(d.tagline,LX,cy+412);
+  }
+
+  // desc
+  const descA=segAlpha(segT,1.6,0.4);
+  if(descA>0.01){
+    g.globalAlpha=descA;
+    g.font='400 36px IBM Plex Mono';g.fillStyle='#aaa';
+    (d.desc||[]).forEach((l,i)=>g.fillText(l,LX,cy+510+i*50));
+  }
+
+  // why block
+  const whyA=segAlpha(segT,2.2,0.4);
+  if(whyA>0.01){
+    g.globalAlpha=whyA;
+    g.fillStyle=d.ac;g.fillRect(LX,cy+652,5,72);
+    g.font='700 24px IBM Plex Mono';g.fillStyle='#444';
+    g.fillText('ПОЧЕМУ ВАЖНО',LX+20,cy+658);
+    g.font='400 32px IBM Plex Mono';g.fillStyle='#aaa';
+    g.fillText(d.why,LX+20,cy+698);
+  }
+
+  // where
+  const whereA=segAlpha(segT,3.0,0.4);
+  if(whereA>0.01){
+    g.globalAlpha=whereA;
+    g.font='400 26px IBM Plex Mono';g.fillStyle='#2e2e2e';
+    g.fillText('▸  '+d.where,LX,cy+790);
+  }
+
+  // extra facts
+  if(d.extra){
+    const efA=segAlpha(segT,4.5,0.5);
+    if(efA>0.01){
+      g.globalAlpha=efA;
+      const rgb=hexToRgb(d.ac);
+      g.strokeStyle=`rgba(${rgb},0.22)`;g.lineWidth=1;
+      g.beginPath();g.moveTo(LX,cy+838);g.lineTo(LX+830,cy+838);g.stroke();
+      g.font='700 24px IBM Plex Mono';g.fillStyle='#383838';
+      g.fillText('ДОПОЛНИТЕЛЬНО',LX,cy+862);
+      d.extra.forEach((e,i)=>{
+        const rowA=segAlpha(segT,4.5+i*0.4,0.35)*efA;
+        g.globalAlpha=rowA;
+        g.font='400 28px IBM Plex Mono';g.fillStyle='#5a5a5a';
+        g.fillText('—  '+e,LX,cy+898+i*42);
+      });
+    }
+  }
+
+  // glitch on title
+  if(activeGlitch>0.08&&titleA>0.5){
+    g.font='290px Bebas Neue';
+    [[8,3],[-11,2],[5,-4]].forEach(([ox,oy])=>{
+      g.save();g.globalAlpha=activeGlitch*0.5;
+      g.fillStyle=d.ac===CY?CR:CY;
+      g.fillText(d.title,LX-6+ox,cy+50+oy);g.restore();
+    });
+  }
+
+  g.restore();
+}
+
+// ═══ RIGHT CARDS ═════════════════════════════════════════
+function drawCards(d,segT){
+  const cw=RW,ch=148,gap=20;
+  // 6 cards total — layout vertically
+  const totalH=d.cards.length*(ch+gap)-gap;
+  const startY=TOP+20;
+
+  d.cards.forEach((card,i)=>{
+    const at=1.2+i*0.55;
+    const rev=segAlpha(segT,at,0.35);
+    if(rev<0.01) return;
+    const cy=startY+i*(ch+gap);
+    const ox=(1-rev)*70;
+
+    g.save();g.globalAlpha=rev;g.translate(-ox,0);
+    // bg
+    g.fillStyle='#0c0c0c';rr(RX,cy,cw,ch,12);g.fill();
+    // border
+    g.strokeStyle=d.ac+'55';g.lineWidth=2;rr(RX,cy,cw,ch,12);g.stroke();
+    // left accent
+    g.fillStyle=d.ac;g.beginPath();
+    g.moveTo(RX,cy+14);g.lineTo(RX+6,cy+14);
+    g.lineTo(RX+6,cy+ch-14);g.lineTo(RX,cy+ch-14);g.closePath();g.fill();
+    // key label
+    g.font='bold 24px IBM Plex Mono';g.fillStyle='#444';
+    g.textAlign='left';g.textBaseline='top';
+    g.fillText(card.k,RX+22,cy+16);
+    // value
+    g.font='700 50px IBM Plex Mono';g.fillStyle=CW2;
+    g.fillText(card.v,RX+22,cy+52);
+    // note
+    g.font='24px IBM Plex Mono';g.fillStyle=d.ac+'99';
+    g.fillText(card.n,RX+22,cy+106);
+    g.restore();
+  });
+
+  // WHERE block below cards
+  const wA=segAlpha(segT,5.0,0.5);
+  if(wA>0.01){
+    const wy=startY+d.cards.length*(ch+gap)+16;
+    g.save();g.globalAlpha=wA;
+    g.strokeStyle=d.ac+'44';g.lineWidth=1;
+    g.beginPath();g.moveTo(RX,wy);g.lineTo(RX+cw,wy);g.stroke();
+    g.font='24px IBM Plex Mono';g.fillStyle='#333';g.textBaseline='top';
+    g.fillText('ПРИМЕНЕНИЕ',RX,wy+12);
+    g.font='28px IBM Plex Mono';g.fillStyle='#666';
+    g.fillText(d.where,RX,wy+42);g.restore();
+  }
+}
+
+// ═══ VERTICAL DIVIDERS ════════════════════════════════════
+function drawDividers(col){
+  g.save();g.strokeStyle=col;g.lineWidth=1.5;g.globalAlpha=0.12;
+  // left | icon
+  g.beginPath();g.moveTo(LX+870,TOP);g.lineTo(LX+870,BOT);g.stroke();
+  // icon | right
+  g.beginPath();g.moveTo(RX-30,TOP);g.lineTo(RX-30,BOT);g.stroke();
+  g.restore();
+}
+
+// ═══ EVENT SYSTEM ════════════════════════════════════════
+const EVLIST={
+  mpeg1:[{t:3,type:'warp'},{t:6,type:'glitch'},{t:7.5,type:'float',txt:'1.5 Мбит/с'},{t:10,type:'warp'},{t:12,type:'glitch'}],
+  mpeg2:[{t:3,type:'warp'},{t:6,type:'glitch'},{t:7.5,type:'float',txt:'DVD · 1995'},{t:10,type:'warp'},{t:12,type:'glitch'}],
+  mpeg3:[{t:1.5,type:'glitch'},{t:3,type:'glitch'},{t:4.5,type:'warp'},{t:5.5,type:'glitch'},{t:7,type:'glitch'},{t:8.2,type:'glitch'}],
+  mp3:  [{t:2.5,type:'warp'},{t:4.5,type:'glitch'},{t:6,type:'float',txt:'MP3 ≠ MPEG-3'},{t:7.5,type:'glitch'}],
+  mpeg4:[{t:2.5,type:'warp'},{t:4.5,type:'glitch'},{t:6.5,type:'float',txt:'79% рынка'},{t:8,type:'warp'},{t:10,type:'glitch'},{t:12,type:'float',txt:'H.264'},{t:13.5,type:'glitch'}],
+};
+let firedEvs=new Set();
+
+function processEvents(segId,segT,d){
+  (EVLIST[segId]||[]).forEach(ev=>{
+    const key=segId+'_'+ev.t;
+    if(segT>=ev.t&&!firedEvs.has(key)){
+      firedEvs.add(key);
+      if(ev.type==='glitch') activeGlitch=0.28;
+      if(ev.type==='warp'){
+        // fire an immediate extra warp pass
+        if(warpActive&&!warpRAF) runWarpPass();
+        else if(warpActive){
+          // interrupt current pass and restart fresh
+          if(warpRAF){cancelAnimationFrame(warpRAF);warpRAF=null;}
+          warpBd.style.opacity='0';setWarpScale(0);
+          setTimeout(runWarpPass,50);
+        }
+      }
+      if(ev.type==='float'){
+        for(let i=0;i<6;i++) addFloat(
+          ICON_CX+(Math.random()-0.5)*340,
+          CH/2+(Math.random()-0.5)*220,
+          ev.txt,d.ac
+        );
+      }
+    }
+  });
+}
+
+// ═══ MAIN LOOP ═══════════════════════════════════════════
+function frame(ts){
+  if(!running)return;
+  if(!lastTs)lastTs=ts;
+  const dt=Math.min((ts-lastTs)/1000,0.05);
+  lastTs=ts;T+=dt;
+  if(T>TOTAL){T=TOTAL;running=false;}
+
+  let si=SEGS.findIndex(s=>T>=s.start&&T<s.start+s.dur);
+  if(si<0)si=SEGS.length-1;
+  const seg=SEGS[si];
+  const segT=T-seg.start;
+  const d=SD[seg.id];
+  const bpv=bpulse();
+
+  if(si!==prevSeg){
+    flashA=1;firedEvs=new Set();activeGlitch=0;floaters=[];prevSeg=si;
+  }
+  flashA*=0.87;
+  activeGlitch=Math.max(0,activeGlitch-dt);
+
+  processEvents(seg.id,segT,d);
+
+  // ── DRAW ──────────────────────────────────────────────
+  g.fillStyle='#000';g.fillRect(0,0,CW,CH);
+  g.save();g.globalAlpha=0.03;g.fillStyle=d.ac;g.fillRect(0,0,CW,CH);g.restore();
+
+  drawHexGrid(d.ac);
+  tickRain(dt);drawRain(d.ac);
+  drawDividers(d.ac);
+
+  // ── ICON
+  const iconY=CH/2+10;
+  const enterEase=ease(Math.min(1,segT/0.32));
+  g.save();
+  g.translate(ICON_CX,iconY);g.scale(enterEase,enterEase);g.translate(-ICON_CX,-iconY);
+  const spin=segT*1.15;
+
+  if(seg.id==='mpeg1')      drawCD(ICON_CX,iconY,268,spin,d.ac);
+  else if(seg.id==='mpeg2') drawDVD(ICON_CX,iconY,268,spin,d.ac);
+  else if(seg.id==='mpeg3') drawGhost(ICON_CX,iconY,258,segT);
+  else if(seg.id==='mp3')   drawMP3Diagram(ICON_CX,iconY,segT,d.ac);
+  else if(seg.id==='mpeg4') drawBrowser(ICON_CX,iconY,780,500,segT,d.ac);
+
+  g.restore();
+
+  // glitch (no confetti — stripes only)
+  if(activeGlitch>0.06) drawGlitch(d.ac);
+
+  // floaters
+  tickFloaters(dt);
+
+  // ── PANELS
+  drawLeft(d,segT);
+  drawCards(d,segT);
+
+  // ── FLASH
+  if(flashA>0.01){
+    g.save();g.globalAlpha=flashA*0.38;g.fillStyle=d.ac;g.fillRect(0,0,CW,CH);g.restore();
+  }
+  // beat border
+  if(bpv>0.06){
+    g.save();g.globalAlpha=bpv*0.14;g.strokeStyle=d.ac;g.lineWidth=50;
+    g.strokeRect(25,25,CW-50,CH-50);g.restore();
+  }
+
+  drawScanlines();
+  drawVignette();
+  drawTopBar(d.ac);
+  drawSegBar(d.ac);
+  drawTicker(d.ac);
+
+  raf=requestAnimationFrame(frame);
+}
+
+// ═══ WARP SCANLINE ENGINE ════════════════════════════════
+// Uses SVG feDisplacementMap + backdrop-filter on a clipped div
+// so the canvas pixels behind it get geometrically warped in a band.
+const warpBd=document.getElementById('warp-bd');
+const turbEl=document.getElementById('warp-turb');
+const dispEl=document.getElementById('warp-disp');
+const warpCv=document.getElementById('wc');
+const wctx=warpCv.getContext('2d');
+
+function resizeWarp(){
+  warpCv.width=window.innerWidth;warpCv.height=window.innerHeight;
+}
+resizeWarp();window.addEventListener('resize',resizeWarp);
+
+let warpActive=false,warpRAF=null,warpTO=null;
+
+function setWarpScale(s){dispEl.setAttribute('scale',s.toFixed(2));}
+function setWarpFreq(fy){turbEl.setAttribute('baseFrequency',`0 ${fy.toFixed(4)}`);}
+setWarpScale(0);setWarpFreq(0.04);
+
+function runWarpPass(){
+  if(!warpActive)return;
+  const bandH=38, speed=340, peakScale=18;
+  const startT=performance.now();
+  turbEl.setAttribute('seed',String(1+Math.floor(Math.random()*99)));
+
+  function step(now){
+    if(!warpActive){warpBd.style.opacity='0';setWarpScale(0);return;}
+    const elapsed=(now-startT)/1000;
+    const y=-bandH+elapsed*speed;
+    const VH=window.innerHeight;
+
+    if(y>VH+bandH){
+      warpBd.style.opacity='0';setWarpScale(0);warpRAF=null;
+      if(warpActive) warpTO=setTimeout(runWarpPass,3200+Math.random()*2800);
+      return;
+    }
+
+    const top=Math.max(0,y), bot=Math.min(VH,y+bandH), h=bot-top;
+    const frac=y<0?(y+bandH)/bandH:y>VH-bandH?(VH-y)/bandH:1;
+
+    if(h>0){
+      warpBd.style.top=top+'px';
+      warpBd.style.height=h+'px';
+      warpBd.style.opacity='1';
+      setWarpScale(peakScale*Math.max(0,frac));
+      setWarpFreq(0.032+Math.sin(elapsed*2.8)*0.014);
+    }
+
+    warpRAF=requestAnimationFrame(step);
+  }
+  warpRAF=requestAnimationFrame(step);
+}
+
+function startWarp(){
+  warpActive=true;
+  warpTO=setTimeout(runWarpPass,600+Math.random()*400);
+}
+function stopWarp(){
+  warpActive=false;
+  if(warpRAF)cancelAnimationFrame(warpRAF);
+  if(warpTO)clearTimeout(warpTO);
+  warpBd.style.opacity='0';setWarpScale(0);
+  wctx.clearRect(0,0,warpCv.width,warpCv.height);
+}
+
+// ═══ START / SPLASH ═══════════════════════════════════════
+function start(){
+  if(raf)cancelAnimationFrame(raf);
+  stopWarp();
+  T=0;lastTs=null;running=true;prevSeg=-1;flashA=0;
+  activeGlitch=0;floaters=[];firedEvs=new Set();
+  raf=requestAnimationFrame(frame);
+  startWarp();
+}
+function splash(){
+  g.fillStyle='#000';g.fillRect(0,0,CW,CH);
+  drawHexGrid(CY);
+  g.fillStyle=CY;g.font='160px Bebas Neue';g.textAlign='center';g.textBaseline='middle';
+  g.fillText('MPEG: ИСТОРИЯ СТАНДАРТОВ',CW/2,CH/2-90);
+  g.fillStyle='#2e2e2e';g.font='44px IBM Plex Mono';
+  g.fillText('нажмите  R  для  запуска',CW/2,CH/2+60);
+  drawScanlines();drawVignette();
+}
+document.addEventListener('keydown',e=>{'rRкК'.includes(e.key)&&start();});
+cv.addEventListener('click',start);
+document.fonts.ready.then(splash);
+</script>
+</body>
+</html>

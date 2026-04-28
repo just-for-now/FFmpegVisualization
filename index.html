@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>История FFmpeg и патентных войн</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;700&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+canvas#bg {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 0;
+}
+
+/* warp scanline overlay — sits between canvas and content */
+#warp-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%;
+  pointer-events: none;
+  z-index: 5;
+  backdrop-filter: url(#warp-filter);
+  -webkit-backdrop-filter: url(#warp-filter);
+  opacity: 0;
+}
+
+#overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  padding: 5vh 7vw 3vh;
+  overflow: hidden;
+}
+
+/* ── HEADER ─────────────────────────────────────────────── */
+#header { margin-bottom: 3vh; flex-shrink: 0; }
+
+.sup-title {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 300;
+  font-size: clamp(10px, 0.95vw, 16px);
+  letter-spacing: 0.35em;
+  color: #fcec0c;
+  text-transform: uppercase;
+  opacity: 0;
+}
+
+.main-title {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 700;
+  font-size: clamp(36px, 5.8vw, 96px);
+  letter-spacing: 0.04em;
+  line-height: 0.9;
+  text-transform: uppercase;
+  opacity: 0;
+}
+#title1 { color: #fff; }
+#title2 { color: #fcec0c; }
+
+/* ── CHAPTER GRID ─────────────────────────────────────────── */
+#chapters {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.1fr 0.8fr 0.85fr;
+  gap: 0 4.5vw;
+  align-content: start;
+  min-height: 0;
+}
+
+.col-inner { overflow: hidden; }
+
+.section-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 700;
+  font-size: clamp(7px, 0.65vw, 11px);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  padding-bottom: 0.5em;
+  border-bottom: 1px solid;
+  margin-bottom: 0.15em;
+  opacity: 0;
+}
+.section-header.yellow { color: #fcec0c; border-color: #fcec0c44; }
+.section-header.teal   { color: #00d4c8; border-color: #00d4c844; }
+.section-header.red    { color: #e50004; border-color: #e5000444; }
+
+.chapter-item { opacity: 0; }
+
+.chapter-item a {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.26em 0;
+  text-decoration: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 400;
+  font-size: clamp(7px, 0.75vw, 12px);
+  color: rgba(255,255,255,0.70);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer;
+}
+
+.chapter-item a .num {
+  color: rgba(255,255,255,0.20);
+  font-size: 0.82em;
+  flex-shrink: 0;
+  min-width: 2.8em;
+}
+
+.chapter-item.part1 a:hover { color: #fcec0c; }
+.chapter-item.part2 a:hover { color: #00d4c8; }
+
+.chapter-item.glitching a {
+  animation: gitm 0.22s steps(2) forwards;
+}
+@keyframes gitm {
+  0%  { transform: none; }
+  25% { transform: translate(-5px,0) skewX(7deg); filter: brightness(1.6) hue-rotate(60deg); }
+  50% { transform: translate(5px,0); clip-path: inset(15% 0 55% 0); }
+  75% { transform: translate(-2px,0); filter: none; clip-path: none; }
+  100%{ transform: none; clip-path: none; filter: none; }
+}
+
+/* ── ABOUT COLUMN ─────────────────────────────────────────── */
+#about-col { opacity: 0; }
+
+.about-block {
+  margin-bottom: 2.2em;
+}
+
+.about-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 700;
+  font-size: clamp(7px, 0.65vw, 11px);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #e50004;
+  padding-bottom: 0.5em;
+  border-bottom: 1px solid #e5000444;
+  margin-bottom: 0.8em;
+}
+
+.about-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 400;
+  font-size: clamp(7px, 0.72vw, 11.5px);
+  color: rgba(255,255,255,0.52);
+  line-height: 1.75;
+  letter-spacing: 0.03em;
+}
+
+.about-text b {
+  color: rgba(255,255,255,0.85);
+  font-weight: 700;
+}
+
+.about-text .accent { color: #fcec0c; }
+.about-text .teal   { color: #00d4c8; }
+
+.ctrl-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8em;
+  padding: 0.3em 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(7px, 0.72vw, 11.5px);
+}
+.ctrl-key {
+  color: #fcec0c;
+  font-weight: 700;
+  min-width: 5em;
+  flex-shrink: 0;
+}
+.ctrl-desc {
+  color: rgba(255,255,255,0.45);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.35em 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(7px, 0.72vw, 11.5px);
+}
+.stat-key   { color: rgba(255,255,255,0.35); }
+.stat-val   { color: rgba(255,255,255,0.75); font-weight: 700; }
+
+/* ── FOOTER ───────────────────────────────────────────────── */
+#footer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(7px, 0.58vw, 9px);
+  color: rgba(255,255,255,0.15);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  padding-top: 1.2vh;
+  display: flex;
+  gap: 2.5em;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+/* wipe-in for title */
+.wipe-in {
+  animation: wipeIn 0.14s linear forwards;
+}
+@keyframes wipeIn {
+  from { opacity: 1; clip-path: inset(0 100% 0 0); }
+  to   { opacity: 1; clip-path: inset(0 0% 0 0); }
+}
+</style>
+</head>
+<body>
+
+<!-- SVG warp filter -->
+<svg style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="warp-filter" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+      <feTurbulence id="warp-turb" type="fractalNoise" baseFrequency="0 0.04" numOctaves="2" seed="1" result="noise"/>
+      <feDisplacementMap id="warp-disp" in="SourceGraphic" in2="noise" scale="0" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
+
+<div id="warp-overlay"></div>
+<canvas id="bg"></canvas>
+
+<div id="overlay">
+  <div id="header">
+    <div class="sup-title" id="suptitle">ДОКУМЕНТАЛЬНЫЙ ПРОЕКТ &nbsp;·&nbsp; 2025</div>
+    <div class="main-title" id="title1">ИСТОРИЯ FFMPEG</div>
+    <div class="main-title" id="title2">И ПАТЕНТНЫХ ВОЙН</div>
+  </div>
+
+  <div id="chapters">
+    <!-- Col 1: PatentWar -->
+    <div class="col-inner">
+      <div class="section-header yellow" id="sh1">ЧАСТЬ I &nbsp;—&nbsp; ПАТЕНТНЫЕ ВОЙНЫ</div>
+      <div id="list1"></div>
+    </div>
+
+    <!-- Col 2: SpacePart -->
+    <div class="col-inner">
+      <div class="section-header teal" id="sh2">ЧАСТЬ II &nbsp;—&nbsp; FFMPEG</div>
+      <div id="list2"></div>
+    </div>
+
+    <!-- Col 3: About -->
+    <div class="col-inner" id="about-col">
+      <div class="section-header red">О ПРОЕКТЕ</div>
+
+      <div class="about-block">
+        <div class="about-text">
+          Документальный фильм о <b>Fabrice Bellard</b>,
+          истории <b class="teal">FFmpeg</b>, и патентных войнах
+          вокруг медиакодеков — <b>GIF, MP3, MPEG,
+          DVD, DivX, OGG Vorbis</b>.<br><br>
+          Каждая страница — отдельный motion graphics
+          сегмент, снятый с экрана как видеофутаж.
+          Рендер в реальном времени, без экспорта.
+        </div>
+      </div>
+
+      <div class="about-block">
+        <div class="about-label">УПРАВЛЕНИЕ</div>
+        <div class="ctrl-row"><span class="ctrl-key">R / К</span><span class="ctrl-desc">перезапуск анимации</span></div>
+        <div class="ctrl-row"><span class="ctrl-key">Пробел</span><span class="ctrl-desc">следующая сцена (где есть)</span></div>
+        <div class="ctrl-row"><span class="ctrl-key">F</span><span class="ctrl-desc">zoom-режим (таймлайн)</span></div>
+        <div class="ctrl-row"><span class="ctrl-key">Q</span><span class="ctrl-desc">автовоспроизведение</span></div>
+        <div class="ctrl-row"><span class="ctrl-key">Tab</span><span class="ctrl-desc">скрыть UI / debug</span></div>
+      </div>
+
+      <div class="about-block">
+        <div class="about-label">ТЕХНИЧЕСКИЙ СТЕК</div>
+        <div class="stat-row"><span class="stat-key">Рендер</span><span class="stat-val">HTML5 Canvas 2D / WebGL</span></div>
+        <div class="stat-row"><span class="stat-key">Разрешение</span><span class="stat-val">2560 × 1440</span></div>
+        <div class="stat-row"><span class="stat-key">Фреймрейт</span><span class="stat-val">60 fps</span></div>
+        <div class="stat-row"><span class="stat-key">Зависимости</span><span class="stat-val">0 (только Google Fonts)</span></div>
+        <div class="stat-row"><span class="stat-key">Сцен</span><span class="stat-val">26</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="footer">
+    <span>R — ПЕРЕЗАПУСК</span>
+    <span>26 СЦЕН</span>
+    <span>HTML5 CANVAS</span>
+    <span>2025</span>
+  </div>
+</div>
+
+<script>
+// ── DATA ─────────────────────────────────────────────────────────────────────
+const PART1 = [
+  ['PatentWar/introduction.html',               'Имитация Mac Explorer'],
+  ['PatentWar/market.html',                     'Рынок плейеров, 2000 год'],
+  ['PatentWar/worldmap_route_2.html',           'Перелёт за Жеромом из Америки'],
+  ['PatentWar/mpeg_creation.html',              'Создание MPEG'],
+  ['PatentWar/mpeg_patent.html',                'Механика MPEG и патентов'],
+  ['PatentWar/mpeg_timeline.html',              'Хронология MPEG'],
+  ['PatentWar/dvd_v10.html',                    'Отчисления за DVD'],
+  ['PatentWar/player_1998_dark.html',           'Написание плеера в 1998 году'],
+  ['PatentWar/gif_violator.html',               'Декодер GIF'],
+  ['PatentWar/jpeg_patent.html',                'Войны вокруг JPEG'],
+  ['PatentWar/patent_wars_mp3.html',            'Патентные войны: MP3'],
+  ['PatentWar/falling_patents.html',            'Слишком много патентов'],
+  ['PatentWar/patent_machine_3d.html',          'Великая патентная машина'],
+  ['PatentWar/divx_irony.html',                 'Ирония DivX'],
+  ['PatentWar/ogg_vorbis_v3.html',              'OGG Vorbis'],
+  ['PatentWar/worldmap_final.html',             'Полная карта мира'],
+  ['PatentWar/redwall.html',                    'Красная подложка кода'],
+  ['PatentWar/eye.html',                        'Глаз'],
+  ['PatentWar/patent_wars (1).html',            'Патентные войны'],
+  ['PatentWar/trap_animation (unrelized).html', 'Ловушка [нереализовано]'],
+];
+
+const PART2 = [
+  ['SpacePart/code_typing.html',    'Написание кода FFmpeg'],
+  ['SpacePart/bellard_final3.html', 'Первые проекты Беллара'],
+  ['SpacePart/ffmpeg_c_asc.html',   'FFmpeg: C и ассемблер'],
+  ['SpacePart/ffmpeg_globe.html',   'Иммунитет FFmpeg'],
+  ['SpacePart/matryoshka_v5.html',  'Анатомия медиафайла'],
+  ['ToUse/EAC3_Downmix.html',       'EAC3 Downmix'],
+];
+
+// ── CANVAS BACKGROUND ────────────────────────────────────────────────────────
+const cv = document.getElementById('bg');
+const g  = cv.getContext('2d');
+let W, H;
+
+function resize() {
+  W = cv.width  = window.innerWidth;
+  H = cv.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// grain
+const gCv = document.createElement('canvas');
+gCv.width = gCv.height = 256;
+const gCx = gCv.getContext('2d');
+let _s = 1;
+function srng(v) { _s = v | 0; }
+function nrng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
+function updateGrain(t) {
+  srng((t * 5000) | 0);
+  const id = gCx.createImageData(256, 256);
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = (nrng() * 255) | 0;
+    d[i] = d[i+1] = d[i+2] = v;
+    d[i+3] = 38;
+  }
+  gCx.putImageData(id, 0, 0);
+}
+function drawGrain() {
+  g.save();
+  g.globalCompositeOperation = 'overlay';
+  g.globalAlpha = 0.07;
+  for (let x = 0; x < W; x += 256)
+    for (let y = 0; y < H; y += 256)
+      g.drawImage(gCv, x, y);
+  g.restore();
+}
+
+// subtle grid
+function drawGrid() {
+  g.strokeStyle = 'rgba(255,255,255,0.022)';
+  g.lineWidth = 1;
+  const xStep = Math.round(W / 24);
+  const yStep = Math.round(H / 13);
+  g.beginPath();
+  for (let x = 0; x <= W; x += xStep) { g.moveTo(x, 0); g.lineTo(x, H); }
+  for (let y = 0; y <= H; y += yStep) { g.moveTo(0, y); g.lineTo(W, y); }
+  g.stroke();
+}
+
+// BPM pulse
+const BPM = 90, BEAT = 60000 / BPM;
+function drawBeat(t) {
+  const ph = (t % BEAT) / BEAT;
+  if (ph > 0.12) return;
+  const a = (1 - ph / 0.12) * 0.04;
+  g.fillStyle = `rgba(252,236,12,${a})`;
+  g.fillRect(0, H * 0.88, W, H * 0.12);
+}
+
+// canvas glitch
+let glitchEnd = 0;
+function triggerCanvasGlitch(t) { glitchEnd = t + 260 + Math.random() * 160; }
+function drawCanvasGlitch(t) {
+  if (t >= glitchEnd) return;
+  const intensity = (glitchEnd - t) / 260;
+  const n = Math.floor(intensity * 10) + 2;
+  for (let i = 0; i < n; i++) {
+    const y  = Math.random() * H;
+    const h  = Math.random() * 28 * intensity + 2;
+    const dx = (Math.random() - 0.5) * intensity * 70;
+    try {
+      const iy = Math.max(0, y | 0), ih = Math.min((h | 0) + 1, H - iy);
+      if (ih > 0) g.putImageData(g.getImageData(0, iy, W, ih), dx, iy);
+    } catch(e) {}
+  }
+}
+
+let lastGlitchAt = 0;
+let rafId = null;
+let t0 = null;
+
+function tick(ts) {
+  if (!t0) t0 = ts;
+  const t = ts - t0;
+
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, W, H);
+
+  drawGrid();
+  drawBeat(t);
+  updateGrain(t);
+  drawGrain();
+
+  if (t - lastGlitchAt > 7000 + Math.random() * 4000) {
+    lastGlitchAt = t;
+    triggerCanvasGlitch(t);
+    domGlitchBurst();
+  }
+  drawCanvasGlitch(t);
+
+  rafId = requestAnimationFrame(tick);
+}
+
+// ── WARP SCANLINE ────────────────────────────────────────────────────────────
+const warpOverlay = document.getElementById('warp-overlay');
+const turbEl = document.getElementById('warp-turb');
+const dispEl = document.getElementById('warp-disp');
+
+function setWarpScale(s) { dispEl.setAttribute('scale', s.toFixed(1)); }
+setWarpScale(0);
+
+let warpAnimId = null;
+let warpScheduled = null;
+
+function runWarpPass() {
+  const bandH = 36;
+  const speed = 310; // px/s
+  const peakScale = 20;
+  const startT = performance.now();
+  turbEl.setAttribute('seed', String(Math.floor(Math.random() * 99) + 1));
+
+  function step(now) {
+    const elapsed = (now - startT) / 1000;
+    const y = -bandH + elapsed * speed;
+
+    if (y > window.innerHeight + bandH) {
+      warpOverlay.style.opacity = '0';
+      setWarpScale(0);
+      warpAnimId = null;
+      scheduleNextWarp();
+      return;
+    }
+
+    const top = Math.max(0, y);
+    const bot = Math.min(window.innerHeight, y + bandH);
+    const h   = bot - top;
+
+    // fade in/out at edges of screen
+    const frac = y < 0
+      ? (y + bandH) / bandH
+      : y > window.innerHeight - bandH
+        ? (window.innerHeight - y) / bandH
+        : 1;
+
+    const sc = Math.max(0, frac) * peakScale;
+    setWarpScale(sc);
+    warpOverlay.style.top    = top + 'px';
+    warpOverlay.style.height = h + 'px';
+    warpOverlay.style.opacity = sc > 0 ? '1' : '0';
+
+    warpAnimId = requestAnimationFrame(step);
+  }
+
+  warpAnimId = requestAnimationFrame(step);
+}
+
+function scheduleNextWarp() {
+  warpScheduled = setTimeout(runWarpPass, 3500 + Math.random() * 2500);
+}
+
+function startWarp() {
+  if (warpAnimId) cancelAnimationFrame(warpAnimId);
+  if (warpScheduled) clearTimeout(warpScheduled);
+  warpOverlay.style.opacity = '0';
+  setWarpScale(0);
+  scheduleNextWarp();
+}
+
+// ── DOM LIST BUILD ────────────────────────────────────────────────────────────
+function buildLists() {
+  const l1 = document.getElementById('list1');
+  const l2 = document.getElementById('list2');
+  l1.innerHTML = '';
+  l2.innerHTML = '';
+
+  PART1.forEach(([href, label], i) => {
+    const div = document.createElement('div');
+    div.className = 'chapter-item part1';
+    div.innerHTML = `<a href="${href}"><span class="num">[${String(i+1).padStart(2,'0')}]</span>${label}</a>`;
+    div.addEventListener('mouseenter', () => glitchItem(div));
+    l1.appendChild(div);
+  });
+
+  PART2.forEach(([href, label], i) => {
+    const div = document.createElement('div');
+    div.className = 'chapter-item part2';
+    div.innerHTML = `<a href="${href}"><span class="num">[${String(PART1.length+i+1).padStart(2,'0')}]</span>${label}</a>`;
+    div.addEventListener('mouseenter', () => glitchItem(div));
+    l2.appendChild(div);
+  });
+}
+
+function glitchItem(el) {
+  el.classList.remove('glitching');
+  void el.offsetWidth;
+  el.classList.add('glitching');
+}
+
+function domGlitchBurst() {
+  const all = [...document.querySelectorAll('.chapter-item')];
+  const n = 3 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < n; i++) {
+    const el = all[Math.floor(Math.random() * all.length)];
+    setTimeout(() => glitchItem(el), i * 45);
+  }
+}
+
+// ── INTRO SEQUENCE ────────────────────────────────────────────────────────────
+function hardShow(el, useWipe) {
+  el.style.opacity = '1';
+  if (useWipe) {
+    el.classList.remove('wipe-in');
+    void el.offsetWidth;
+    el.classList.add('wipe-in');
+  }
+}
+
+let introActive = false;
+
+async function runIntro() {
+  introActive = true;
+
+  ['suptitle','title1','title2','sh1','sh2'].forEach(id => {
+    const el = document.getElementById(id);
+    el.style.opacity = '0';
+    el.classList.remove('wipe-in');
+  });
+  document.getElementById('about-col').style.opacity = '0';
+  document.querySelectorAll('.chapter-item').forEach(el => el.style.opacity = '0');
+  document.getElementById('footer').style.opacity = '0';
+
+  await delay(500);
+
+  hardShow(document.getElementById('suptitle'), false);
+  await delay(130);
+  hardShow(document.getElementById('title1'), true);
+  await delay(110);
+  hardShow(document.getElementById('title2'), true);
+  await delay(250);
+
+  hardShow(document.getElementById('sh1'), false);
+  hardShow(document.getElementById('sh2'), false);
+  await delay(130);
+
+  const items1 = [...document.querySelectorAll('#list1 .chapter-item')];
+  const items2 = [...document.querySelectorAll('#list2 .chapter-item')];
+  const rows = Math.max(items1.length, items2.length);
+  const STEP = 65;
+
+  for (let i = 0; i < rows; i++) {
+    if (items1[i]) setTimeout(() => { items1[i].style.opacity = '1'; }, i * STEP);
+    if (items2[i]) setTimeout(() => { items2[i].style.opacity = '1'; }, i * STEP + 28);
+  }
+
+  await delay(rows * STEP + 150);
+
+  hardShow(document.getElementById('about-col'), false);
+  await delay(120);
+  hardShow(document.getElementById('footer'), false);
+
+  introActive = false;
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── RESTART ───────────────────────────────────────────────────────────────────
+function restart() {
+  if (rafId) cancelAnimationFrame(rafId);
+  t0 = null;
+  lastGlitchAt = 0;
+  glitchEnd = 0;
+  rafId = requestAnimationFrame(tick);
+  startWarp();
+  runIntro();
+}
+
+document.addEventListener('keydown', e => {
+  if ('rRкК'.includes(e.key)) restart();
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+buildLists();
+rafId = requestAnimationFrame(tick);
+startWarp();
+runIntro();
+</script>
+</body>
+</html>

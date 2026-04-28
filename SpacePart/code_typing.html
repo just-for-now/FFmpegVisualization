@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>code</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; width:2560px; height:1440px; overflow:hidden; }
+canvas { position:absolute; top:0; left:0; width:2560px; height:1440px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const CV = document.getElementById('c');
+const X = CV.getContext('2d');
+CV.width = 2560; CV.height = 1440;
+
+const KEYWORD = '#ff2d55';
+const TYPE    = '#ff9500';
+const FUNC    = '#ffd60a';
+const STRING  = '#30d158';
+const COMMENT = '#636366';
+const NUMBER  = '#bf5af2';
+const MACRO   = '#0a84ff';
+const PLAIN   = '#ebebf5';
+
+const FS = 30;
+const LH = 52;
+const PX = 160;
+const PY = 120;
+const FW = 18.0;
+
+// All chars to type, flattened
+const CODE = [
+  [{t:'/*',c:COMMENT},{t:' Copyright (c) 2000 Fabrice Bellard',c:COMMENT}],
+  [{t:' * FFmpeg - fast forward MPEG',c:COMMENT}],
+  [{t:' */',c:COMMENT}],
+  [],
+  [{t:'#include',c:MACRO},{t:' "avcodec.h"',c:STRING}],
+  [{t:'#include',c:MACRO},{t:' "avformat.h"',c:STRING}],
+  [{t:'#include',c:MACRO},{t:' "swscale.h"',c:STRING}],
+  [],
+  [{t:'static',c:KEYWORD},{t:' int ',c:TYPE},{t:'decode_frame',c:FUNC},{t:'(',c:PLAIN},{t:'InputStream',c:TYPE},{t:' *ist, ',c:PLAIN},{t:'AVPacket',c:TYPE},{t:' *pkt) {',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'AVFrame',c:TYPE},{t:' *frame = ',c:PLAIN},{t:'av_frame_alloc',c:FUNC},{t:'();',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'if',c:KEYWORD},{t:' (!frame) ',c:PLAIN},{t:'return',c:KEYWORD},{t:' AVERROR(ENOMEM);',c:NUMBER}],
+  [{t:'    ',c:PLAIN},{t:'int',c:TYPE},{t:' ret = ',c:PLAIN},{t:'avcodec_send_packet',c:FUNC},{t:'(ist->dec_ctx, pkt);',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'while',c:KEYWORD},{t:' (ret >= ',c:PLAIN},{t:'0',c:NUMBER},{t:') {',c:PLAIN}],
+  [{t:'        ',c:PLAIN},{t:'ret = ',c:PLAIN},{t:'avcodec_receive_frame',c:FUNC},{t:'(ist->dec_ctx, frame);',c:PLAIN}],
+  [{t:'        ',c:PLAIN},{t:'if',c:KEYWORD},{t:' (ret == AVERROR(EAGAIN)) ',c:PLAIN},{t:'break',c:KEYWORD},{t:';',c:PLAIN}],
+  [{t:'        ',c:PLAIN},{t:'process_frame',c:FUNC},{t:'(ist, frame);',c:PLAIN}],
+  [{t:'        ',c:PLAIN},{t:'av_frame_unref',c:FUNC},{t:'(frame);',c:PLAIN}],
+  [{t:'    }',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'av_frame_free',c:FUNC},{t:'(&frame);',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'return',c:KEYWORD},{t:' ret;',c:PLAIN}],
+  [{t:'}',c:PLAIN}],
+  [],
+  [{t:'static',c:KEYWORD},{t:' int ',c:TYPE},{t:'encode_frame',c:FUNC},{t:'(',c:PLAIN},{t:'OutputStream',c:TYPE},{t:' *ost, ',c:PLAIN},{t:'AVFrame',c:TYPE},{t:' *frame) {',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'AVPacket',c:TYPE},{t:' *pkt = ',c:PLAIN},{t:'av_packet_alloc',c:FUNC},{t:'();',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'int',c:TYPE},{t:' ret = ',c:PLAIN},{t:'avcodec_send_frame',c:FUNC},{t:'(ost->enc, frame);',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'while',c:KEYWORD},{t:' ((ret = ',c:PLAIN},{t:'avcodec_receive_packet',c:FUNC},{t:'(ost->enc, pkt)) >= ',c:PLAIN},{t:'0',c:NUMBER},{t:') {',c:PLAIN}],
+  [{t:'        ',c:PLAIN},{t:'write_packet',c:FUNC},{t:'(ost, pkt);',c:PLAIN}],
+  [{t:'        ',c:PLAIN},{t:'av_packet_unref',c:FUNC},{t:'(pkt);',c:PLAIN}],
+  [{t:'    }',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'av_packet_free',c:FUNC},{t:'(&pkt);',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'return',c:KEYWORD},{t:' ',c:PLAIN},{t:'0',c:NUMBER},{t:';',c:PLAIN}],
+  [{t:'}',c:PLAIN}],
+  [],
+  [{t:'int ',c:TYPE},{t:'main',c:FUNC},{t:'(',c:PLAIN},{t:'int',c:TYPE},{t:' argc, ',c:PLAIN},{t:'char',c:TYPE},{t:' **argv) {',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'ffmpeg_parse_options',c:FUNC},{t:'(argc, argv);',c:PLAIN}],
+  [{t:'    ',c:PLAIN},{t:'return',c:KEYWORD},{t:' ',c:PLAIN},{t:'transcode',c:FUNC},{t:'();',c:PLAIN}],
+  [{t:'}',c:PLAIN}],
+];
+
+// flatten to char stream
+const CHARS = []; // {t, c, newline, blank}
+for (const line of CODE) {
+  if (line.length === 0) {
+    CHARS.push({ t: '', c: PLAIN, newline: true, blank: true });
+    continue;
+  }
+  for (const seg of line) {
+    for (let i = 0; i < seg.t.length; i++) {
+      CHARS.push({ t: seg.t[i], c: seg.c, newline: false });
+    }
+  }
+  CHARS.push({ t: '', c: PLAIN, newline: true });
+}
+
+// committed lines
+let lines = []; // [{segs: [{t,c}]}]
+let curLine = [];
+let curX = PX;
+let curLineY = PY;
+let scrollY = 0;
+let charIdx = 0;
+let lastTime = null;
+let accumMs = 0;
+let done = false;
+
+function charDelay() {
+  return 18 + Math.random() * 28;
+}
+
+function scroll() {
+  const maxY = PY + lines.length * LH;
+  const visible = 1440 - PY - LH * 3;
+  if (maxY - scrollY > visible + PY) {
+    scrollY = maxY - visible - PY;
+  }
+}
+
+function step() {
+  if (charIdx >= CHARS.length) { done = true; return 0; }
+  const ch = CHARS[charIdx++];
+
+  if (ch.newline) {
+    lines.push({ segs: curLine });
+    curLine = [];
+    curX = PX;
+    scroll();
+    return ch.blank ? 30 : 40;
+  }
+
+  // append char to current line segment
+  if (curLine.length > 0 && curLine[curLine.length - 1].c === ch.c) {
+    curLine[curLine.length - 1].t += ch.t;
+  } else {
+    curLine.push({ t: ch.t, c: ch.c });
+  }
+  curX += FW;
+
+  let d = charDelay();
+  if (ch.t === '(') d += 25;
+  if (ch.t === '{') d += 40;
+  if (ch.t === ';') d += 55;
+  return d;
+}
+
+function draw(ts) {
+  requestAnimationFrame(draw);
+
+  if (!lastTime) lastTime = ts;
+  const dt = ts - lastTime;
+  lastTime = ts;
+
+  if (!done) {
+    accumMs += dt;
+    while (accumMs > 0 && !done) {
+      accumMs -= step();
+    }
+  }
+
+  X.fillStyle = '#000';
+  X.fillRect(0, 0, 2560, 1440);
+
+  X.font = `${FS}px 'Courier New', monospace`;
+  X.textBaseline = 'top';
+
+  // draw committed lines
+  for (let i = 0; i < lines.length; i++) {
+    const y = PY + i * LH - scrollY;
+    if (y < -LH || y > 1440) continue;
+    let dx = PX;
+    for (const seg of lines[i].segs) {
+      X.fillStyle = seg.c;
+      X.fillText(seg.t, dx, y);
+      dx += seg.t.length * FW;
+    }
+  }
+
+  // draw current line
+  {
+    const y = PY + lines.length * LH - scrollY;
+    let dx = PX;
+    for (const seg of curLine) {
+      X.fillStyle = seg.c;
+      X.fillText(seg.t, dx, y);
+      dx += seg.t.length * FW;
+    }
+
+    // cursor
+    const blink = Math.floor(ts / 500) % 2;
+    if (!done || blink === 0) {
+      X.fillStyle = '#fff';
+      X.fillRect(dx, y + FS - 2, FW * 0.7, 3);
+    }
+  }
+}
+
+function start() {
+  lines = [];
+  curLine = [];
+  curX = PX;
+  scrollY = 0;
+  charIdx = 0;
+  lastTime = null;
+  accumMs = 0;
+  done = false;
+  requestAnimationFrame(draw);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'к' || e.key === 'К') start();
+});
+
+start();
+</script>
+</body>
+</html>

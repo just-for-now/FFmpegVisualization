@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Patent Machine — 3D</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%;height:100%;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center; }
+#wrap { position:relative; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="glc"></canvas>
+</div>
+<script>
+const W=2560,H=1440,CX=W/2,CY=H/2;
+const BPM=90, BP=60/BPM;
+
+const glc=document.getElementById('glc');
+glc.width=W; glc.height=H;
+const wrap=document.getElementById('wrap');
+
+function fit(){
+  const s=Math.min(innerWidth/W,innerHeight/H);
+  wrap.style.width=W*s+'px'; wrap.style.height=H*s+'px';
+  glc.style.width=W*s+'px'; glc.style.height=H*s+'px';
+}
+addEventListener('resize',fit); fit();
+
+const gl=glc.getContext('webgl')||glc.getContext('experimental-webgl');
+
+const VS=`
+attribute vec2 aP;
+void main(){gl_Position=vec4(aP,0,1);}
+`;
+
+const FS=`
+precision highp float;
+uniform vec2 uR;
+uniform float uT;
+uniform float uBt;
+uniform float uGl;
+uniform float uAI;
+uniform float uAP;
+
+#define PI 3.14159265358979
+#define TAU 6.28318530717959
+#define EPS 0.003
+
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+
+float sdSphere(vec3 p,float r){return length(p)-r;}
+float sdTorus(vec3 p,vec2 t){return length(vec2(length(p.xz)-t.x,p.y))-t.y;}
+float sdCyl(vec3 p,float h,float r){
+  vec2 d=abs(vec2(length(p.xz),p.y))-vec2(r,h);
+  return min(max(d.x,d.y),0.)+length(max(d,0.));
+}
+float sdBox(vec3 p,vec3 b){
+  vec3 d=abs(p)-b;
+  return length(max(d,0.))+min(max(d.x,max(d.y,d.z)),0.);
+}
+float smin(float a,float b,float k){
+  float h=clamp(.5+.5*(b-a)/k,0.,1.);
+  return mix(b,a,h)-k*h*(1.-h);
+}
+
+float sdGear(vec3 p,float R,float r,float n,float ang,float tH){
+  p.xz=rot(ang)*p.xz;
+  float theta=atan(p.z,p.x);
+  float tooth=r*tH*pow(max(0.,cos(n*theta)),5.);
+  vec2 q=vec2(length(p.xz)-R,p.y);
+  return length(q)-r-tooth;
+}
+
+float smoothF(float a,float b,float x){
+  float t=clamp((x-a)/(b-a),0.,1.);
+  return t*t*(3.-2.*t);
+}
+
+struct Hit{float d;float id;};
+Hit minH(Hit a,Hit b){
+  Hit r;
+  float sel=step(b.d,a.d);
+  r.d=mix(a.d,b.d,sel);
+  r.id=mix(a.id,b.id,sel);
+  return r;
+}
+
+float actSpd(float base){return base*(1.+uAI*0.4+uAP*0.3);}
+
+Hit map(vec3 p){
+  float t=uT;
+  Hit h; h.d=1e6; h.id=0.;
+
+  float g1=sdGear(p, 3.2, 0.30, 16., actSpd(0.24)*t, 0.75);
+  Hit hg1; hg1.d=g1; hg1.id=1.; h=minH(h,hg1);
+
+  vec3 pv=p; pv.yz=rot(1.5708)*pv.yz;
+  float g2=sdGear(pv, 2.1, 0.22, 12.,-actSpd(0.41)*t, 0.70);
+  Hit hg2; hg2.d=g2; hg2.id=2.; h=minH(h,hg2);
+
+  vec3 pd=p;
+  pd.xy=rot(0.6)*pd.xy;
+  pd.yz=rot(0.9)*pd.yz;
+  float g3=sdGear(pd, 1.55, 0.18, 9., actSpd(0.73)*t, 0.65);
+  Hit hg3; hg3.d=g3; hg3.id=3.; h=minH(h,hg3);
+
+  float g4=sdGear(p, 4.8, 0.22, 24.,-actSpd(0.11)*t, 0.55);
+  Hit hg4; hg4.d=g4; hg4.id=4.; h=minH(h,hg4);
+
+  for(int i=0;i<4;i++){
+    float a=float(i)*1.5708;
+    float py=sin(actSpd(3.)*t+float(i)*1.5708)*0.9;
+    vec3 pp=p-vec3(cos(a)*3.9,py,sin(a)*3.9);
+    Hit hp; hp.d=sdCyl(pp,1.6,0.24); hp.id=5.; h=minH(h,hp);
+    vec3 pr=p-vec3(cos(a)*3.9,py-2.8,sin(a)*3.9);
+    Hit hr; hr.d=sdCyl(pr,1.4,0.09); hr.id=5.; h=minH(h,hr);
+    vec3 pc=p-vec3(cos(a)*3.9,py+1.6,sin(a)*3.9);
+    Hit hc; hc.d=sdBox(pc,vec3(0.26,0.08,0.26)); hc.id=5.; h=minH(h,hc);
+  }
+
+  Hit hcr; hcr.d=sdCyl(vec3(p.x,p.y,p.z),0.1,0.5); hcr.id=6.; h=minH(h,hcr);
+
+  float beat=uBt;
+  float cs=0.48+0.10*sin(t*11.)+0.08*beat;
+  Hit hcore; hcore.d=sdSphere(p,cs); hcore.id=7.; h=minH(h,hcore);
+
+  for(int i=0;i<5;i++){
+    float a=float(i)/5.*TAU+t*0.85+float(i)*0.7;
+    float orb=4.4+sin(t*0.6+float(i))*0.5;
+    float oy=0.9*sin(float(i)+t*0.5);
+    vec3 lp2=p-vec3(cos(a)*orb,oy,sin(a)*orb);
+    Hit hlb; hlb.d=sdSphere(lp2,0.13); hlb.id=8.; h=minH(h,hlb);
+  }
+
+  Hit hfl; hfl.d=p.y+5.8; hfl.id=9.; h=minH(h,hfl);
+
+  return h;
+}
+
+vec3 nrm(vec3 p){
+  vec2 e=vec2(0.002,0.);
+  return normalize(vec3(
+    map(p+e.xyy).d-map(p-e.xyy).d,
+    map(p+e.yxy).d-map(p-e.yxy).d,
+    map(p+e.yyx).d-map(p-e.yyx).d
+  ));
+}
+
+vec3 matCol(float id,vec3 p,vec3 n){
+  if(id<1.5)return vec3(0.25,0.02,0.02);
+  if(id<2.5)return vec3(0.18,0.14,0.01);
+  if(id<3.5)return vec3(0.10,0.18,0.05);
+  if(id<4.5)return vec3(0.20,0.03,0.03);
+  if(id<5.5)return vec3(0.20,0.18,0.16);
+  if(id<6.5)return vec3(0.10,0.08,0.08);
+  if(id>8.5){
+    vec2 gf=fract(p.xz*0.5);
+    float gl2=(1.-smoothstep(0.,.05,min(gf.x,gf.y)))*0.4
+             +(1.-smoothstep(0.,.05,min(1.-gf.x,1.-gf.y)))*0.4;
+    return mix(vec3(0.02,.0,.0),vec3(0.22,.0,.0),gl2);
+  }
+  return vec3(0.1);
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*uR)/uR.y;
+
+  if(uGl>0.001){
+    float gRow=step(.96-uGl*.35,fract(sin(uv.y*97.+uT*11.)*43758.5));
+    uv.x+=gRow*(fract(sin(uT*173.)*100.)-.5)*.10*uGl;
+  }
+
+  float camR=mix(9.,5.,smoothF(0.,4.,uAI+uAP));
+  float camH=mix(3.5,1.5,smoothF(1.,4.,uAI+uAP));
+  float camSpd=mix(.15,.35,smoothF(0.,4.,uAI+uAP));
+  float camA=uT*camSpd;
+
+  if(uAI>=3.5){ camR=4.0+sin(uT*.4)*.5; camH=1.2+sin(uT*.3)*.4; }
+
+  vec3 ro=vec3(cos(camA)*camR, camH+.8*uBt*.15, sin(camA)*camR);
+  vec3 ta=vec3(0.,.4,0.);
+  vec3 fw=normalize(ta-ro);
+  vec3 rt=normalize(cross(fw,vec3(0,1,0)));
+  vec3 up2=cross(rt,fw);
+  vec3 rd=normalize(uv.x*rt+uv.y*up2+1.5*fw);
+
+  float d=.15; Hit h; bool hit=false;
+  for(int i=0;i<100;i++){
+    h=map(ro+rd*d);
+    if(h.d<EPS){hit=true;break;}
+    if(d>50.)break;
+    d+=h.d*.78;
+  }
+
+  vec3 col=vec3(0.012,.0,.0);
+
+  if(hit){
+    vec3 p=ro+rd*d;
+    vec3 n=nrm(p);
+
+    vec3 L1=vec3(0.,5.,0.);
+    vec3 L2=vec3(cos(uT)*5.,1.,sin(uT)*5.);
+    vec3 L3=vec3(-4.,2.,3.);
+
+    float d1=max(dot(n,normalize(L1-p)),0.);
+    float d2=max(dot(n,normalize(L2-p)),0.)*.5;
+    float d3=max(dot(n,normalize(L3-p)),0.)*.3;
+    float diff=d1*.8+d2+d3;
+
+    float spec1=pow(max(dot(reflect(-normalize(L1-p),n),-rd),0.),28.);
+    float spec2=pow(max(dot(reflect(-normalize(L2-p),n),-rd),0.),20.)*.6;
+    float rim=pow(1.-max(dot(n,-rd),0.),2.8);
+
+    if(h.id>6.5&&h.id<7.5){
+      float pulse=.5+.5*sin(uT*12.);
+      col=vec3(2.+pulse*1.5,.0,.0);
+    } else if(h.id>7.5&&h.id<8.5){
+      col=vec3(3.5,2.2,.0);
+    } else {
+      vec3 mc=matCol(h.id,p,n);
+      col=mc*(diff*.9+.15)
+          +vec3(.9,.05,.0)*(spec1+spec2)*.55
+          +vec3(.7,.0,.0)*rim*.22;
+    }
+
+    col*=(.55+.45*clamp(1.-d*.022,0.,1.));
+  }
+
+  float fog=1.-exp(-d*.07);
+  col=mix(col,vec3(.014,.0,.0),fog);
+
+  float caAmt=.002+uGl*.015;
+  col.r*=1.+caAmt*2.;
+  col.b*=1.-caAmt;
+
+  float vig=1.-dot(uv*.9,uv*.9);
+  col*=max(vig,0.)*.6+.4;
+
+  col+=vec3(.15,.0,.0)*uBt;
+
+  col=pow(clamp(col,0.,1.),vec3(.4545));
+  gl_FragColor=vec4(col,1.);
+}
+`;
+
+function mkShader(src,type){
+  const s=gl.createShader(type);
+  gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))
+    console.error('Shader error:',gl.getShaderInfoLog(s));
+  return s;
+}
+const prog=gl.createProgram();
+gl.attachShader(prog,mkShader(VS,gl.VERTEX_SHADER));
+gl.attachShader(prog,mkShader(FS,gl.FRAGMENT_SHADER));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS))
+  console.error('Program error:',gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const vBuf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,vBuf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+const aP=gl.getAttribLocation(prog,'aP');
+gl.enableVertexAttribArray(aP);
+gl.vertexAttribPointer(aP,2,gl.FLOAT,false,0,0);
+
+const U={};
+['uR','uT','uBt','uGl','uAI','uAP'].forEach(n=>U[n]=gl.getUniformLocation(prog,n));
+gl.uniform2f(U.uR,W,H);
+
+let T0=null, RAF=null, lastT=0;
+
+function frame(ts){
+  if(!T0) T0=ts;
+  const t=(ts-T0)/1000;
+  lastT=t;
+
+  let act,actP;
+  if(t<8)        {act=0;actP=t/8;}
+  else if(t<13)  {act=1;actP=(t-8)/5;}
+  else if(t<30)  {act=2;actP=(t-13)/17;}
+  else if(t<40)  {act=3;actP=(t-30)/10;}
+  else           {act=4;actP=Math.min((t-40)/32,1);}
+
+  const beatPhase=(t/BP)%1;
+  const beatPulse=Math.max(0,1-beatPhase*6);
+
+  let glitch=0;
+  if(Math.random()<0.015) glitch=0.3+Math.random()*0.7;
+  if(act>=4 && Math.random()<(actP*0.04)) glitch=Math.random();
+
+  gl.viewport(0,0,W,H);
+  gl.uniform1f(U.uT,t);
+  gl.uniform1f(U.uBt,beatPulse);
+  gl.uniform1f(U.uGl,glitch);
+  gl.uniform1f(U.uAI,act);
+  gl.uniform1f(U.uAP,actP);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+
+  RAF=requestAnimationFrame(frame);
+}
+
+function restart(){
+  if(RAF) cancelAnimationFrame(RAF);
+  T0=null; lastT=0;
+  RAF=requestAnimationFrame(frame);
+}
+
+document.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='r'||k==='к') restart();
+});
+
+restart();
+</script>
+</body>
+</html>

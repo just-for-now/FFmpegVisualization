@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ВТОРАЯ ПРОБЛЕМА</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; }
+canvas { display:block; position:absolute; top:0; left:0; image-rendering:pixelated; }
+#bpm-ui {
+  position: fixed;
+  bottom: 12px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0,0,0,0.5);
+  padding: 6px 10px;
+  font-family: 'Share Tech Mono', monospace;
+  color: #3d0000;
+  font-size: 13px;
+  z-index: 100;
+  user-select: none;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+#bpm-ui:hover { opacity: 1; }
+#bpm-ui button {
+  background: none;
+  border: none;
+  color: #7a0000;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px;
+  width: 18px;
+  cursor: pointer;
+  padding: 0;
+}
+#bpm-ui button:hover { color: #e50000; }
+#bpm-val {
+  color: #8b0000;
+  font-size: 13px;
+  min-width: 36px;
+  text-align: center;
+}
+#bpm-ui input[type=range] {
+  -webkit-appearance: none;
+  width: 80px;
+  height: 2px;
+  background: #1a0000;
+  outline: none;
+  cursor: pointer;
+}
+#bpm-ui input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 8px;
+  background: #7a0000;
+  border-radius: 0;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bpm-ui"><span>BPM</span><button id="bpm-dn">−</button><span id="bpm-val">200</span><button id="bpm-up">+</button><input type="range" id="bpm-slider" min="60" max="400" value="200"></div>
+<script>
+// ─── CONSTANTS ────────────────────────────────────────────────
+const W = 2560, H = 1440;
+let BPM = 200;
+let SPB = 60 / BPM;
+let MS_BEAT = SPB * 1000;
+
+const c = document.getElementById('c');
+c.width = W; c.height = H;
+const g = c.getContext('2d');
+
+// fit canvas to viewport
+function fitCanvas() {
+  const sx = window.innerWidth / W, sy = window.innerHeight / H;
+  const s = Math.min(sx, sy);
+  c.style.width  = (W * s) + 'px';
+  c.style.height = (H * s) + 'px';
+  c.style.left   = ((window.innerWidth  - W * s) / 2) + 'px';
+  c.style.top    = ((window.innerHeight - H * s) / 2) + 'px';
+}
+fitCanvas();
+window.addEventListener('resize', fitCanvas);
+
+// ─── FONTS ────────────────────────────────────────────────────
+const fl = document.createElement('link');
+fl.rel = 'stylesheet';
+fl.href = 'https://fonts.googleapis.com/css2?family=Russo+One&family=Share+Tech+Mono&family=IBM+Plex+Mono:ital,wght@0,400;0,700;1,400&display=swap';
+document.head.appendChild(fl);
+
+// ─── PALETTE ──────────────────────────────────────────────────
+const R = {
+  BLACK:   '#000000',
+  DEEP:    '#0d0000',
+  DARK:    '#1a0000',
+  MID:     '#3d0000',
+  BLOOD:   '#7a0000',
+  CRIMSON: '#b00015',
+  RED:     '#e50000',
+  BRIGHT:  '#ff2222',
+  HOT:     '#ff5500',
+  WHITE:   '#ffffff',
+  GREY:    '#4a0808',
+};
+
+function rc(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+
+// ─── MATH / BEAT UTILS ────────────────────────────────────────
+function beatPhase(tSec) {
+  const pos = (tSec % SPB) / SPB;
+  if (pos < 0.04) return pos / 0.04;
+  return Math.max(0, Math.pow(1 - (pos - 0.04) / 0.45, 2));
+}
+
+function halfBeat(tSec) {
+  const pos = (tSec % (SPB * 0.5)) / (SPB * 0.5);
+  if (pos < 0.04) return pos / 0.04;
+  return Math.max(0, Math.pow(1 - (pos - 0.04) / 0.40, 2));
+}
+
+function beatCount(tSec) { return Math.floor(tSec / SPB); }
+
+function ease(t, p=3) { return 1 - Math.pow(1 - t, p); }
+function easeIn(t, p=2) { return Math.pow(t, p); }
+function clamp(v,a,b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a,b,t) { return a + (b-a)*t; }
+
+// ─── SAFE ARC ────────────────────────────────────────────────
+function arc(x, y, r, a0, a1, ccw) {
+  g.arc(x, y, Math.max(0.1, r), a0, a1, ccw);
+}
+
+// ─── NOISE ───────────────────────────────────────────────────
+function hash(n) {
+  n = Math.sin(n) * 43758.5453;
+  return n - Math.floor(n);
+}
+function noise2(x, y) {
+  return hash(x * 127.1 + y * 311.7);
+}
+
+// ─── TEXT UTILS ──────────────────────────────────────────────
+function setText(txt, x, y, size, color, align='center', font='Russo One') {
+  g.font = `${size}px '${font}'`;
+  g.textAlign = align;
+  g.textBaseline = 'middle';
+  g.fillStyle = color;
+  g.fillText(txt, x, y);
+}
+
+function glowText(txt, x, y, size, col, glowCol, glowR, alpha, font='Russo One') {
+  g.save();
+  g.globalAlpha = alpha;
+  g.font = `${size}px '${font}'`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = glowCol;
+  g.shadowBlur = glowR;
+  g.fillStyle = col;
+  g.fillText(txt, x, y);
+  g.shadowBlur = glowR * 2;
+  g.fillText(txt, x, y);
+  g.shadowBlur = 0;
+  g.restore();
+}
+
+function glitchText(txt, x, y, size, alpha, t) {
+  // RGB split glitch
+  g.save();
+  g.globalAlpha = alpha * 0.6;
+  g.font = `${size}px 'Russo One'`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  const off = 6 + Math.sin(t * 47) * 8;
+  g.fillStyle = `rgba(255,0,0,0.7)`;
+  g.fillText(txt, x - off, y + 2);
+  g.fillStyle = `rgba(0,255,200,0.7)`;
+  g.fillText(txt, x + off, y - 2);
+  g.globalAlpha = alpha;
+  g.fillStyle = R.WHITE;
+  g.fillText(txt, x, y);
+  g.restore();
+}
+
+// ─── SCANLINES ────────────────────────────────────────────────
+function scanlines() {
+  g.save();
+  g.globalAlpha = 0.12;
+  g.fillStyle = '#000';
+  for (let y = 0; y < H; y += 3) g.fillRect(0, y, W, 1);
+  g.restore();
+}
+
+function vignette() {
+  const v = g.createRadialGradient(W/2,H/2,H*0.25, W/2,H/2,H*0.85);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.85)');
+  g.fillStyle = v;
+  g.fillRect(0,0,W,H);
+}
+
+// ─── DATA TICKER ─────────────────────────────────────────────
+const TICKER_ITEMS = [
+  'PATENT::UNISYS/GIF 1994',
+  'PATENT::FORGENT/JPEG 2002',
+  'PATENT::ALCATEL/MP3 2007',
+  'MPEG-LA POOL ACTIVE',
+  'SUBLICENSING REQUIRED',
+  'ENFORCEMENT PENDING',
+  '35 U.S.C. § 154',
+  'PRIOR ART: UNKNOWN',
+  'ROYALTY: $12-20/UNIT',
+  'TRAP STATUS: ARMED',
+  'DEVELOPER: UNAWARE',
+  'EXIT: NONE',
+];
+
+function drawTicker(tSec) {
+  g.save();
+  g.font = `26px 'Share Tech Mono'`;
+  g.textBaseline = 'middle';
+  const str = TICKER_ITEMS.join('   //   ') + '   //   ';
+  const charW = 15.6;
+  const totalW = str.length * charW;
+  const offset = (tSec * 120) % totalW;
+  g.fillStyle = rc(R.BLOOD, 0.5);
+  g.fillText(str + str, -offset + 20, H - 35);
+  g.restore();
+}
+
+// ═══════════════════════════════════════════════════════════
+// BLOCK 1: 0–11s  "ВТОРАЯ ПРОБЛЕМА"
+//
+// Concept: A developer walks forward through darkness.
+// Tripwires — glowing patent lines — stretch across the
+// floor invisibly. As the camera pulls back, more and more
+// wires appear. The word TRAP is built from the wire grid.
+// Final phrase: text burns in like acid.
+// ═══════════════════════════════════════════════════════════
+
+// Grid of patent trip-wires
+const WIRES = [];
+(function buildWires() {
+  // Horizontal wires across screen
+  for (let i = 0; i < 28; i++) {
+    WIRES.push({
+      type: 'h',
+      y: 80 + i * 48,
+      x0: -100,
+      x1: W + 100,
+      phase: Math.random() * Math.PI * 2,
+      bright: Math.random() > 0.7,
+      label: TICKER_ITEMS[i % TICKER_ITEMS.length],
+      labelX: 60 + Math.random() * (W - 200),
+      delay: i * 0.08,
+    });
+  }
+  // Vertical wires
+  for (let i = 0; i < 50; i++) {
+    WIRES.push({
+      type: 'v',
+      x: 30 + i * 51,
+      y0: -100,
+      y1: H + 100,
+      phase: Math.random() * Math.PI * 2,
+      bright: Math.random() > 0.8,
+      delay: i * 0.05,
+    });
+  }
+})();
+
+// Code stream columns (matrix-rain style but with patent numbers)
+const PATENT_CHARS = '0123456789ABCDEF§©™$%/.,-_=+[]{}|<>?!*&#';
+const PATENT_LABELS = [
+  'US5,319,712', 'US6,185,312', 'US4,972,484', 'US7,036,011',
+  'US6,847,990', 'US5,379,345', 'US6,728,775', 'EP0615384',
+  'US4,698,672', 'US6,212,236', 'US5,583,562', 'US6,377,628',
+];
+const STREAMS = [];
+for (let i = 0; i < 60; i++) {
+  STREAMS.push({
+    x: (i / 60) * W,
+    y: Math.random() * H,
+    speed: 80 + Math.random() * 200,
+    chars: Array.from({length: 20}, () => PATENT_CHARS[Math.floor(Math.random()*PATENT_CHARS.length)]),
+    label: PATENT_LABELS[i % PATENT_LABELS.length],
+    alpha: 0.1 + Math.random() * 0.3,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function drawBlock1(tSec) {
+  const bp = beatPhase(tSec);
+  const hb = halfBeat(tSec);
+
+  // ── BG: multi-layer kinetic background ──
+  // Layer 1: pure black base
+  g.fillStyle = R.BLACK;
+  g.fillRect(0, 0, W, H);
+
+  // Layer 2: large diagonal grid of patent IDs — slow drift
+  {
+    const drift = tSec * 18;
+    const gSize = 160;
+    g.save();
+    g.font = `18px 'Share Tech Mono'`;
+    g.textBaseline = 'middle';
+    const patGrid = [
+      'US5319712','EP0615384','US6185312','US4972484',
+      'US7036011','US6847990','US5379345','US6728775',
+      'US4698672','US6212236','US5583562','US6377628',
+    ];
+    for (let row = -2; row < H/gSize + 2; row++) {
+      for (let col = -2; col < W/gSize + 3; col++) {
+        const ox = (col * gSize + (row % 2) * gSize * 0.5 + drift) % (W + gSize * 2) - gSize;
+        const oy = row * gSize * 0.75;
+        const idx = (Math.abs(row * 7 + col * 13)) % patGrid.length;
+        // Occasional bright node
+        const isBright = hash(col * 3.1 + row * 7.9) > 0.88;
+        g.fillStyle = isBright
+          ? rc(R.BLOOD, 0.18 + bp * 0.25)
+          : rc(R.MID,   0.06);
+        g.textAlign = 'center';
+        g.fillText(patGrid[idx], ox, oy);
+      }
+    }
+    g.restore();
+  }
+
+  // Layer 3: horizontal CRT-style scan bands that slide on beat
+  {
+    const bandCount = 7;
+    g.save();
+    for (let b = 0; b < bandCount; b++) {
+      const phase = (b / bandCount);
+      // Each band at a fixed Y, width modulated by beat
+      const bandY = (phase * H + tSec * 40 * (b % 2 === 0 ? 1 : -1)) % H;
+      const bandH = 2 + bp * (b % 3 === 0 ? 8 : 3);
+      const bandAlpha = 0.06 + bp * (b % 3 === 0 ? 0.18 : 0.08);
+      g.fillStyle = rc(R.RED, bandAlpha);
+      g.fillRect(0, bandY, W, bandH);
+      // Mirror band
+      g.fillRect(0, H - bandY - bandH, W, bandH);
+    }
+    g.restore();
+  }
+
+  // Layer 4: vertical glitch slices that flash on beats
+  if (bp > 0.6) {
+    g.save();
+    const sliceCount = 3 + Math.floor(bp * 5);
+    for (let s = 0; s < sliceCount; s++) {
+      const sx = hash(s * 17.3 + beatCount(tSec) * 0.7) * W;
+      const sw = 2 + hash(s * 5.1) * 40;
+      g.fillStyle = rc(R.BLOOD, bp * 0.25);
+      g.fillRect(sx, 0, sw, H);
+    }
+    g.restore();
+  }
+
+  // Layer 5: radial vortex — dark red hot-spot that breathes
+  {
+    const vox = W/2 + Math.sin(tSec * 0.3) * 80;
+    const voy = H/2 + Math.cos(tSec * 0.2) * 50;
+    const vg = g.createRadialGradient(vox, voy, 0, vox, voy, 700 + bp * 120);
+    vg.addColorStop(0,   rc(R.MID,   0.55 + bp * 0.25));
+    vg.addColorStop(0.35,rc(R.DARK,  0.35));
+    vg.addColorStop(1,   rc(R.BLACK, 0));
+    g.fillStyle = vg;
+    g.fillRect(0, 0, W, H);
+  }
+
+  // Beat flash — aggressive
+  if (bp > 0.05) {
+    g.fillStyle = rc(R.MID, bp * 0.5);
+    g.fillRect(0, 0, W, H);
+  }
+
+  // ── CODE RAIN (always running, patent numbers) ──
+  g.save();
+  for (const s of STREAMS) {
+    s.y += s.speed * (1/60);
+    if (s.y > H + 400) s.y = -400;
+    const alpha = s.alpha * clamp(tSec / 1.5, 0, 1);
+    g.font = `22px 'Share Tech Mono'`;
+    g.textAlign = 'center';
+    for (let j = 0; j < s.chars.length; j++) {
+      if (Math.random() < 0.02) s.chars[j] = PATENT_CHARS[Math.floor(Math.random()*PATENT_CHARS.length)];
+      const cy = s.y - j * 28;
+      if (cy < -30 || cy > H + 30) continue;
+      const fade = j === 0 ? 1 : (1 - j / s.chars.length) * 0.6;
+      g.fillStyle = j === 0 ? rc(R.RED, alpha * fade) : rc(R.BLOOD, alpha * fade * 0.5);
+      g.fillText(s.chars[j], s.x, cy);
+    }
+    // Patent label at head
+    if (tSec > 1.5) {
+      g.font = `18px 'Share Tech Mono'`;
+      g.fillStyle = rc(R.CRIMSON, alpha * 0.4);
+      g.fillText(s.label, s.x, s.y + 14);
+    }
+  }
+  g.restore();
+
+  // ── WIRE GRID — appears progressively ──
+  g.save();
+  const wireReveal = clamp((tSec - 0.5) / 5, 0, 1);
+  for (const w of WIRES) {
+    const wAlpha = clamp((tSec - 0.5 - w.delay) / 0.4, 0, 1) * wireReveal;
+    if (wAlpha <= 0) continue;
+    const pulse = 0.15 + hb * 0.4;
+    if (w.type === 'h') {
+      g.strokeStyle = w.bright
+        ? rc(R.RED, wAlpha * (0.25 + bp * 0.5))
+        : rc(R.MID, wAlpha * 0.12);
+      g.lineWidth = w.bright ? 1.5 + bp * 2 : 0.5;
+      if (w.bright) { g.shadowBlur = 8 + bp * 12; g.shadowColor = R.RED; }
+      g.beginPath(); g.moveTo(w.x0, w.y); g.lineTo(w.x1, w.y); g.stroke();
+      g.shadowBlur = 0;
+      // Label on bright wires
+      if (w.bright && tSec > 3 && wAlpha > 0.5) {
+        g.font = `20px 'Share Tech Mono'`;
+        g.textAlign = 'left';
+        g.fillStyle = rc(R.CRIMSON, wAlpha * 0.5);
+        g.fillText(w.label, w.labelX, w.y - 10);
+      }
+    } else {
+      g.strokeStyle = w.bright
+        ? rc(R.BLOOD, wAlpha * (0.2 + bp * 0.3))
+        : rc(R.MID, wAlpha * 0.08);
+      g.lineWidth = w.bright ? 1 : 0.5;
+      g.beginPath(); g.moveTo(w.x, w.y0); g.lineTo(w.x, w.y1); g.stroke();
+    }
+  }
+  g.restore();
+
+  // ── ПЕРЕКРЕСТЬЯ — узлы сетки вспыхивают на битах (символы) ──
+  if (tSec > 2 && bp > 0.3) {
+    g.save();
+    const gridStep = 51;
+    const rows = Math.floor(H / 48);
+    const nodeSyms = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'K', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'X', 'Z'];
+    for (let col = 0; col < 50; col++) {
+      for (let row = 0; row < rows; row++) {
+        if (hash(col * 7.3 + row * 13.1 + beatCount(tSec)) > 0.93) {
+          const nx = col * gridStep;
+          const ny = 80 + row * 48;
+          const sym = nodeSyms[Math.floor(hash(col * 3.7 + row) * nodeSyms.length)];
+          const sz = 18 + bp * 14;
+          g.font = `${sz}px 'Share Tech Mono'`;
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillStyle = rc(R.RED, bp * 0.9);
+          g.shadowBlur = 14;
+          g.shadowColor = R.RED;
+          g.fillText(sym, nx, ny);
+          g.shadowBlur = 0;
+        }
+      }
+    }
+    g.restore();
+  }
+
+  // ── ТЕКСТ: строки из сценария ──
+  const lines = [
+    { t: 0.1, d: 2.5,  txt: 'ВТОРАЯ ПРОБЛЕМА',                          y: H*0.48, sz: 200, bold: true },
+    { t: 2.8, d: 4.8,  txt: 'НЕ ЗАВИСЕЛ НИ ОТ ОДНОЙ КОРПОРАЦИИ.',       y: H*0.48, sz: 80 },
+    { t: 4.8, d: 7.5,  txt: 'НАПИСАЛ ВСЁ С НУЛЯ.',                      y: H*0.48, sz: 96 },
+    { t: 7.5, d: 9.5,  txt: 'ТЫ ВСЁ РАВНО БЫЛ В ЛОВУШКЕ —',            y: H*0.48, sz: 96 },
+    { t: 9.5, d: 12.0, txt: 'ПРОСТО ЕЩЁ НЕ ЗНАЛ ОБ ЭТОМ.',             y: H*0.48, sz: 96 },
+  ];
+
+  for (const line of lines) {
+    if (tSec < line.t || tSec > line.d + 1.2) continue;
+    const inA = clamp((tSec - line.t) / 0.06, 0, 1);
+    const outA = tSec > line.d + 0.05 ? 0 : 1;
+    const a = inA * outA;
+
+    if (line.bold) {
+      // First line: HUGE, glitch on beat
+      if (bp > 0.5) {
+        glitchText(line.txt, W/2, line.y, line.sz, a, tSec);
+      } else {
+        glowText(line.txt, W/2, line.y, line.sz, R.WHITE, R.RED, 40, a);
+      }
+    } else {
+      glowText(line.txt, W/2, line.y, line.sz, R.WHITE, R.RED, 20, a);
+    }
+  }
+
+  // ── ЛОВУШКА — финальная вспышка ──
+  if (tSec > 9.0 && tSec < 12.0) {
+    const tf = clamp((tSec - 9.0) / 0.5, 0, 1);
+    const fo = tSec > 10.5 ? clamp(1 - (tSec - 10.5) / 1.5, 0, 1) : 1;
+    // Giant "TRAP" text behind everything
+    g.save();
+    g.globalAlpha = tf * fo * 0.12;
+    g.font = `600px 'Russo One'`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = R.BLOOD;
+    g.fillText('TRAP', W/2, H/2 + 80);
+    g.restore();
+  }
+
+  // ── ВЕРТИКАЛЬНЫЕ ДАННЫЕ по краям ──
+  if (tSec > 1) {
+    g.save();
+    g.font = `24px 'Share Tech Mono'`;
+    g.textBaseline = 'top';
+    const sideAlpha = clamp((tSec - 1) / 1.5, 0, 1) * 0.35;
+    g.fillStyle = rc(R.BLOOD, sideAlpha);
+    // Left column
+    const leftItems = ['PATENT::ACTIVE','ROYALTY::DUE','LICENSE::REQUIRED','VIOLATION::PENDING','STATUS::TRAPPED','ESCAPE::NULL','///','UNISYS/GIF','FORGENT/JPEG','ALCATEL/MP3','MPEG-LA/H264'];
+    for (let i = 0; i < leftItems.length; i++) g.fillText(leftItems[i], 40, 120 + i * 60);
+    // Right column
+    g.textAlign = 'right';
+    const rightItems = ['US5319712','US6185312','US4972484','US7036011','US6847990','US5379345','///','EP0615384','US4698672','US6212236','US5583562'];
+    for (let i = 0; i < rightItems.length; i++) g.fillText(rightItems[i], W - 40, 120 + i * 60);
+    g.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BLOCK 2: 11–21s  "Кьяриглионе и Ясуда, 1988"
+//
+// Concept: Two terminals. Left = Italy (white). Right = Japan (red).
+// They type simultaneously. Each line of typing builds the
+// structure of MPEG between them — a machine blueprint.
+// The blueprint grows as a technical schematic,
+// then at "основывают MPEG" — a hard cut, the logo BURNS in.
+// ═══════════════════════════════════════════════════════════
+
+const ITALY_LINES = [
+  '> INITIATING CODEC STANDARD PROPOSAL...',
+  '> FRAGMENTATION INDEX: 0.94 [CRITICAL]',
+  '> SOLUTION: UNIFIED COMPRESSION STANDARD',
+  '> CONTRIBUTOR: L. CHIARIGLIONE / CSELT',
+  '> LOCATION: ROME, ITALY',
+  '> PROPOSAL: MPEG STANDARD v0.0.1',
+  '> WAITING FOR CO-AUTHOR...',
+];
+const JAPAN_LINES = [
+  '> システム起動 / SYSTEM BOOT',
+  '> フラグメンテーション検出 / FRAGMENTATION DETECTED',
+  '> 解決策: 統一ビデオ標準 / UNIFIED VIDEO STD',
+  '> 貢献者: H. YASUDA / NTT',
+  '> 場所: TOKYO, JAPAN',
+  '> CO-AUTHORING: MPEG STANDARD',
+  '> CONNECTION ESTABLISHED.',
+];
+
+// Blueprint schematic nodes
+const SCHEMATIC = [];
+(function buildSchematic() {
+  const cx = W / 2, cy = H / 2 + 30;
+  const layers = [
+    { label: 'MPEG STANDARD', nodes: [{x:0, y:0}], r: 0 },
+    { label: '', nodes: [{x:-300,y:-140},{x:0,y:-180},{x:300,y:-140}], r: 1 },
+    { label: '', nodes: [{x:-480,y:0},{x:-240,y:40},{x:240,y:40},{x:480,y:0}], r: 2 },
+    { label: '', nodes: [{x:-520,y:160},{x:-180,y:190},{x:180,y:190},{x:520,y:160}], r: 3 },
+  ];
+  const nodeLabels = [
+    'CODEC', 'CONTAINER', 'BITSTREAM',
+    'VIDEO', 'AUDIO', 'META', 'SYNC',
+    'ENCODE', 'DECODE', 'PATENT', 'ROYALTY', 'LICENSE',
+  ];
+  let idx = 0;
+  for (const layer of layers) {
+    for (const n of layer.nodes) {
+      SCHEMATIC.push({
+        x: cx + n.x, y: cy + n.y,
+        label: nodeLabels[idx++ % nodeLabels.length],
+        ring: layer.r,
+        delay: layer.r * 0.6 + Math.random() * 0.3,
+      });
+    }
+  }
+  // Add edges between adjacent nodes
+  SCHEMATIC.edges = [];
+  for (let i = 0; i < SCHEMATIC.length; i++) {
+    for (let j = i+1; j < SCHEMATIC.length; j++) {
+      const dx = SCHEMATIC[i].x - SCHEMATIC[j].x;
+      const dy = SCHEMATIC[i].y - SCHEMATIC[j].y;
+      const d = Math.sqrt(dx*dx+dy*dy);
+      if (d < 360 && Math.abs(SCHEMATIC[i].ring - SCHEMATIC[j].ring) <= 1) {
+        SCHEMATIC.edges.push({ a: i, b: j, d });
+      }
+    }
+  }
+})();
+
+function typewriterStr(lines, tSec, startT, charsPerSec = 40) {
+  // Returns array of fully or partially typed lines
+  const result = [];
+  let elapsed = tSec - startT;
+  for (const line of lines) {
+    if (elapsed <= 0) break;
+    const chars = Math.floor(elapsed * charsPerSec);
+    result.push(line.slice(0, Math.min(line.length, chars)));
+    elapsed -= line.length / charsPerSec;
+  }
+  return result;
+}
+
+function drawBlock2(tSec) {
+  const bp = beatPhase(tSec);
+  const localT = tSec; // already offset
+
+  // ── BG ──
+  g.fillStyle = R.BLACK;
+  g.fillRect(0, 0, W, H);
+
+  // Subtle beat pulse
+  if (bp > 0.05) {
+    g.fillStyle = rc(R.MID, bp * 0.5);
+    g.fillRect(0, 0, W, H);
+  }
+
+  // ── DIVIDING LINE ──
+  const divAlpha = clamp(localT / 0.3, 0, 1);
+  g.save();
+  g.strokeStyle = rc(R.BLOOD, divAlpha * (0.3 + bp * 0.4));
+  g.lineWidth = 1 + bp;
+  g.shadowBlur = bp * 8;
+  g.shadowColor = R.RED;
+  g.beginPath(); g.moveTo(W/2, 60); g.lineTo(W/2, H - 60); g.stroke();
+  g.shadowBlur = 0;
+  g.restore();
+
+  // ── LEFT TERMINAL (ITALY) ──
+  g.save();
+  const leftAlpha = clamp(localT / 0.5, 0, 1);
+  g.globalAlpha = leftAlpha;
+
+  // Terminal header
+  g.fillStyle = rc(R.BLOOD, 0.3);
+  g.fillRect(40, 60, W/2 - 80, 60);
+  g.font = `32px 'Share Tech Mono'`;
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillStyle = rc(R.RED, 0.9);
+  g.fillText('CSELT TORINO  //  ITALIA  //  1988', 60, 90);
+  g.strokeStyle = rc(R.BLOOD, 0.5);
+  g.lineWidth = 1;
+  g.strokeRect(40, 60, W/2 - 80, 60);
+
+  // Typed lines
+  const italyLines = typewriterStr(ITALY_LINES, localT, 0.3, 35);
+  g.font = `28px 'Share Tech Mono'`;
+  g.textBaseline = 'top';
+  for (let i = 0; i < italyLines.length; i++) {
+    const lineAlpha = i < italyLines.length - 1 ? 0.6 : 0.95;
+    g.fillStyle = rc(R.BRIGHT, lineAlpha);
+    g.fillText(italyLines[i], 60, 145 + i * 52);
+    // Cursor on last line
+    if (i === italyLines.length - 1 && Math.floor(localT * 3) % 2 === 0) {
+      const tw = g.measureText(italyLines[i]).width;
+      g.fillStyle = rc(R.RED, 0.9);
+      g.fillRect(60 + tw + 3, 145 + i * 52, 14, 28);
+    }
+  }
+  g.restore();
+
+  // ── RIGHT TERMINAL (JAPAN) ──
+  g.save();
+  const rightAlpha = clamp((localT - 0.2) / 0.5, 0, 1);
+  g.globalAlpha = rightAlpha;
+
+  g.fillStyle = rc(R.MID, 0.3);
+  g.fillRect(W/2 + 40, 60, W/2 - 80, 60);
+  g.font = `32px 'Share Tech Mono'`;
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillStyle = rc(R.HOT, 0.9);
+  g.fillText('NTT TOKYO  //  日本  //  1988', W/2 + 60, 90);
+  g.strokeStyle = rc(R.CRIMSON, 0.5);
+  g.lineWidth = 1;
+  g.strokeRect(W/2 + 40, 60, W/2 - 80, 60);
+
+  const japanLines = typewriterStr(JAPAN_LINES, localT, 0.5, 32);
+  g.font = `28px 'Share Tech Mono'`;
+  g.textBaseline = 'top';
+  for (let i = 0; i < japanLines.length; i++) {
+    const lineAlpha = i < japanLines.length - 1 ? 0.5 : 0.95;
+    g.fillStyle = rc(R.HOT, lineAlpha);
+    g.fillText(japanLines[i], W/2 + 60, 145 + i * 52);
+    if (i === japanLines.length - 1 && Math.floor(localT * 3) % 2 === 0) {
+      const tw = g.measureText(japanLines[i]).width;
+      g.fillStyle = rc(R.HOT, 0.9);
+      g.fillRect(W/2 + 60 + tw + 3, 145 + i * 52, 14, 28);
+    }
+  }
+  g.restore();
+
+  // ── SCHEMATIC BLUEPRINT (grows in bottom half) ──
+  const schemStart = 2.0;
+  if (localT > schemStart) {
+    const st = localT - schemStart;
+    g.save();
+
+    // Draw edges first
+    for (const e of SCHEMATIC.edges) {
+      const na = SCHEMATIC[e.a], nb = SCHEMATIC[e.b];
+      const eDelay = Math.max(na.delay, nb.delay);
+      const ea = clamp((st - eDelay) / 0.5, 0, 1);
+      if (ea <= 0) continue;
+      g.strokeStyle = rc(R.MID, ea * (0.4 + bp * 0.3));
+      g.lineWidth = 1 + bp * 0.5;
+      g.shadowBlur = bp * 4;
+      g.shadowColor = R.BLOOD;
+      g.beginPath(); g.moveTo(na.x, na.y); g.lineTo(nb.x, nb.y); g.stroke();
+      g.shadowBlur = 0;
+    }
+
+    // Draw nodes
+    for (const n of SCHEMATIC) {
+      const na = clamp((st - n.delay) / 0.4, 0, 1);
+      if (na <= 0) continue;
+      const nr = Math.max(0.1, 12 + bp * 8) * na;
+      const gc = g.createRadialGradient(n.x, n.y, 0, n.x, n.y, Math.max(0.1, 30 * na));
+      gc.addColorStop(0, rc(n.ring === 0 ? R.WHITE : R.RED, na));
+      gc.addColorStop(1, rc(R.BLOOD, 0));
+      g.fillStyle = gc;
+      g.beginPath(); arc(n.x, n.y, Math.max(0.1, 30 * na), 0, Math.PI*2); g.fill();
+      g.beginPath(); arc(n.x, n.y, Math.max(0.1, nr), 0, Math.PI*2);
+      g.fillStyle = n.ring === 0 ? rc(R.WHITE, na) : rc(R.RED, na);
+      g.shadowBlur = 10 + bp * 15;
+      g.shadowColor = n.ring === 0 ? R.WHITE : R.RED;
+      g.fill();
+      g.shadowBlur = 0;
+
+      // Label
+      if (na > 0.7) {
+        g.font = `20px 'Share Tech Mono'`;
+        g.textAlign = 'center';
+        g.textBaseline = 'top';
+        g.fillStyle = rc(R.GREY, na * 0.8);
+        g.fillText(n.label, n.x, n.y + 16);
+      }
+    }
+    g.restore();
+  }
+
+  // ── "ОСНОВЫВАЮТ MPEG" moment — hard SMASH at ~7s ──
+  if (localT > 7.0) {
+    const mt = localT - 7.0;
+    const smash = clamp(mt / 0.2, 0, 1);
+    const fade = clamp(1 - (mt - 3.0) / 1.0, 0, 1);
+
+    // Flash frame
+    if (mt < 0.15) {
+      g.fillStyle = rc(R.BRIGHT, (0.15 - mt) / 0.15 * 0.6);
+      g.fillRect(0, 0, W, H);
+    }
+
+    // MPEG wordmark
+    g.save();
+    g.globalAlpha = smash * Math.max(fade, 0.05);
+    const mpegScale = 1 + bp * 0.02;
+    g.translate(W/2, H*0.52);
+    g.scale(mpegScale, mpegScale);
+    g.font = `420px 'Russo One'`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.shadowColor = R.RED;
+    g.shadowBlur = 60 + bp * 80;
+    g.fillStyle = R.WHITE;
+    g.fillText('MPEG', 0, 0);
+    g.shadowBlur = 0;
+
+    // Subtitle
+    if (mt > 0.4) {
+      g.font = `52px 'Share Tech Mono'`;
+      g.fillStyle = rc(R.RED, clamp((mt - 0.4) / 0.4, 0, 1));
+      g.fillText('MOVING PICTURE EXPERTS GROUP', 0, 230);
+      g.font = `44px 'Russo One'`;
+      g.fillStyle = rc(R.BRIGHT, clamp((mt - 0.55) / 0.3, 0, 1));
+      g.fillText('ГРУППА ЭКСПЕРТОВ ПО ДВИЖУЩИМСЯ ИЗОБРАЖЕНИЯМ', 0, 295);
+      g.font = `32px 'Share Tech Mono'`;
+      g.fillStyle = rc(R.BLOOD, clamp((mt - 0.7) / 0.4, 0, 1));
+      g.fillText('ОТТАВА  ·  1988', 0, 358);
+    }
+    g.restore();
+  }
+
+  // ── Text subtitles ──
+  const subtitles = [
+    { t: 0.0, d: 6.8,  txt: '1988',  y: H - 240, sz: 160 },
+  ];
+  for (const s of subtitles) {
+    if (localT < s.t || localT > s.d + 0.8) continue;
+    const a = clamp((localT - s.t) / 0.06, 0, 1) * (localT > s.d + 0.05 ? 0 : 1);
+    glowText(s.txt, W/2, s.y, s.sz, R.WHITE, R.RED, 18, a);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BLOCK 3: 21–29s  "Оттава, 15 человек"
+//
+// Concept: A conference room rendered as a top-down
+// blueprint / floorplan. 15 seats appear one by one.
+// Then: the PATENT POOL MECHANISM is visualized as
+// a monster — a many-armed structure that GROWS
+// out of the meeting table, devouring everything.
+// Fragmented bars of competing formats fly in and get
+// EATEN by the pool. Pure body horror bureaucracy.
+// ═══════════════════════════════════════════════════════════
+
+// 15 seat positions around an oval table
+const SEATS = [];
+(function buildSeats() {
+  const cx = W/2, cy = H*0.44;
+  const rx = 380, ry = 200;
+  for (let i = 0; i < 15; i++) {
+    const a = (i / 15) * Math.PI * 2 - Math.PI / 2;
+    SEATS.push({
+      x: cx + Math.cos(a) * rx,
+      y: cy + Math.sin(a) * ry,
+      angle: a,
+      delay: i * 0.18,
+    });
+  }
+})();
+
+// Patent pool arms — tentacle-like structures
+const POOL_ARMS = [];
+for (let i = 0; i < 12; i++) {
+  const angle = (i / 12) * Math.PI * 2;
+  POOL_ARMS.push({
+    angle,
+    length: 200 + Math.random() * 300,
+    speed: 0.3 + Math.random() * 0.5,
+    phase: Math.random() * Math.PI * 2,
+    thickness: 3 + Math.random() * 6,
+  });
+}
+
+
+function drawBlock3(tSec) {
+  const bp = beatPhase(tSec);
+  const localT = tSec;
+
+  // ── BG ──
+  g.fillStyle = R.BLACK;
+  g.fillRect(0, 0, W, H);
+
+  if (bp > 0.05) {
+    g.fillStyle = rc(R.MID, bp * 0.5);
+    g.fillRect(0, 0, W, H);
+  }
+
+  // ── FLOOR PLAN GRID ──
+  g.save();
+  const gridAlpha = clamp(localT / 0.5, 0, 1) * 0.07;
+  g.strokeStyle = rc(R.BLOOD, gridAlpha);
+  g.lineWidth = 1;
+  for (let x = 0; x < W; x += 60) { g.beginPath(); g.moveTo(x,0); g.lineTo(x,H); g.stroke(); }
+  for (let y = 0; y < H; y += 60) { g.beginPath(); g.moveTo(0,y); g.lineTo(W,y); g.stroke(); }
+  g.restore();
+
+  const cx = W/2, cy = H * 0.44;
+
+  // ── CONFERENCE TABLE (top-down oval) ──
+  const tableAlpha = clamp(localT / 0.8, 0, 1);
+  g.save();
+  g.globalAlpha = tableAlpha;
+  // Table fill
+  const tg = g.createRadialGradient(cx, cy, 0, cx, cy, 400);
+  tg.addColorStop(0, rc(R.DARK, 0.9));
+  tg.addColorStop(1, rc(R.BLACK, 0.9));
+  g.fillStyle = tg;
+  g.beginPath(); g.ellipse(cx, cy, 400, 220, 0, 0, Math.PI*2); g.fill();
+  g.strokeStyle = rc(R.BLOOD, 0.4 + bp * 0.3);
+  g.lineWidth = 2 + bp * 2;
+  g.shadowBlur = 8 + bp * 10;
+  g.shadowColor = R.BLOOD;
+  g.stroke();
+  g.shadowBlur = 0;
+
+  // Blueprint cross-hairs on table
+  g.strokeStyle = rc(R.MID, 0.2);
+  g.lineWidth = 1;
+  g.setLineDash([8, 8]);
+  g.beginPath(); g.moveTo(cx - 380, cy); g.lineTo(cx + 380, cy); g.stroke();
+  g.beginPath(); g.moveTo(cx, cy - 210); g.lineTo(cx, cy + 210); g.stroke();
+  g.setLineDash([]);
+
+  // Table label
+  g.font = `24px 'Share Tech Mono'`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = rc(R.GREY, 0.4);
+  g.fillText('OTTAWA  //  1988  //  MPEG FOUNDING MEETING', cx, cy);
+  g.restore();
+
+  // ── 15 SEATS appear one by one ──
+  const seatsStart = 0.5;
+  for (let i = 0; i < 15; i++) {
+    const s = SEATS[i];
+    const sa = clamp((localT - seatsStart - s.delay) / 0.3, 0, 1);
+    if (sa <= 0) continue;
+
+    const PERSON_SYMBOLS = ['◆','▲','◉','✦','◈','▶','◀','▼','◇','△','▷','◁','✧','◎','✦'];
+    const sym = PERSON_SYMBOLS[i % PERSON_SYMBOLS.length];
+    g.save();
+    g.globalAlpha = sa;
+
+    // Glow halo
+    const sg = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, Math.max(0.1, 50));
+    sg.addColorStop(0, rc(R.RED, 0.25 + bp * 0.3));
+    sg.addColorStop(1, rc(R.BLOOD, 0));
+    g.fillStyle = sg;
+    g.beginPath(); arc(s.x, s.y, Math.max(0.1, 50 + bp * 12), 0, Math.PI*2); g.fill();
+
+    // Symbol
+    const symSize = 36 + bp * 8;
+    g.font = `${symSize}px 'Share Tech Mono'`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = rc(R.RED, 0.9 + bp * 0.1);
+    g.shadowBlur = 12 + bp * 14;
+    g.shadowColor = R.RED;
+    g.fillText(sym, s.x, s.y);
+    g.shadowBlur = 0;
+
+    // Number below
+    g.font = `16px 'Share Tech Mono'`;
+    g.fillStyle = rc(R.GREY, 0.6);
+    g.fillText(`${i+1}`, s.x, s.y + 30);
+    g.restore();
+  }
+
+  // ── PATENT POOL MONSTER grows after all seats appear ──
+  const poolStart = 4.5;
+  if (localT > poolStart) {
+    const pt = localT - poolStart;
+    const poolGrowth = clamp(pt / 2.5, 0, 1);
+
+    g.save();
+
+    // Pool core — pulsing at center of table
+    const poolR = Math.max(0.1, 60 + poolGrowth * 140 + bp * 20);
+    const pg = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(0.1, poolR * 1.5));
+    pg.addColorStop(0, rc(R.RED, 0.8 * poolGrowth));
+    pg.addColorStop(0.4, rc(R.BLOOD, 0.5 * poolGrowth));
+    pg.addColorStop(1, rc(R.BLACK, 0));
+    g.fillStyle = pg;
+    g.beginPath(); arc(cx, cy, Math.max(0.1, poolR * 1.5), 0, Math.PI*2); g.fill();
+
+    g.fillStyle = rc(R.RED, 0.9 * poolGrowth);
+    g.shadowBlur = 30 + bp * 40;
+    g.shadowColor = R.RED;
+    g.beginPath(); arc(cx, cy, Math.max(0.1, poolR * 0.5 + bp * 15), 0, Math.PI*2); g.fill();
+    g.shadowBlur = 0;
+
+    // Pool label
+    if (poolGrowth > 0.4) {
+      const pl = clamp((poolGrowth - 0.4) / 0.3, 0, 1);
+      g.font = `32px 'Russo One'`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillStyle = rc(R.WHITE, pl);
+      g.shadowBlur = 10;
+      g.shadowColor = R.RED;
+      g.fillText('PATENT POOL', cx, cy - 8);
+      g.font = `20px 'Share Tech Mono'`;
+      g.fillStyle = rc(R.CRIMSON, pl * 0.8);
+      g.fillText('MPEG-LA', cx, cy + 22);
+      g.shadowBlur = 0;
+    }
+
+    // Tentacle arms
+    for (const arm of POOL_ARMS) {
+      const wave = Math.sin(pt * arm.speed + arm.phase) * 0.4;
+      const actualAngle = arm.angle + wave * (pt * 0.3);
+      const armLen = arm.length * poolGrowth;
+      const endX = cx + Math.cos(actualAngle) * armLen;
+      const endY = cy + Math.sin(actualAngle) * armLen;
+      const midX = cx + Math.cos(actualAngle + wave) * armLen * 0.5;
+      const midY = cy + Math.sin(actualAngle + wave) * armLen * 0.5;
+
+      const ag = g.createLinearGradient(cx, cy, endX, endY);
+      ag.addColorStop(0, rc(R.BLOOD, 0.7 * poolGrowth));
+      ag.addColorStop(1, rc(R.BLOOD, 0));
+      g.strokeStyle = ag;
+      g.lineWidth = Math.max(0.1, arm.thickness * poolGrowth * (1 + bp * 0.5));
+      g.shadowBlur = 6 * poolGrowth;
+      g.shadowColor = R.RED;
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.quadraticCurveTo(midX, midY, endX, endY);
+      g.stroke();
+      g.shadowBlur = 0;
+    }
+    g.restore();
+  }
+
+  // ── MARKET FRAGMENTATION: shards scattered → converge ──
+  // Phase 1 (0–3.5s): shards scattered across screen, spinning, chaotic
+  // Phase 2 (3.5–6s): shards start drifting toward center (the meeting table)
+  // Phase 3 (6s+): shards lock together — ЕДИНЫЙ ЯЗЫК
+  {
+    const SHARD_DEFS = [
+      { ox:-900, oy:-320, rot:0.8,  w:260, h:90,  label:'QUICKTIME',    col: R.BLOOD   },
+      { ox: 760, oy:-280, rot:-0.5, w:220, h:80,  label:'WMV',    col: R.MID     },
+      { ox:-820, oy: 200, rot: 1.2, w:200, h:100, label:'REALVIDEO',    col: R.CRIMSON },
+      { ox: 850, oy: 160, rot:-0.9, w:240, h:85,  label:'AVI',    col: R.BLOOD   },
+      { ox:-400, oy:-420, rot: 0.4, w:180, h:75,  label:'DIVX',    col: R.MID     },
+      { ox: 300, oy:-450, rot:-1.1, w:200, h:90,  label:'FLASH',    col: R.CRIMSON },
+      { ox:-600, oy: 380, rot: 0.7, w:170, h:80,  label:'3GP',    col: R.BLOOD   },
+      { ox: 550, oy: 360, rot:-0.6, w:190, h:85,  label:'ASF',    col: R.MID     },
+      { ox:   0, oy:-500, rot: 0.2, w:160, h:70,  label:'MPEG-1',    col: R.CRIMSON },
+    ];
+
+    const shardPhase1End = 3.5;
+    const shardPhase2End = 6.2;
+    const shardLockTime  = 6.5;
+
+    let globalConvergeT = 0;
+    if (localT > shardPhase1End) {
+      globalConvergeT = clamp((localT - shardPhase1End) / (shardPhase2End - shardPhase1End), 0, 1);
+      globalConvergeT = ease(globalConvergeT, 3);
+    }
+    let globalLockT = 0;
+    if (localT > shardLockTime) {
+      globalLockT = clamp((localT - shardLockTime) / 0.6, 0, 1);
+      globalLockT = ease(globalLockT, 2);
+    }
+
+    for (let i = 0; i < SHARD_DEFS.length; i++) {
+      const sd = SHARD_DEFS[i];
+      const sDelay = i * 0.12;
+      const sAlpha = clamp((localT - sDelay) / 0.3, 0, 1);
+      if (sAlpha <= 0) continue;
+
+      const convergeT = globalConvergeT;
+      const lockT     = globalLockT;
+
+      // Locked position: spread evenly in a ring
+      const lockAngle = (i / SHARD_DEFS.length) * Math.PI * 2;
+      const lockR = 520;
+      const lockX = cx + Math.cos(lockAngle) * lockR;
+      const lockY = cy + Math.sin(lockAngle) * lockR * 0.55;
+
+      const scatterX = cx + sd.ox;
+      const scatterY = cy + sd.oy;
+      const convergeX = lerp(scatterX, cx + sd.ox * 0.15, convergeT);
+      const convergeY = lerp(scatterY, cy + sd.oy * 0.15, convergeT);
+      const finalX    = lerp(convergeX, lockX, lockT);
+      const finalY    = lerp(convergeY, lockY, lockT);
+
+      // Rotation: spinning → settling
+      const spinSpeed = 0.4 + i * 0.07;
+      const baseRot   = localT * spinSpeed * (i % 2 === 0 ? 1 : -1) + sd.rot;
+      const settledRot = lockAngle + Math.PI / 2;
+      const finalRot  = lerp(baseRot, settledRot, ease(convergeT * 0.5 + lockT * 0.5, 2));
+
+      // Color: blood when scattered, brightens when locked
+      const lockBright = lockT;
+
+      g.save();
+      g.globalAlpha = sAlpha * (0.5 + lockBright * 0.4);
+      g.translate(finalX, finalY);
+      g.rotate(finalRot);
+
+      // Shard shape: irregular hexagon
+      const hw = sd.w / 2, hh = sd.h / 2;
+      g.beginPath();
+      g.moveTo(-hw + 20, -hh);
+      g.lineTo( hw - 15, -hh + 8);
+      g.lineTo( hw,       hh - 10);
+      g.lineTo( hw - 25,  hh);
+      g.lineTo(-hw + 10,  hh - 5);
+      g.lineTo(-hw,      -hh + 15);
+      g.closePath();
+
+      const shardGrad = g.createLinearGradient(-hw, -hh, hw, hh);
+      shardGrad.addColorStop(0, rc(sd.col, 0.6 + lockBright * 0.3));
+      shardGrad.addColorStop(1, rc(R.DARK, 0.4));
+      g.fillStyle = shardGrad;
+      g.fill();
+
+      g.strokeStyle = rc(lockBright > 0.5 ? R.BRIGHT : R.BLOOD, 0.5 + lockBright * 0.4);
+      g.lineWidth = 1.5 + lockBright * 1.5;
+      if (lockBright > 0.3) { g.shadowBlur = 10 + lockBright * 15; g.shadowColor = R.RED; }
+      g.stroke();
+      g.shadowBlur = 0;
+
+      // Label: visible when not spinning too fast
+      if (convergeT > 0.3 || lockT > 0) {
+        const lA = Math.max(convergeT - 0.3, lockT) / 0.7;
+        g.font = `${20 + lockBright * 6}px 'Share Tech Mono'`;
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillStyle = rc(R.WHITE, lA * (0.6 + lockBright * 0.3));
+        g.fillText(sd.label, 0, 0);
+      }
+      g.restore();
+    }
+
+    // When locked: draw connecting lines between shards + "ЕДИНЫЙ ЯЗЫК" in center
+    if (globalLockT > 0) {
+      const lt = clamp((localT - shardLockTime) / 0.6, 0, 1);
+      // Connecting ring
+      g.save();
+      g.strokeStyle = rc(R.RED, lt * 0.5);
+      g.lineWidth = 1.5;
+      g.setLineDash([12, 12]);
+      g.beginPath();
+      g.ellipse(cx, cy, 520, 520 * 0.55, 0, 0, Math.PI * 2);
+      g.stroke();
+      g.setLineDash([]);
+
+      // Center label
+      if (lt > 0.5) {
+        const cl = clamp((lt - 0.5) / 0.5, 0, 1);
+        glowText('ЕДИНЫЙ ЯЗЫК', cx, cy + 60, 72, R.WHITE, R.RED, 25, cl * (1 - clamp((localT - 7.5) / 0.5, 0, 1)));
+        g.font = `30px 'Share Tech Mono'`;
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillStyle = rc(R.CRIMSON, cl * 0.7 * (1 - clamp((localT - 7.5) / 0.5, 0, 1)));
+        g.fillText('ОБЩИЙ СТАНДАРТ СЖАТИЯ ВИДЕО', cx, cy + 110);
+      }
+      g.restore();
+    }
+  }
+
+  // ── Text ──
+  const txtLines = [
+    { t: 0.0, d: 3.5,  txt: 'ИДЕЯ БЛАГОРОДНАЯ',        y: H*0.87, sz: 100 },
+    { t: 3.5, d: 6.0,  txt: 'СОЗДАТЬ ЕДИНЫЙ ЯЗЫК',      y: H*0.87, sz: 110 },
+    { t: 6.0, d: 8.5,  txt: '15 ЧЕЛОВЕК. ОТТАВА.',      y: H*0.87, sz: 110 },
+  ];
+  for (const line of txtLines) {
+    if (localT < line.t || localT > line.d + 0.6) continue;
+    const a = clamp((localT - line.t) / 0.06, 0, 1) * (localT > line.d + 0.05 ? 0 : 1);
+    glowText(line.txt, W/2, line.y, line.sz, R.WHITE, R.RED, 16, a);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════════════════════
+
+let startTime = null;
+let raf = null;
+let running = false;
+
+// Block timing (seconds)
+const B1_START = 0, B1_END = 11;
+const B2_START = 11, B2_END = 21;
+const B3_START = 21, B3_END = 29;
+
+function render(ts) {
+  if (!running) return;
+  if (!startTime) startTime = ts;
+  const elapsed = (ts - startTime) / 1000;
+
+  g.clearRect(0, 0, W, H);
+
+  // Transition flash between blocks
+  const B1B2 = clamp(1 - Math.abs(elapsed - B2_START) / 0.08, 0, 1);
+  const B2B3 = clamp(1 - Math.abs(elapsed - B3_START) / 0.08, 0, 1);
+
+  if (elapsed < B1_END + 0.5) {
+    drawBlock1(elapsed - B1_START);
+  }
+  if (elapsed > B2_START - 0.3 && elapsed < B2_END + 0.5) {
+    if (elapsed < B2_START) {
+      // Fade out block 1
+      g.save(); g.globalAlpha = clamp(1 - (elapsed - (B2_START - 0.3)) / 0.3, 0, 1); drawBlock1(elapsed - B1_START); g.restore();
+    } else {
+      drawBlock2(elapsed - B2_START);
+    }
+  }
+  if (elapsed > B3_START - 0.3 && elapsed < B3_END + 1.0) {
+    if (elapsed < B3_START) {
+      g.save(); g.globalAlpha = clamp(1 - (elapsed - (B3_START - 0.3)) / 0.3, 0, 1); drawBlock2(elapsed - B2_START); g.restore();
+    } else {
+      drawBlock3(elapsed - B3_START);
+    }
+  }
+
+  // Hard white flash on block transitions
+  if (B1B2 > 0.01) {
+    g.fillStyle = rc(R.WHITE, B1B2 * 0.7);
+    g.fillRect(0, 0, W, H);
+  }
+  if (B2B3 > 0.01) {
+    g.fillStyle = rc(R.WHITE, B2B3 * 0.7);
+    g.fillRect(0, 0, W, H);
+  }
+
+  const bp_global = beatPhase(elapsed);
+
+  // Universal overlays
+  scanlines();
+  drawTicker(elapsed);
+  vignette();
+
+  // BPM indicator — tight bottom right
+  g.save();
+  g.globalAlpha = 0.25 + bp_global * 0.4;
+  g.font = `22px 'Share Tech Mono'`;
+  g.textAlign = 'right';
+  g.textBaseline = 'bottom';
+  g.fillStyle = bp_global > 0.5 ? R.RED : R.BLOOD;
+  g.fillText(`▮ 180BPM`, W - 30, H - 42);
+  g.restore();
+
+  if (elapsed < B3_END + 2) raf = requestAnimationFrame(render);
+  else running = false;
+}
+
+function restart() {
+  if (raf) cancelAnimationFrame(raf);
+  startTime = null;
+  running = true;
+  raf = requestAnimationFrame(render);
+}
+
+
+// ── BPM CONTROL ──
+function setBPM(val) {
+  BPM = Math.max(60, Math.min(400, val));
+  SPB = 60 / BPM;
+  MS_BEAT = SPB * 1000;
+  document.getElementById('bpm-val').textContent = BPM;
+  document.getElementById('bpm-slider').value = BPM;
+}
+
+document.getElementById('bpm-up').addEventListener('click', () => setBPM(BPM + 1));
+document.getElementById('bpm-dn').addEventListener('click', () => setBPM(BPM - 1));
+document.getElementById('bpm-slider').addEventListener('input', e => setBPM(parseInt(e.target.value)));
+
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'r' || k === 'к') { restart(); return; }
+  if (e.key === 'ArrowUp')    { setBPM(BPM + 1); e.preventDefault(); }
+  if (e.key === 'ArrowDown')  { setBPM(BPM - 1); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { setBPM(BPM + 10); e.preventDefault(); }
+  if (e.key === 'ArrowLeft')  { setBPM(BPM - 10); e.preventDefault(); }
+});
+
+
+// Auto-start
+setTimeout(restart, 600);
+</script>
+</body>
+</html>

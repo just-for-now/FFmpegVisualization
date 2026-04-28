@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap" rel="stylesheet">
+<title>RED WALL</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; overflow:hidden; width:2560px; height:1440px; }
+  canvas { display:block; position:absolute; top:0; left:0; }
+  #ui {
+    position:fixed; bottom:44px; right:72px;
+    color:rgba(140,0,0,0.4);
+    font-family:'Rajdhani',monospace;
+    font-size:22px; letter-spacing:8px; font-weight:600;
+    transition:opacity 0.4s; z-index:10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<div id="ui">[ r / к ]</div>
+<script>
+const W = 2560, H = 1440;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Offscreen canvases
+const scene  = new OffscreenCanvas(W, H); const sctx = scene.getContext('2d');
+const bloom1 = new OffscreenCanvas(W>>1, H>>1); const b1 = bloom1.getContext('2d');
+const bloom2 = new OffscreenCanvas(W>>2, H>>2); const b2 = bloom2.getContext('2d');
+const bloom3 = new OffscreenCanvas(W>>3, H>>3); const b3 = bloom3.getContext('2d');
+const composed = new OffscreenCanvas(W, H); const cmp = composed.getContext('2d');
+
+const FONT_SIZE = 22;
+const LINE_H    = 25;
+const SPEED     = 1.0;
+const CHAR_W    = FONT_SIZE * 0.595;
+
+const POOL = [
+  "ffmpeg -i input.mkv -c:v libx264 -crf 28 -preset slow output.mp4",
+  "avcodeccontext stream 0:0 h264 -> hevc_nvenc bitrate 8400kb",
+  "patent us7295673 licensing fee $12.00 per device mpeg pool",
+  "0xdeadbeef nal_type idr poc 0 sz 48291 stream_index 0",
+  "bitrate 8400kb pts 7349201 dts 7349150 keyframe gop 250",
+  "scale 2560:1440 flags lanczos format p010le yuv420p10le",
+  "libavcodec 60.31.102 libavformat 60.16.100 libswscale 7.5.100",
+  "frame 24891 fps 59 q 28.0 size 2048kb time 00:06:54.23",
+  "drm fail content locked key_id 4f3a1b2c9e87d6f0 widevine l3",
+  "realplayer uid a3f9c2b1e5d8 telemetry sent user unaware port 554",
+  "mpeg-4 patent pool 14 holders fee $14.50 per device philips sony",
+  "hevc profile main10 level 5.1 ref 4 frames tier high hdr10",
+  "eac3 5.1 -> pcm s24le stereo downmix -3db center channel",
+  "forgent networks $105m collected jpeg patent us4698672 expired",
+  "swscale 3840x2160 -> 2560x1440 fmt yuv420p algo bilinear",
+  "av_read_frame pkt_size 32768 stream_index 0 pts 7349201",
+  "0xff 0xd8 0xff 0xe0 0x00 0x10 0x4a 0x46 0x49 0x46 0x00 0x01",
+  "avi riff fmt chunk 0x61766920 0x4c495354 size 4096 codec divx",
+  "unisys gif patent lzw compression $5000 per site us4558302",
+  "quicktime mov atom ftyp mp42 isom mdat size 2147483648 bytes",
+  "h.264 cabac entropy coding mb_type p_skip ref_idx_l0 mvd_l0",
+  "av_malloc 1048576 ptr 0x7f3c2a1b0000 av_free 0x7f3c2a000000",
+  "moov atom not found seeking to end file corrupted eof truncated",
+  "windows media player format 0x0162 wma pro channels 6 rate 48000",
+  "realmedia rv40 codec bitstream error concealment frame dropped",
+  "xvid mpeg-4 asp gmc warp points 3 quarter pixel me sad 1024",
+  "divx 3.11 low motion fast motion hybrid bitrate vbr 2pass",
+  "0x00000001 0x67 0x42 0xc0 0x1f 0xd9 0x00 0xa0 0x5b 0x01 0x10",
+  "pts wrap bitrate vbv buffer overflow underflow concealment skip",
+  "mp3 mpeg-1 audio layer iii joint stereo 320kbps 44100hz id3v2",
+  "aac lc profile sbr ps 48000hz 2ch bitrate 192kbps adts header",
+  "container mkv webm matroska codec_id v_mpeg4/iso/avc track 1",
+  "seek table index corrupted rebuilding from raw stream scan",
+  "dts hd master audio 7.1 24bit 96khz lossless extension substream",
+  "patent troll forgent vs apple dell kodak hp ibm canon 31 suits",
+  "rgb24 -> yuv420p colorspace bt709 range limited swing 16-235",
+];
+
+function irnd(a,b){ return Math.floor(a+Math.random()*(b-a)); }
+
+function makeRowText(){
+  const src = POOL[irnd(0,POOL.length)];
+  const unit = src + '  ';
+  const reps = Math.ceil((W*2.5)/(unit.length*CHAR_W))+3;
+  return unit.repeat(reps);
+}
+
+const EXTRA = 3;
+const TOTAL_ROWS = Math.ceil(H/LINE_H)+EXTRA*2+1;
+const TOTAL_H = TOTAL_ROWS*LINE_H;
+
+let rows=[], offsetY=0, running=false, raf=null, crtTime=0;
+const persist = new OffscreenCanvas(W,H); const pctx = persist.getContext('2d');
+
+function initRows(){
+  rows=[];
+  for(let i=0;i<TOTAL_ROWS;i++){
+    rows.push({ localY:i*LINE_H, text:makeRowText(), xOff:irnd(0,900) });
+  }
+  offsetY=0; crtTime=0;
+  pctx.clearRect(0,0,W,H);
+}
+
+// ── 1. Рисуем текст в scene ───────────────────────────────────────────
+function drawScene(){
+  sctx.fillStyle='#000';
+  sctx.fillRect(0,0,W,H);
+  sctx.font=`600 ${FONT_SIZE}px Rajdhani, monospace`;
+  sctx.textBaseline='top';
+  sctx.fillStyle='rgb(255,28,0)';
+  for(const row of rows){
+    let y=((row.localY-offsetY)%TOTAL_H+TOTAL_H)%TOTAL_H - EXTRA*LINE_H;
+    if(y>H+LINE_H||y<-LINE_H*2) continue;
+    sctx.fillText(row.text,-row.xOff,y);
+  }
+}
+
+// ── 2. Настоящий multi-pass bloom ────────────────────────────────────
+function applyBloom(){
+  // Downsample x2
+  b1.drawImage(scene, 0, 0, W>>1, H>>1);
+  // Downsample x4
+  b2.drawImage(bloom1, 0, 0, W>>2, H>>2);
+  // Downsample x8
+  b3.drawImage(bloom2, 0, 0, W>>3, H>>3);
+
+  // Compose: scene + все уровни аддитивно
+  cmp.clearRect(0,0,W,H);
+  cmp.drawImage(scene,0,0);
+
+  cmp.globalCompositeOperation='lighter';
+
+  // Уровень 1 — мягкое свечение
+  cmp.globalAlpha=0.55;
+  cmp.drawImage(bloom1, 0, 0, W, H);
+
+  // Уровень 2 — широкий halo
+  cmp.globalAlpha=0.35;
+  cmp.drawImage(bloom2, 0, 0, W, H);
+
+  // Уровень 3 — очень широкое атмосферное свечение
+  cmp.globalAlpha=0.20;
+  cmp.drawImage(bloom3, 0, 0, W, H);
+
+  cmp.globalAlpha=1;
+  cmp.globalCompositeOperation='source-over';
+}
+
+// ── 3. Barrel warp + scanlines + phosphor → финальный canvas ────────
+// Barrel warp делаем пиксельно через ImageData
+// k — сила дисторсии (>0 = barrel, <0 = pincushion)
+const BARREL_K = 0.18; // сила barrel distortion
+
+function warpAndDraw(){
+  // Сначала рисуем composed (с bloom) в финальный canvas без warp
+  // потом читаем пиксели и применяем warp
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+
+  // Phosphor persistence
+  ctx.globalAlpha=0.38;
+  ctx.drawImage(persist,0,0);
+  ctx.globalAlpha=1;
+
+  ctx.drawImage(composed,0,0);
+
+  // Сохраняем в persist
+  pctx.clearRect(0,0,W,H);
+  pctx.drawImage(composed,0,0);
+
+  // --- Barrel warp через webgl-like pixel remap ---
+  // Читаем весь кадр, пересчитываем координаты
+  // Для производительности делаем на половинном разрешении warp-маски
+  // и рисуем через ctx.drawImage с transform
+  // Настоящий barrel — через offscreen + getImageData слишком медленно на 2K
+  // Делаем через CSS-transform perspective как аппроксимацию:
+  // Рисуем финал в temp canvas, потом через перспективу
+  // Нет, делаем правильно через WebGL-free pixel remap на четверти разрешения:
+  applyBarrelPixel();
+
+  // --- Scanlines поверх ---
+  ctx.fillStyle='rgba(0,0,0,0.50)';
+  for(let y=0;y<H;y+=3) ctx.fillRect(0,y+2,W,1);
+
+  // --- RGB pixel mask ---
+  ctx.fillStyle='rgba(0,0,0,0.10)';
+  for(let x=0;x<W;x+=3) ctx.fillRect(x+1,0,1,H);
+
+  // --- Rolling scan band ---
+  const band=(crtTime*1.6)%(H+200)-100;
+  const sg=ctx.createLinearGradient(0,band-100,0,band+100);
+  sg.addColorStop(0,  'rgba(255,50,0,0)');
+  sg.addColorStop(0.4,'rgba(255,50,0,0.05)');
+  sg.addColorStop(0.5,'rgba(255,80,0,0.11)');
+  sg.addColorStop(0.6,'rgba(255,50,0,0.05)');
+  sg.addColorStop(1,  'rgba(255,50,0,0)');
+  ctx.fillStyle=sg;
+  ctx.fillRect(0,band-100,W,200);
+
+  // --- Мерцание ---
+  const flicker=Math.random()*0.025;
+  ctx.fillStyle=`rgba(0,0,0,${flicker})`;
+  ctx.fillRect(0,0,W,H);
+
+  // --- Редкий глитч ---
+  if(Math.random()<0.005){
+    const gy=irnd(0,H),gh=irnd(1,4),gx=irnd(-50,50);
+    try{ const id=ctx.getImageData(0,gy,W,gh); ctx.putImageData(id,gx,gy); }catch(e){}
+  }
+}
+
+// Barrel distortion через offscreen pixel remap (четверть разрешения для скорости)
+const WS=Math.floor(W/2), HS=Math.floor(H/2);
+const warpSrc  = new OffscreenCanvas(WS,HS); const wctx = warpSrc.getContext('2d');
+const warpOut  = new OffscreenCanvas(WS,HS); const wout = warpOut.getContext('2d');
+
+// Предвычисляем LUT для barrel warp
+const lut = new Int16Array(WS*HS*2);
+(function buildLUT(){
+  const cx=WS/2, cy=HS/2;
+  const maxR=Math.sqrt(cx*cx+cy*cy);
+  for(let py=0;py<HS;py++){
+    for(let px=0;px<WS;px++){
+      const dx=(px-cx)/cx, dy=(py-cy)/cy;
+      const r2=dx*dx+dy*dy;
+      const factor=1+BARREL_K*r2;
+      const sx=Math.round(cx+dx/factor*cx);
+      const sy=Math.round(cy+dy/factor*cy);
+      const i=(py*WS+px)*2;
+      lut[i]  =Math.max(0,Math.min(WS-1,sx));
+      lut[i+1]=Math.max(0,Math.min(HS-1,sy));
+    }
+  }
+})();
+
+function applyBarrelPixel(){
+  // Downsample composed -> warpSrc
+  wctx.drawImage(composed,0,0,WS,HS);
+  const src=wctx.getImageData(0,0,WS,HS);
+  const dst=wout.createImageData(WS,HS);
+  const sd=src.data, dd=dst.data;
+
+  for(let i=0;i<WS*HS;i++){
+    const li=i*2;
+    const si=(lut[li+1]*WS+lut[li])*4;
+    const di=i*4;
+    dd[di]  =sd[si];
+    dd[di+1]=sd[si+1];
+    dd[di+2]=sd[si+2];
+    dd[di+3]=sd[si+3];
+  }
+  wout.putImageData(dst,0,0);
+
+  // Рисуем warp поверх основного canvas (upsample)
+  ctx.drawImage(warpOut,0,0,W,H);
+}
+
+function tick(){
+  if(!running) return;
+  offsetY+=SPEED;
+  crtTime++;
+  drawScene();
+  applyBloom();
+  warpAndDraw();
+  raf=requestAnimationFrame(tick);
+}
+
+function start(){
+  if(running) return;
+  running=true;
+  document.getElementById('ui').style.opacity='0';
+  initRows();
+  tick();
+}
+
+function stop(){
+  running=false;
+  if(raf){cancelAnimationFrame(raf);raf=null;}
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  document.getElementById('ui').style.opacity='1';
+}
+
+document.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='r'||k==='к') running?stop():start();
+});
+</script>
+</body>
+</html>

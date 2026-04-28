@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>JPEG Patent</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #080808;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    font-family: 'JetBrains Mono', monospace;
+    color: #c8ff00;
+    cursor: none;
+  }
+
+  canvas#noise {
+    position: absolute;
+    top: 0; left: 0;
+    opacity: 0.12;
+    z-index: 0;
+  }
+
+  canvas#web {
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 1;
+  }
+
+  #scene {
+    position: absolute;
+    width: 100%; height: 100%;
+    z-index: 2;
+  }
+
+  /* ── PHASE 1 ── */
+  #phase-patent {
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:0;
+  }
+  .year-bg {
+    font-family:'Bebas Neue',sans-serif;
+    font-size:560px; color:#131313;
+    position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    letter-spacing:-20px; user-select:none; line-height:1;
+  }
+  .p1-label { font-size:18px; letter-spacing:8px; color:#666; margin-bottom:20px; z-index:1; }
+  .p1-title {
+    font-family:'Bebas Neue',sans-serif;
+    font-size:260px; letter-spacing:12px; color:#c8ff00;
+    z-index:1; line-height:0.9; text-align:center;
+  }
+  .p1-sub { font-size:18px; letter-spacing:6px; color:#666; margin-top:20px; z-index:1; }
+
+  /* ── PHASE 2 ── */
+  #phase-sleep {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    opacity:0; display:flex; align-items:center; justify-content:center;
+  }
+  .tl-wrap { position:relative; width:1600px; z-index:1; }
+  .tl-label { font-size:15px; letter-spacing:6px; color:#444; margin-bottom:48px; }
+  .tl-track { width:100%; height:2px; background:#191919; position:relative; }
+  .tl-fill {
+    height:100%; background:#c8ff00; width:0%;
+    position:relative;
+  }
+  .tl-fill::after {
+    content:''; position:absolute; right:-6px; top:-7px;
+    width:16px; height:16px; background:#c8ff00; border-radius:50%;
+    box-shadow:0 0 20px #c8ff00, 0 0 50px #c8ff0055;
+  }
+  .tl-years { display:flex; justify-content:space-between; margin-top:22px; }
+  .ty {
+    font-family:'Bebas Neue',sans-serif; font-size:28px;
+    color:#222; letter-spacing:2px; transition:color .2s, text-shadow .2s;
+  }
+  .ty.on { color:#c8ff00; text-shadow:0 0 20px #c8ff0066; }
+  .tl-counter {
+    font-family:'Bebas Neue',sans-serif; font-size:320px;
+    color:#111; position:absolute; right:-30px; top:-210px;
+    line-height:1; letter-spacing:-8px; z-index:0;
+  }
+  .tl-bg-word {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-240px);
+    font-family:'Bebas Neue',sans-serif; font-size:220px;
+    color:#0f0f0f; letter-spacing:30px; white-space:nowrap; user-select:none;
+  }
+
+  /* ── PHASE 3 ── */
+  #phase-wake {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    opacity:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .fw-yr { font-size:18px; letter-spacing:10px; color:#ff3300cc; margin-bottom:18px; opacity:0; }
+  .fw-name {
+    font-family:'Bebas Neue',sans-serif; font-size:230px; letter-spacing:16px;
+    color:#ff3300; text-shadow:0 0 80px #ff330022; line-height:1;
+    clip-path:inset(0 100% 0 0);
+  }
+  .fw-claim { font-size:22px; letter-spacing:8px; color:#ff3300cc; margin-top:24px; opacity:0; }
+
+  /* ── PHASE 4: WEB ── */
+  #phase-money {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    opacity:0;
+  }
+  /* Node labels rendered on canvas; HTML layer only for total counter + fact boxes */
+  .total-counter {
+    position:absolute; bottom:55px; right:110px; text-align:right; z-index:3;
+  }
+  .total-lbl { font-size:15px; letter-spacing:6px; color:#444; }
+  .total-num {
+    font-family:'Bebas Neue',sans-serif; font-size:150px;
+    color:#c8ff00; line-height:1; letter-spacing:-3px;
+    text-shadow:0 0 50px #c8ff0022;
+  }
+
+  /* small fact callout that appears during money phase */
+  .fact-box {
+    position:absolute; opacity:0;
+    border-left:2px solid #c8ff0044;
+    padding:12px 20px;
+    background:#c8ff0005;
+    max-width:340px;
+  }
+  .fact-box .fb-label { font-size:13px; letter-spacing:5px; color:#c8ff0099; margin-bottom:8px; }
+  .fact-box .fb-val { font-family:'Bebas Neue',sans-serif; font-size:52px; letter-spacing:2px; color:#c8ff00; line-height:1; }
+  .fact-box .fb-sub { font-size:14px; letter-spacing:2px; color:#666; margin-top:6px; line-height:1.8; }
+
+  #fb-cost  { top:60px;  left:80px; }
+  #fb-scope { top:60px;  right:80px; border-left:none; border-right:2px solid #ff330044; background:#ff330005; text-align:right; }
+  #fb-scope .fb-label { color:#ff330066; }
+  #fb-scope .fb-val   { color:#ff3300; }
+
+  /* ── PHASE 5 ── */
+  #phase-fraud {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    opacity:0; display:flex; flex-direction:column;
+    align-items:flex-start; justify-content:center;
+    padding:0 200px;
+  }
+  .fl {
+    font-family:'Bebas Neue',sans-serif; font-size:118px;
+    letter-spacing:5px; line-height:1; color:#1e1e1e;
+    opacity:0; transform:translateX(-40px);
+  }
+  .fl.acc { color:#c8ff00; }
+  .fl.red { color:#ff3300; }
+
+  /* hidden fact revealed below fraud lines */
+  .fraud-reveal {
+    font-size:20px; letter-spacing:3px; color:#ff330099;
+    margin-top:40px; opacity:0;
+    border-left:2px solid #ff330044; padding-left:22px;
+    line-height:2.2;
+  }
+  /* extra sub-fact */
+  .fraud-subfact {
+    font-size:16px; letter-spacing:3px; color:#555;
+    margin-top:20px; opacity:0;
+    padding-left:24px; line-height:2;
+  }
+
+  /* ── PHASE 6 ── */
+  #phase-final {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    opacity:0;
+  }
+
+  /* 6a — years */
+  #f6a {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .f6a-prompt { font-size:20px; letter-spacing:8px; color:#666; margin-bottom:36px; opacity:0; }
+  .f6a-nums { display:flex; align-items:baseline; gap:0; line-height:1; }
+  .yn {
+    font-family:'Bebas Neue',sans-serif; font-size:420px; line-height:1;
+    letter-spacing:-14px; color:#181818; transition:color .15s,text-shadow .15s;
+  }
+  .yn.lit { color:#c8ff00; text-shadow:0 0 80px #c8ff0044; }
+  .yd {
+    font-family:'Bebas Neue',sans-serif; font-size:420px; line-height:1;
+    color:#222; opacity:0; transition:opacity .2s; margin:0 -10px;
+  }
+  .yd.vis { opacity:1; }
+  .f6a-sub { font-size:20px; letter-spacing:8px; color:#666; margin-top:16px; opacity:0; }
+
+  /* 6b — moment */
+  #f6b {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:0;
+  }
+  .f6b-lbl { font-size:18px; letter-spacing:8px; color:#666; margin-bottom:48px; }
+  .f6b-line {
+    font-family:'Bebas Neue',sans-serif; font-size:106px; letter-spacing:6px;
+    color:#1e1e1e; line-height:1.08; text-align:center;
+    opacity:0; transform:translateY(20px);
+  }
+  .f6b-line.lit { color:#c8ff00; }
+  .f6b-line.red { color:#ff3300; }
+
+  /* 6c — no defense */
+  #f6c {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:0;
+  }
+  .f6c-top { font-size:20px; letter-spacing:7px; color:#777; margin-bottom:46px; opacity:0; }
+  .f6c-main {
+    font-family:'Bebas Neue',sans-serif; font-size:290px; letter-spacing:14px;
+    color:#c8ff00; line-height:1; clip-path:inset(0 100% 0 0); text-align:center;
+  }
+  .f6c-sub { font-size:18px; letter-spacing:5px; color:#555; margin-top:40px; opacity:0; text-align:center; }
+
+  /* stats row */
+  .stats-row { display:flex; gap:110px; margin-top:60px; opacity:0; }
+  .si { text-align:center; }
+  .si-num { font-family:'Bebas Neue',sans-serif; font-size:100px; color:#ff3300; letter-spacing:2px; line-height:1; }
+  .si-lbl { font-size:13px; letter-spacing:5px; color:#444; margin-top:8px; }
+
+  /* epilogue line */
+  .f6c-epilogue {
+    font-size:16px; letter-spacing:5px; color:#ff330088;
+    margin-top:36px; opacity:0; text-align:center; line-height:2;
+  }
+
+  /* overlays */
+  #scanlines {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; z-index:100;
+    background:repeating-linear-gradient(
+      to bottom, transparent 0, transparent 3px,
+      rgba(0,0,0,.065) 3px, rgba(0,0,0,.065) 4px
+    );
+  }
+  #vignette {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; z-index:99;
+    background:radial-gradient(ellipse at center, transparent 30%, #000000bb 100%);
+  }
+
+  .glitch { animation:glitch .12s steps(2) 3; }
+  @keyframes glitch {
+    0%  { clip-path:inset(15% 0 40% 0); transform:translateX(-5px); filter:hue-rotate(90deg); }
+    50% { clip-path:inset(55% 0  5% 0); transform:translateX(5px);  filter:hue-rotate(-90deg); }
+    100%{ clip-path:inset(30% 0 60% 0); transform:translateX(-3px); filter:hue-rotate(0deg); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="noise"></canvas>
+<canvas id="web"></canvas>
+<div id="scanlines"></div>
+<div id="vignette"></div>
+
+<div id="scene">
+
+  <!-- P1 -->
+  <div id="phase-patent">
+    <div class="year-bg">1987</div>
+    <div class="p1-label">US PATENT №4,698,672 — ПОДАНА. ОДОБРЕНА. ЗАБЫТА.</div>
+    <div class="p1-title">JPEG</div>
+    <div class="p1-sub">АЛГОРИТМ СЖАТИЯ ИЗОБРАЖЕНИЙ</div>
+  </div>
+
+  <!-- P2 -->
+  <div id="phase-sleep">
+    <div class="tl-bg-word">ТИШИНА</div>
+    <div class="tl-wrap">
+      <div class="tl-label">ХРОНОЛОГИЯ — 1987 → 2002 — ПАТЕНТ НЕАКТИВЕН</div>
+      <div class="tl-track"><div class="tl-fill" id="tl-fill"></div></div>
+      <div class="tl-years">
+        <span class="ty" data-y="1987">1987</span>
+        <span class="ty" data-y="1989">1989</span>
+        <span class="ty" data-y="1991">1991</span>
+        <span class="ty" data-y="1993">1993</span>
+        <span class="ty" data-y="1995">1995</span>
+        <span class="ty" data-y="1997">1997</span>
+        <span class="ty" data-y="1999">1999</span>
+        <span class="ty" data-y="2001">2001</span>
+        <span class="ty" data-y="2002">2002</span>
+      </div>
+      <div class="tl-counter" id="tl-counter">0</div>
+    </div>
+  </div>
+
+  <!-- P3 -->
+  <div id="phase-wake">
+    <div class="fw-yr" id="fw-yr">ИЮЛЬ 2002</div>
+    <div class="fw-name" id="fw-name">FORGENT NETWORKS</div>
+    <div class="fw-claim" id="fw-claim">«МЫ ВЛАДЕЕМ JPEG»</div>
+  </div>
+
+  <!-- P4 web -->
+  <div id="phase-money">
+    <!-- hidden-fact callouts -->
+    <div class="fact-box" id="fb-cost">
+      <div class="fb-label">FORGENT КУПИЛ ПАТЕНТ В 1997</div>
+      <div class="fb-val">$65,000</div>
+      <div class="fb-sub">ЗАПЛАЧЕНО ЗА COMPRESSION LABS INC.<br>ROI: ×1615</div>
+    </div>
+    <div class="fact-box" id="fb-scope">
+      <div class="fb-label">ОХВАТ ПРЕТЕНЗИЙ</div>
+      <div class="fb-val">1000+</div>
+      <div class="fb-sub">КОМПАНИЙ УВЕДОМЛЕНО<br>О ВОЗМОЖНОМ ДОЛГЕ</div>
+    </div>
+
+    <div class="total-counter">
+      <div class="total-lbl">СОБРАНО С РЫНКА</div>
+      <div class="total-num" id="total-num">$0M</div>
+    </div>
+  </div>
+
+  <!-- P5 -->
+  <div id="phase-fraud">
+    <div class="fl acc" id="fl1">ПОЗЖЕ ВЫЯСНИТСЯ:</div>
+    <div class="fl" id="fl2">ПРЕДШЕСТВУЮЩИЕ РАЗРАБОТКИ</div>
+    <div class="fl" id="fl3">СУЩЕСТВОВАЛИ ДО ЗАЯВКИ.</div>
+    <div class="fl red" id="fl4">И БЫЛИ СКРЫТЫ.</div>
+    <div class="fraud-reveal" id="fraud-reveal">
+      COMPRESSION LABS САМА ЖЕ И РАЗРАБОТАЛА ЭТИ ТЕХНОЛОГИИ РАНЬШЕ.<br>
+      ОНИ ЗНАЛИ — И НЕ РАСКРЫЛИ ПАТЕНТНОМУ БЮРО.
+    </div>
+    <div class="fraud-subfact" id="fraud-sub">
+      МАЙ 2006 — ПАТЕНТНОЕ БЮРО США ОТКЛОНИЛО КЛЮЧЕВЫЕ ПУНКТЫ ПАТЕНТА.<br>
+      НО К ЭТОМУ МОМЕНТУ $105M УЖЕ БЫЛИ В КАРМАНЕ.
+    </div>
+  </div>
+
+  <!-- P6 -->
+  <div id="phase-final">
+
+    <div id="f6a">
+      <div class="f6a-prompt" id="f6a-p">ПАТЕНТ МОГ ЛЕЖАТЬ...</div>
+      <div class="f6a-nums">
+        <span class="yn" id="yn1">5</span><span class="yd" id="yd1">.</span>
+        <span class="yn" id="yn2">10</span><span class="yd" id="yd2">.</span>
+        <span class="yn" id="yn3">15</span><span class="yd" id="yd3">.</span>
+      </div>
+      <div class="f6a-sub" id="f6a-s">ЛЕТ.</div>
+    </div>
+
+    <div id="f6b">
+      <div class="f6b-lbl">ФОРМАТ УЖЕ СТАЛ СТАНДАРТОМ. УЙТИ НЕВОЗМОЖНО.</div>
+      <div class="f6b-line lit" id="pb1">ВЛАДЕЛЕЦ МОГ ПРОСНУТЬСЯ</div>
+      <div class="f6b-line lit" id="pb2">В ЛЮБОЙ МОМЕНТ.</div>
+      <div class="f6b-line red" id="pb3">И ПРИЙТИ ЗА ДЕНЬГАМИ.</div>
+    </div>
+
+    <div id="f6c">
+      <div class="f6c-top" id="f6c-top">У РАЗРАБОТЧИКА НЕ БЫЛО СПОСОБА ЭТО ПРЕДСКАЗАТЬ.</div>
+      <div class="f6c-main" id="f6c-main">НЕТ ЗАЩИТЫ</div>
+      <div class="f6c-sub" id="f6c-sub">И НЕ БЫЛО СПОСОБА ЗАЩИТИТЬСЯ.</div>
+      <div class="stats-row" id="stats-row">
+        <div class="si"><div class="si-num">15</div><div class="si-lbl">ЛЕТ ОЖИДАНИЯ</div></div>
+        <div class="si"><div class="si-num">30+</div><div class="si-lbl">КОМПАНИЙ ЗАПЛАТИЛИ</div></div>
+        <div class="si"><div class="si-num">$105M</div><div class="si-lbl">ВЗЯТО. НЕ ВОЗВРАЩЕНО.</div></div>
+        <div class="si"><div class="si-num">2007</div><div class="si-lbl">FORGENT → ASURE SOFTWARE</div></div>
+      </div>
+      <div class="f6c-epilogue" id="f6c-ep">
+        В 2007 ГОДУ FORGENT ПЕРЕИМЕНОВАЛСЯ В ASURE SOFTWARE<br>
+        И ТИХО УШЁЛ ИЗ ПАТЕНТНОГО БИЗНЕСА.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── NOISE ──
+const nc = document.getElementById('noise');
+nc.width = 1920; nc.height = 1080;
+const nctx = nc.getContext('2d');
+function drawNoise() {
+  const id = nctx.createImageData(1920,1080); const d = id.data;
+  for (let i=0;i<d.length;i+=4){const v=Math.random()*255|0;d[i]=d[i+1]=d[i+2]=v;d[i+3]=20;}
+  nctx.putImageData(id,0,0);
+}
+setInterval(drawNoise,100); drawNoise();
+
+// ── WEB CANVAS ──
+const wc = document.getElementById('web');
+wc.width = 1920; wc.height = 1080;
+const wctx = wc.getContext('2d');
+
+// Company data — explicit pixel positions to guarantee no overlap.
+// Canvas is 1920×1080, center of web at CX=880, CY=510.
+// Each node has: name, year, amount, x, y, textAlign ('left'|'right'), textX offset
+const CX = 880, CY = 510;
+
+const PAID = [
+  // Top arc, right side — flowing clockwise from top-right
+  { name:'SONY',       year:2003, amount:'$16M', x: 1160, y:  130, ta:'left',  dx: 22 },
+  { name:'CANON',      year:2003, amount:'$?',   x: 1360, y:  230, ta:'left',  dx: 22 },
+  { name:'FUJIFILM',   year:2003, amount:'$?',   x: 1460, y:  390, ta:'left',  dx: 22 },
+  { name:'HP',         year:2003, amount:'$?',   x: 1480, y:  570, ta:'left',  dx: 22 },
+  { name:'KYOCERA',    year:2003, amount:'$?',   x: 1400, y:  740, ta:'left',  dx: 22 },
+  { name:'PANASONIC',  year:2003, amount:'$?',   x: 1240, y:  880, ta:'left',  dx: 22 },
+  { name:'RICOH',      year:2004, amount:'$?',   x: 1010, y:  970, ta:'left',  dx: 22 },
+  // Bottom arc, left side — continuing clockwise
+  { name:'TOSHIBA',    year:2004, amount:'$?',   x:  680, y:  970, ta:'right', dx:-22 },
+  { name:'ADOBE',      year:2005, amount:'$?',   x:  430, y:  870, ta:'right', dx:-22 },
+  { name:'MACROMEDIA', year:2005, amount:'$?',   x:  260, y:  710, ta:'right', dx:-22 },
+  { name:'YAHOO',      year:2005, amount:'$?',   x:  200, y:  520, ta:'right', dx:-22 },
+  { name:'SAMSUNG',    year:2004, amount:'$?',   x:  290, y:  330, ta:'right', dx:-22 },
+  { name:'SHARP',      year:2004, amount:'$?',   x:  470, y:  180, ta:'right', dx:-22 },
+];
+
+const SUED = [
+  // Upper-left cluster — clearly separated from PAID
+  { name:'APPLE',     x:  680, y:  110, ta:'right', dx:-22 },
+  { name:'DELL',      x:  870, y:   60, ta:'left',  dx: 22 },
+  { name:'IBM',       x: 1060, y:   80, ta:'left',  dx: 22 },
+  // Lower connector to right
+  { name:'MICROSOFT', x: 1560, y:  780, ta:'left',  dx: 22 },
+  { name:'KODAK',     x: 1490, y:  910, ta:'left',  dx: 22 },
+  { name:'XEROX',     x: 1290, y: 1010, ta:'left',  dx: 22 },
+];
+
+function nodePos(item){ return { x: item.x, y: item.y }; }
+
+// Web state
+let webPhase = 0; // 0=hidden, 1=center only, 2=lines appear, 3=paid activate, 4=sued activate
+let paidProgress = 0; // 0..PAID.length
+let suedProgress = 0;
+let webAlpha = 0;
+let nodeAlpha = new Array(PAID.length + SUED.length).fill(0);
+let lineProgress = new Array(PAID.length + SUED.length).fill(0);
+let paidActive = new Array(PAID.length).fill(false);
+let suedActive = new Array(SUED.length).fill(false);
+let webVisible = false;
+
+function lerp(a,b,t){ return a+(b-a)*t; }
+const easeOut = t => 1-Math.pow(1-t,3);
+const easeIn  = t => t*t*t;
+
+function drawWeb() {
+  if (!webVisible) { wctx.clearRect(0,0,1920,1080); return; }
+  wctx.clearRect(0,0,1920,1080);
+
+  const fa = webAlpha;
+  if (fa <= 0) return;
+
+  wctx.save();
+  wctx.globalAlpha = fa;
+
+  // ── draw lines ──
+  PAID.forEach((c,i) => {
+    const lp = lineProgress[i];
+    if (lp <= 0) return;
+    const ex = lerp(CX, c.x, lp);
+    const ey = lerp(CY, c.y, lp);
+    wctx.beginPath(); wctx.moveTo(CX, CY); wctx.lineTo(ex, ey);
+    wctx.strokeStyle = paidActive[i] ? '#c8ff0055' : '#1e1e1e';
+    wctx.lineWidth = paidActive[i] ? 1.5 : 1;
+    wctx.stroke();
+    if (paidActive[i]) {
+      wctx.beginPath(); wctx.moveTo(CX, CY); wctx.lineTo(ex, ey);
+      wctx.strokeStyle = '#c8ff0018'; wctx.lineWidth = 8; wctx.stroke();
+    }
+  });
+
+  SUED.forEach((c,i) => {
+    const li = PAID.length + i;
+    const lp = lineProgress[li];
+    if (lp <= 0) return;
+    const ex = lerp(CX, c.x, lp);
+    const ey = lerp(CY, c.y, lp);
+    wctx.beginPath(); wctx.moveTo(CX, CY); wctx.lineTo(ex, ey);
+    wctx.strokeStyle = suedActive[i] ? '#ff330055' : '#1e1e1e';
+    wctx.lineWidth = suedActive[i] ? 1.5 : 1;
+    wctx.stroke();
+    if (suedActive[i]) {
+      wctx.beginPath(); wctx.moveTo(CX, CY); wctx.lineTo(ex, ey);
+      wctx.strokeStyle = '#ff330018'; wctx.lineWidth = 8; wctx.stroke();
+    }
+  });
+
+  // ── center node ──
+  wctx.beginPath();
+  wctx.arc(CX, CY, 20, 0, Math.PI*2);
+  wctx.fillStyle = '#ff3300';
+  wctx.shadowColor = '#ff3300'; wctx.shadowBlur = 35;
+  wctx.fill(); wctx.shadowBlur = 0;
+
+  wctx.font = '800 28px "Bebas Neue"';
+  wctx.fillStyle = '#ff3300';
+  wctx.textAlign = 'center';
+  wctx.fillText('FORGENT', CX, CY - 36);
+  wctx.font = '16px "JetBrains Mono"';
+  wctx.fillStyle = '#ff330099';
+  wctx.fillText('NETWORKS', CX, CY - 16);
+
+  // ── paid nodes ──
+  PAID.forEach((c,i) => {
+    const na = nodeAlpha[i];
+    if (na <= 0) return;
+    const active = paidActive[i];
+    wctx.globalAlpha = fa * na;
+
+    if (active) {
+      wctx.beginPath();
+      wctx.arc(c.x, c.y, 30, 0, Math.PI*2);
+      wctx.strokeStyle = '#c8ff0033'; wctx.lineWidth = 1; wctx.stroke();
+    }
+    wctx.beginPath();
+    wctx.arc(c.x, c.y, active ? 11 : 5, 0, Math.PI*2);
+    wctx.fillStyle = active ? '#c8ff00' : '#2a2a2a';
+    if (active) { wctx.shadowColor = '#c8ff00'; wctx.shadowBlur = 22; }
+    wctx.fill(); wctx.shadowBlur = 0;
+
+    const tx = c.x + c.dx;
+    const ty = c.y;
+    wctx.textAlign = c.ta;
+
+    // Company name — large
+    wctx.font = 'bold 30px "Bebas Neue"';
+    wctx.fillStyle = active ? '#c8ff00' : '#303030';
+    wctx.fillText(c.name, tx, ty + 6);
+
+    if (active) {
+      // Amount — was 11px → now 20px
+      if (c.amount !== '$?') {
+        wctx.font = '700 20px "JetBrains Mono"';
+        wctx.fillStyle = '#c8ff00bb';
+        wctx.fillText(c.amount, tx, ty + 28);
+      }
+      // Year — was 10px → now 20px
+      wctx.font = '20px "JetBrains Mono"';
+      wctx.fillStyle = '#c8ff0077';
+      wctx.fillText(c.year, tx, ty + (c.amount !== '$?' ? 50 : 28));
+    }
+
+    wctx.globalAlpha = fa;
+  });
+
+  // ── sued nodes ──
+  SUED.forEach((c,i) => {
+    const li = PAID.length + i;
+    const na = nodeAlpha[li];
+    if (na <= 0) return;
+    const active = suedActive[i];
+    wctx.globalAlpha = fa * na;
+
+    if (active) {
+      const s = 14;
+      wctx.beginPath();
+      wctx.moveTo(c.x-s, c.y-s); wctx.lineTo(c.x+s, c.y+s);
+      wctx.moveTo(c.x+s, c.y-s); wctx.lineTo(c.x-s, c.y+s);
+      wctx.strokeStyle = '#ff3300'; wctx.lineWidth = 2.5;
+      wctx.shadowColor = '#ff3300'; wctx.shadowBlur = 18;
+      wctx.stroke(); wctx.shadowBlur = 0;
+    } else {
+      wctx.beginPath();
+      wctx.arc(c.x, c.y, 5, 0, Math.PI*2);
+      wctx.fillStyle = '#2a2a2a'; wctx.fill();
+    }
+
+    const tx = c.x + c.dx;
+    wctx.textAlign = c.ta;
+    wctx.font = 'bold 30px "Bebas Neue"';
+    wctx.fillStyle = active ? '#ff5533' : '#2a2a2a';
+    wctx.fillText(c.name, tx, c.y + 6);
+
+    if (active) {
+      // "ИСК ОТКЛОНЁН" — was 10px → now 20px
+      wctx.font = '20px "JetBrains Mono"';
+      wctx.fillStyle = '#ff330088';
+      wctx.fillText('ИСК ОТКЛОНЁН', tx, c.y + 28);
+    }
+
+    wctx.globalAlpha = fa;
+  });
+
+  wctx.restore();
+}
+
+// animation loop for web
+let webRAF;
+function webLoop(){
+  drawWeb();
+  webRAF = requestAnimationFrame(webLoop);
+}
+webLoop();
+
+// ── HELPERS ──
+function after(ms,fn){ setTimeout(fn,ms); }
+function anim(dur,fn,cb){
+  const s=performance.now();
+  (function step(n){
+    const t=Math.min((n-s)/dur,1);
+    fn(t);
+    if(t<1) requestAnimationFrame(step);
+    else if(cb) cb();
+  })(s);
+}
+function fadeIn(el,dur,delay,cb){ after(delay||0,()=>anim(dur,t=>{el.style.opacity=easeOut(t);},cb)); }
+function fadeOut(el,dur,delay,cb){ after(delay||0,()=>anim(dur,t=>{el.style.opacity=1-easeOut(t);},cb)); }
+function slideIn(el,dur,delay){
+  after(delay||0,()=>anim(dur,t=>{
+    el.style.opacity=easeOut(Math.min(t*1.5,1));
+    el.style.transform=`translateX(${lerp(-40,0,easeOut(t))}px)`;
+  }));
+}
+function popIn(el,dur,delay){
+  after(delay||0,()=>anim(dur,t=>{
+    el.style.opacity=easeOut(Math.min(t*2,1));
+    el.style.transform=`translateY(${lerp(12,0,easeOut(t))}px)`;
+  }));
+}
+function wipeIn(el,dur,delay,cb){
+  after(delay||0,()=>anim(dur,t=>{
+    el.style.clipPath=`inset(0 ${100-easeOut(t)*100}% 0 0)`;
+  },cb));
+}
+function glitch(el,delay){
+  after(delay,()=>{ el.classList.add('glitch'); after(450,()=>el.classList.remove('glitch')); });
+}
+
+// ── PHASES ──
+
+function phase1(){
+  const p=document.getElementById('phase-patent');
+  fadeIn(p,700,0,()=>fadeOut(p,700,1050,phase2));
+}
+
+function phase2(){
+  const p=document.getElementById('phase-sleep');
+  const fill=document.getElementById('tl-fill');
+  const counter=document.getElementById('tl-counter');
+  const ys=document.querySelectorAll('.ty');
+  fadeIn(p,350,0);
+  anim(5000,t=>{
+    // linear progress for visual sync between bar and year labels
+    fill.style.width=(t*100)+'%';
+    counter.textContent=Math.round(lerp(0,15,t));
+    const yr=Math.round(lerp(1987,2002,t));
+    ys.forEach(el=>el.classList.toggle('on',parseInt(el.dataset.y)<=yr));
+  },()=>fadeOut(p,350,100,phase3));
+}
+
+function phase3(){
+  const p=document.getElementById('phase-wake');
+  fadeIn(p,300,0);
+  fadeIn(document.getElementById('fw-yr'),400,200);
+  wipeIn(document.getElementById('fw-name'),900,500);
+  glitch(document.getElementById('fw-name'),1600);
+  fadeIn(document.getElementById('fw-claim'),600,1900);
+  fadeOut(p,500,3300,phase4);
+}
+
+function phase4(){
+  const p=document.getElementById('phase-money');
+  fadeIn(p,400,0);
+
+  // Show web
+  webVisible=true;
+  anim(800,t=>{ webAlpha=easeOut(t)*0.9; });
+
+  // Draw lines one by one — spread over 3s
+  PAID.forEach((_,i)=>{
+    after(200+i*220,()=>{
+      nodeAlpha[i]=1;
+      anim(600,t=>{ lineProgress[i]=easeOut(t); });
+    });
+  });
+  SUED.forEach((_,i)=>{
+    const li=PAID.length+i;
+    after(400+i*240,()=>{
+      nodeAlpha[li]=1;
+      anim(600,t=>{ lineProgress[li]=easeOut(t); });
+    });
+  });
+
+  // Activate paid (green lights) — spread over ~5s
+  after(1600,()=>{
+    PAID.forEach((_,i)=>{
+      after(i*400,()=>{ paidActive[i]=true; });
+    });
+  });
+
+  // Activate sued (red X) after paid are mostly done
+  after(5000,()=>{
+    SUED.forEach((_,i)=>{
+      after(i*400,()=>{ suedActive[i]=true; });
+    });
+  });
+
+  // money counter
+  after(1600,()=>{
+    anim(9500,t=>{
+      document.getElementById('total-num').textContent=`$${Math.round(easeOut(t)*105)}M`;
+    });
+  });
+
+  // fact callouts
+  fadeIn(document.getElementById('fb-cost'),700,2000);
+  fadeIn(document.getElementById('fb-scope'),700,5500);
+
+  glitch(document.getElementById('total-num'),11500);
+
+  // Total phase 4 duration: ~15s (was ~11.5s, ×1.3)
+  fadeOut(p,600,14900,()=>{
+    anim(600,t=>{ webAlpha=0.9*(1-easeOut(t)); },()=>{ webVisible=false; });
+    phase5();
+  });
+}
+
+function phase5(){
+  const p=document.getElementById('phase-fraud');
+  fadeIn(p,400,0);
+  // Lines appear with longer gaps
+  ['fl1','fl2','fl3','fl4'].forEach((id,i)=>slideIn(document.getElementById(id),600,i*800));
+  // Reveal and subfact with more breathing room
+  fadeIn(document.getElementById('fraud-reveal'),700,4000);
+  fadeIn(document.getElementById('fraud-sub'),700,6500);
+  // Total: ~13s (was ~6.5s, ×2)
+  fadeOut(p,600,13000,phase6);
+}
+
+function phase6(){
+  const p=document.getElementById('phase-final');
+  fadeIn(p,300,0);
+  phase6a();
+}
+
+function phase6a(){
+  const prompt=document.getElementById('f6a-p');
+  const sub=document.getElementById('f6a-s');
+  fadeIn(prompt,500,200);
+  after(900,()=>{ document.getElementById('yn1').classList.add('lit'); });
+  after(1150,()=>{ document.getElementById('yd1').classList.add('vis'); });
+  after(2100,()=>{ document.getElementById('yn2').classList.add('lit'); });
+  after(2350,()=>{ document.getElementById('yd2').classList.add('vis'); });
+  after(3300,()=>{ document.getElementById('yn3').classList.add('lit'); });
+  after(3550,()=>{ document.getElementById('yd3').classList.add('vis'); });
+  after(4100,()=>fadeIn(sub,400,0));
+  after(5600,()=>fadeOut(document.getElementById('f6a'),400,0,phase6b));
+}
+
+function phase6b(){
+  const p=document.getElementById('f6b');
+  fadeIn(p,400,0);
+  ['pb1','pb2','pb3'].forEach((id,i)=>{
+    const el=document.getElementById(id);
+    after(i*950,()=>anim(500,t=>{
+      el.style.opacity=easeOut(t);
+      el.style.transform=`translateY(${lerp(20,0,easeOut(t))}px)`;
+    }));
+  });
+  glitch(document.getElementById('pb3'),3200);
+  after(4900,()=>fadeOut(p,400,0,phase6c));
+}
+
+function phase6c(){
+  const p=document.getElementById('f6c');
+  fadeIn(p,400,0);
+  fadeIn(document.getElementById('f6c-top'),600,300);
+  wipeIn(document.getElementById('f6c-main'),1200,900);
+  fadeIn(document.getElementById('f6c-sub'),600,2500);
+  after(3500,()=>anim(700,t=>{ document.getElementById('stats-row').style.opacity=easeOut(t); }));
+  after(5000,()=>fadeIn(document.getElementById('f6c-ep'),700,0));
+  glitch(document.getElementById('f6c-main'),5500);
+  glitch(document.getElementById('f6c-main'),7000);
+}
+
+after(300,phase1);
+document.addEventListener('keydown',e=>{ if(e.code==='Space') location.reload(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>gif 1994</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; width:2560px; height:1440px; }
+canvas { display:block; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Oswald:wght@700&display=swap">
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+const W = 2560, H = 1440;
+const MONO    = '"Share Tech Mono","Courier New",monospace';
+const DISPLAY = '"Oswald",sans-serif';
+
+// ── Timeline (24s ÷ 1.5 = 16s)
+// old → new:  13→8.67  14.5→9.67  16→10.67  17.5→11.67  19→12.67  20.5→13.67  22→14.67
+const DUR        = 16.0;
+const T_SQUIGGLE = 8.67;
+const T_ERRPANEL = 9.67;
+const T_BORDER   = 10.67;
+const T_SEGFAULT = 11.67;
+const T_VIGNETTE = 12.67;
+const T_SHAKE    = 13.67;
+const TXT_START  = 14.67;
+
+let startTime = null, raf = null, t = 0;
+
+function inv(a, b) { return Math.min(1, Math.max(0, (t-a)/(b-a))); }
+
+// ── Code
+const MAIN_C = [
+  '/* gif_decode.c — read & display GIF87a/89a    */',
+  '/* tools: gcc 2.7, SunOS 4.1.3, 1994           */',
+  '',
+  '#include <stdio.h>',
+  '#include <stdlib.h>',
+  '#include <string.h>',
+  '',
+  '#define GIF_SIG87   "GIF87a"',
+  '#define GIF_SIG89   "GIF89a"',
+  '#define MAX_CODES   4096',
+  '#define MAX_STACK   4096',
+  '',
+  'typedef unsigned char  byte;',
+  'typedef unsigned short word;',
+  '',
+  'typedef struct {',
+  '    word  width, height;',
+  '    byte  packed;',
+  '    byte  bg_color;',
+  '    byte  aspect;',
+  '} LogicalScreenDesc;',
+  '',
+  'typedef struct {',
+  '    word  left, top;',
+  '    word  width, height;',
+  '    byte  packed;',
+  '} ImageDesc;',
+  '',
+  '/* LZW decompression table */',
+  'static byte  *lzw_table[MAX_CODES];',
+  'static int    lzw_len[MAX_CODES];',
+  'static byte   lzw_stack[MAX_STACK];',
+  '',
+  'static int lzw_decompress(',
+  '    FILE *f, byte *out,',
+  '    int min_code_size)',
+  '{',
+  '    int  clear_code, eoi_code;',
+  '    int  code_size, code_mask;',
+  '    int  next_code, old_code;',
+  '    int  code, i, top;',
+  '    byte first;',
+  '',
+  '    clear_code = 1 << min_code_size;',
+  '    eoi_code   = clear_code + 1;',
+  '    next_code  = eoi_code + 1;',
+  '    code_size  = min_code_size + 1;',
+  '    code_mask  = (1 << code_size) - 1;',
+  '',
+  '    for (i = 0; i < clear_code; i++) {',
+  '        lzw_table[i] = (byte*)malloc(1);',
+  '        lzw_table[i][0] = (byte)i;',
+  '        lzw_len[i] = 1;',
+  '    }',
+  '',
+  '    old_code = -1; first = 0; top = 0;',
+  '',
+  '    while ((code = read_code(f,',
+  '                   &code_size,',
+  '                   &code_mask)) != eoi_code)',
+  '    {',
+  '        if (code == clear_code) {',
+  '            code_size = min_code_size + 1;',
+  '            code_mask = (1<<code_size)-1;',
+  '            next_code = eoi_code + 1;',
+  '            old_code  = -1; continue;',
+  '        }',
+  '        if (old_code == -1) {',
+  '            *out++ = lzw_table[code][0];',
+  '            old_code = code;',
+  '            first = lzw_table[code][0];',
+  '            continue;',
+  '        }',
+  '        if (code >= next_code) {',
+  '            lzw_stack[top++] = first;',
+  '            code = old_code;',
+  '        }',
+  '        while (lzw_len[code] > 1) {',
+  '            lzw_stack[top++] =',
+  '                lzw_table[code][lzw_len[code]-1];',
+  '            code = *(word*)lzw_table[code];',
+  '        }',
+  '        first = lzw_stack[top++]',
+  '              = lzw_table[code][0];',
+  '        while (top > 0)',
+  '            *out++ = lzw_stack[--top];',
+  '        if (next_code < MAX_CODES) {',
+  '            int nlen = lzw_len[old_code]+1;',
+  '            lzw_table[next_code] =',
+  '                (byte*)malloc(nlen);',
+  '            memcpy(lzw_table[next_code],',
+  '                   lzw_table[old_code],',
+  '                   lzw_len[old_code]);',
+  '            lzw_table[next_code][nlen-1] = first;',
+  '            lzw_len[next_code] = nlen;',
+  '            if (++next_code > code_mask+1',
+  '                && code_size < 12)',
+  '                code_mask=(1<<++code_size)-1;',
+  '        }',
+  '        old_code = code;',
+  '    }',
+  '    return (int)(out - outbase);',
+  '}',
+  '',
+  'int load_gif(const char *path,',
+  '             byte **pixels, int *w, int *h)',
+  '{',
+  '    FILE *f; LogicalScreenDesc lsd;',
+  '    ImageDesc img; byte sig[7];',
+  '    int gct_size; byte lct_size;',
+  '',
+  '    f = fopen(path, "rb");',
+  '    if (!f) return -1;',
+  '    fread(sig, 1, 6, f); sig[6] = 0;',
+  '    if (strcmp((char*)sig, GIF_SIG87) != 0',
+  '     && strcmp((char*)sig, GIF_SIG89) != 0)',
+  '        { fclose(f); return -2; }',
+  '    fread(&lsd, sizeof(lsd), 1, f);',
+  '    *w = lsd.width; *h = lsd.height;',
+  '    gct_size = lsd.packed & 0x07;',
+  '    if (lsd.packed & 0x80)',
+  '        fseek(f,3*(1<<(gct_size+1)),SEEK_CUR);',
+  '    while (fgetc(f) != 0x2C);',
+  '    fread(&img, sizeof(img), 1, f);',
+  '    lct_size = img.packed & 0x07;',
+  '    if (img.packed & 0x80)',
+  '        fseek(f,3*(1<<(lct_size+1)),SEEK_CUR);',
+  '    *pixels = (byte*)malloc((*w)*(*h));',
+  '    lzw_decompress(f, *pixels, fgetc(f));',
+  '    fclose(f);',
+  '    return 0;',
+  '}',
+];
+
+const FLAGGED = new Set([34,35,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62]);
+
+const HEADER = [
+  '/* gif.h — public API */',
+  '',
+  'typedef unsigned char  byte;',
+  'typedef unsigned short word;',
+  '',
+  '/* returns 0 on success, <0 error */',
+  'int load_gif(',
+  '    const char *path,',
+  '    byte      **pixels,',
+  '    int        *w,',
+  '    int        *h);',
+  '',
+  'void free_pixels(byte *p);',
+  '',
+  '#define GIF_OK        0',
+  '#define GIF_ERR_OPEN -1',
+  '#define GIF_ERR_SIG  -2',
+  '#define GIF_ERR_MEM  -3',
+  '#define GIF_ERR_LZW  -4',
+];
+
+const TERM_LINES = [
+  '$ gcc -Wall -O2 -o gifshow gif_decode.c -lm',
+  '',
+  '$ ls -la gifshow',
+  '-rwxr-xr-x  1 alex  staff  12288 Mar  7 02:14 gifshow',
+  '',
+  '$ ./gifshow dancing_baby.gif',
+  'load_gif: 160x120 GIF89a, 256 colours',
+  'lzw: min_code_size=8, 19200 bytes out',
+  'frame 001 ... ok  [ 8.1 ms ]',
+  'frame 002 ... ok  [ 7.9 ms ]',
+  'frame 003 ... ok  [ 8.3 ms ]',
+  '$ ./gifshow homepage_logo.gif',
+  'load_gif: 468x60 GIF87a, 64 colours',
+  'lzw: min_code_size=6, 28080 bytes out',
+  'frame 001 ... ok  [ 6.4 ms ]',
+  'frame 002 ... ok  [ 6.2 ms ]',
+];
+
+// ── Colour helpers
+function hexRgb(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
+function lerp(a,b,f){ return Math.round(a+(b-a)*f); }
+function lerpHex(ha,hb,f){
+  const [r0,g0,b0]=hexRgb(ha),[r1,g1,b1]=hexRgb(hb);
+  return `rgb(${lerp(r0,r1,f)},${lerp(g0,g1,f)},${lerp(b0,b1,f)})`;
+}
+const RED='#e50004';
+
+function synCol(line){
+  if(!line.trim()) return '#c4c4c4';
+  if(/^\s*\/\*|^\s*\*|^\s*\/\//.test(line)) return '#4e7a4e';
+  if(/^\s*#/.test(line))                     return '#7a5f20';
+  if(/^\s*(typedef|struct|int|void|byte|word|char|static|return|if|else|for|while|continue)\b/.test(line)) return '#4a7898';
+  return '#c4c4c4';
+}
+
+// ── Primitives
+function bevel(x,y,w,h,up){
+  cx.lineWidth=1;
+  cx.strokeStyle=up?'#4a4a4a':'#1a1a1a';
+  cx.beginPath();cx.moveTo(x,y+h);cx.lineTo(x,y);cx.lineTo(x+w,y);cx.stroke();
+  cx.strokeStyle=up?'#1a1a1a':'#4a4a4a';
+  cx.beginPath();cx.moveTo(x+w,y);cx.lineTo(x+w,y+h);cx.lineTo(x,y+h);cx.stroke();
+}
+
+function titleBar(x,y,w,h,title,active){
+  const g=cx.createLinearGradient(x,y,x+w,y);
+  active?(g.addColorStop(0,'#1a3550'),g.addColorStop(1,'#234468'))
+        :(g.addColorStop(0,'#282828'),g.addColorStop(1,'#303030'));
+  cx.fillStyle=g; cx.fillRect(x,y,w,h);
+  cx.fillStyle=active?'#ccd6e0':'#606060';
+  cx.font=`bold ${Math.floor(h*0.52)}px ${MONO}`; cx.textAlign='left';
+  cx.fillText(title,x+8,y+h*0.72);
+  const bw=h-6,bsX=x+w-(bw+3)*3-3;
+  ['−','□','×'].forEach((l,i)=>{
+    const bxi=bsX+i*(bw+3);
+    cx.fillStyle='#2d2d2d'; cx.fillRect(bxi,y+3,bw,bw); bevel(bxi,y+3,bw,bw,true);
+    cx.fillStyle=active?'#b0bcc8':'#505050';
+    cx.font=`bold ${Math.floor(bw*0.55)}px ${MONO}`; cx.textAlign='center';
+    cx.fillText(l,bxi+bw/2,y+bw*0.82);
+  });
+}
+
+function menuBar(x,y,w,h,items){
+  cx.fillStyle='#272727'; cx.fillRect(x,y,w,h);
+  cx.strokeStyle='#1a1a1a'; cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(x,y+h-1);cx.lineTo(x+w,y+h-1);cx.stroke();
+  cx.fillStyle='#aaa'; cx.font=`${Math.floor(h*0.6)}px ${MONO}`; cx.textAlign='left';
+  let ox=x+10; items.forEach(it=>{cx.fillText(it,ox,y+h*0.72);ox+=cx.measureText(it).width+28;});
+}
+
+function scrollbar(x,y,w,h,pct){
+  cx.fillStyle='#1e1e1e'; cx.fillRect(x,y,w,h);
+  for(let dy=0;dy<h;dy+=4) for(let dx=0;dx<w;dx+=4)
+    if((dx+dy)%8===0){cx.fillStyle='#242424';cx.fillRect(x+dx,y+dy,2,2);}
+  const tH=Math.max(40,h*0.22),tY=y+w+(h-2*w-tH)*Math.min(1,Math.max(0,pct));
+  cx.fillStyle='#3a3a3a'; cx.fillRect(x,tY,w,tH); bevel(x,tY,w,tH,true);
+  [y,y+h-w].forEach((ay,ai)=>{
+    cx.fillStyle='#343434'; cx.fillRect(x,ay,w,w); bevel(x,ay,w,w,true);
+    cx.fillStyle='#888'; cx.font=`${Math.floor(w*0.65)}px ${MONO}`; cx.textAlign='center';
+    cx.fillText(ai===0?'▲':'▼',x+w/2,ay+w*0.78);
+  });
+}
+
+// ── Desktop icon (Win95 style)
+function desktopIcon(ix,iy,label,iconChar,iconColor){
+  // icon box
+  cx.fillStyle='#2a2a2a'; cx.fillRect(ix,iy,48,42); bevel(ix,iy,48,42,true);
+  // icon glyph
+  cx.fillStyle=iconColor||'#5a7a9a';
+  cx.font=`28px ${MONO}`; cx.textAlign='center';
+  cx.fillText(iconChar,ix+24,iy+30);
+  // label
+  cx.fillStyle='#888';
+  cx.font=`16px ${MONO}`; cx.textAlign='center';
+  // wrap long labels
+  const words=label.split(' ');
+  if(words.length===1||cx.measureText(label).width<90){
+    cx.fillText(label,ix+24,iy+58);
+  } else {
+    cx.fillText(words[0],ix+24,iy+56);
+    cx.fillText(words.slice(1).join(' '),ix+24,iy+72);
+  }
+}
+
+// ── File manager window (small, on desktop)
+function fileManager(x,y,w,h){
+  cx.fillStyle='rgba(0,0,0,0.5)'; cx.fillRect(x+6,y+6,w,h);
+  cx.fillStyle='#2b2b2b'; cx.fillRect(x,y,w,h); bevel(x,y,w,h,true);
+  const TH=30;
+  titleBar(x+2,y+2,w-4,TH,'File Manager — /home/alex/gif_reader',false);
+  menuBar(x+2,y+TH+2,w-4,24,['File','Edit','View','Help']);
+
+  // address bar
+  const abY=y+TH+26;
+  cx.fillStyle='#1e1e1e'; cx.fillRect(x+2,abY,w-4,22); bevel(x+2,abY,w-4,22,false);
+  cx.fillStyle='#6a9aaa'; cx.font='16px '+MONO; cx.textAlign='left';
+  cx.fillText('/home/alex/gif_reader/',x+8,abY+15);
+
+  // file list
+  const files=[
+    ['📄','gif_decode.c','3.1 KB','Mar 7 02:14'],
+    ['📄','gif.h',       '0.8 KB','Mar 7 01:55'],
+    ['⚙','gifshow',     '12 KB', 'Mar 7 02:14'],
+    ['🖼','dancing_baby.gif','48 KB','Feb 28 11:20'],
+    ['🖼','homepage_logo.gif','22 KB','Feb 28 11:22'],
+    ['🖼','press_release.gif','64 KB','Feb 28 11:25'],
+    ['📄','Makefile',   '0.4 KB','Mar 7 01:40'],
+    ['📄','README',     '1.2 KB','Mar 5 09:10'],
+  ];
+  const listY=abY+26;
+  // header
+  cx.fillStyle='#222'; cx.fillRect(x+2,listY,w-4,22);
+  cx.fillStyle='#777'; cx.font='15px '+MONO; cx.textAlign='left';
+  cx.fillText('Name',x+34,listY+15);
+  cx.fillText('Size',x+280,listY+15);
+  cx.fillText('Modified',x+380,listY+15);
+
+  cx.save(); cx.beginPath(); cx.rect(x+2,listY+22,w-4,h-TH-26-22-26); cx.clip();
+  files.forEach((f,i)=>{
+    const fy=listY+22+i*24;
+    if(i%2===0){cx.fillStyle='#1e1e1e';cx.fillRect(x+2,fy,w-4,24);}
+    // icon
+    cx.font='14px '+MONO; cx.textAlign='left';
+    cx.fillStyle=f[0]==='⚙'?'#4a7a4a':f[0]==='🖼'?'#7a6a3a':'#5a7a9a';
+    cx.fillText(f[0],x+8,fy+17);
+    cx.fillStyle='#c0c0c0'; cx.font='16px '+MONO;
+    cx.fillText(f[1],x+30,fy+17);
+    cx.fillStyle='#777';
+    cx.fillText(f[2],x+280,fy+17);
+    cx.fillText(f[3],x+380,fy+17);
+  });
+  cx.restore();
+
+  // status
+  const stY=y+h-22;
+  cx.fillStyle='#1e1e1e'; cx.fillRect(x+2,stY,w-4,20); bevel(x+2,stY,w-4,20,false);
+  cx.fillStyle='#666'; cx.font='15px '+MONO; cx.textAlign='left';
+  cx.fillText('8 objects   153 KB',x+8,stY+14);
+}
+
+// ── Editor window
+function editorWindow(x,y,w,h,linesTyped,scrollFrac,caretOn,shake){
+  const sx=x+shake;
+  cx.fillStyle='rgba(0,0,0,0.6)'; cx.fillRect(sx+10,y+10,w,h);
+  cx.fillStyle='#2b2b2b'; cx.fillRect(sx,y,w,h); bevel(sx,y,w,h,true);
+
+  // red border pulse
+  const bInv=inv(T_BORDER,T_BORDER+1);
+  if(bInv>0){
+    cx.strokeStyle=`rgba(229,0,4,${bInv*(0.5+0.5*Math.sin(t*8))})`;
+    cx.lineWidth=Math.round(bInv*6);
+    cx.strokeRect(sx+1,y+1,w-2,h-2);
+    cx.lineWidth=1;
+  }
+
+  const TH=40;
+  titleBar(sx+2,y+2,w-4,TH,'gif_decode.c — [source]',true);
+  menuBar(sx+2,y+TH+2,w-4,30,['File','Edit','View','Search','Project','Build','Debug','Help']);
+
+  const tbY=y+TH+32;
+  cx.fillStyle='#252525'; cx.fillRect(sx+2,tbY,w-4,34);
+  cx.strokeStyle='#1a1a1a'; cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(sx+2,tbY+34);cx.lineTo(sx+w-2,tbY+34);cx.stroke();
+  ['▶','■','⊞','⊟','✎','⇅'].forEach((ic,i)=>{
+    const bx2=sx+8+i*42;
+    cx.fillStyle='#303030'; cx.fillRect(bx2,tbY+4,30,26); bevel(bx2,tbY+4,30,26,true);
+    cx.fillStyle='#888'; cx.font='16px '+MONO; cx.textAlign='center';
+    cx.fillText(ic,bx2+15,tbY+21);
+  });
+
+  const errInv=inv(T_ERRPANEL,T_ERRPANEL+1);
+  const errorPanelH=Math.round(errInv*160);
+  const SBW=24;
+  const edX=sx+4,edY=y+TH+32+34+4,edW=w-8-SBW;
+  const edH=h-TH-32-34-32-8-errorPanelH;
+
+  cx.fillStyle='#1c1c1c'; cx.fillRect(edX,edY,edW,edH); bevel(edX,edY,edW,edH,false);
+  const GW=68;
+  cx.fillStyle='#232323'; cx.fillRect(edX+2,edY+2,GW,edH-4);
+  cx.strokeStyle='#2e2e2e'; cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(edX+2+GW,edY+2);cx.lineTo(edX+2+GW,edY+edH-2);cx.stroke();
+
+  const FS=23,LH=30,maxV=Math.floor((edH-8)/LH);
+  const topLine=Math.floor(scrollFrac*Math.max(0,MAIN_C.length-maxV));
+  const sqInv=inv(T_SQUIGGLE,T_SQUIGGLE+1);
+
+  cx.save(); cx.beginPath(); cx.rect(edX+2,edY+2,edW-4,edH-4); cx.clip();
+  for(let i=0;i<=maxV;i++){
+    const li=topLine+i;
+    if(li>=MAIN_C.length) break;
+    const ly=edY+8+i*LH;
+    if(li===linesTyped-1&&linesTyped<=MAIN_C.length){
+      cx.fillStyle='#252535'; cx.fillRect(edX+2+GW+2,ly-LH*0.82,edW-GW-6,LH);
+    }
+    const flagged=FLAGGED.has(li);
+    cx.fillStyle=flagged&&sqInv>0?lerpHex('#4a4a5a',RED,sqInv):(li<linesTyped?'#4a4a5a':'#2a2a2a');
+    cx.font=`${FS-3}px ${MONO}`; cx.textAlign='right';
+    if(li<linesTyped) cx.fillText((li+1).toString(),edX+2+GW-6,ly);
+    if(li<linesTyped){
+      cx.fillStyle=synCol(MAIN_C[li]);
+      cx.font=`${FS}px ${MONO}`; cx.textAlign='left';
+      cx.fillText(MAIN_C[li],edX+2+GW+8,ly);
+      if(flagged&&sqInv>0){
+        const tw=cx.measureText(MAIN_C[li]).width;
+        cx.save(); cx.globalAlpha=sqInv;
+        cx.strokeStyle=RED; cx.lineWidth=2;
+        cx.beginPath();
+        for(let px=0;px<=tw;px+=4){
+          const wy=ly+4+Math.sin(px*0.8)*2;
+          px===0?cx.moveTo(edX+2+GW+8+px,wy):cx.lineTo(edX+2+GW+8+px,wy);
+        }
+        cx.stroke(); cx.restore();
+      }
+    }
+  }
+  // caret
+  if(linesTyped>0&&linesTyped<=MAIN_C.length){
+    const cr=linesTyped-1-topLine;
+    if(cr>=0&&cr<maxV&&caretOn){
+      const ly=edY+8+cr*LH;
+      cx.font=`${FS}px ${MONO}`;
+      const tw=cx.measureText(MAIN_C[linesTyped-1]||'').width;
+      cx.fillStyle='#9090bb';
+      cx.fillRect(edX+2+GW+8+tw,ly-LH*0.78,2,LH*0.88);
+    }
+  }
+  cx.restore();
+  scrollbar(edX+edW,edY,SBW,edH,scrollFrac);
+
+  // error panel
+  if(errorPanelH>0){
+    const epY=edY+edH;
+    cx.fillStyle='#1a0a0a'; cx.fillRect(edX,epY,edW+SBW,errorPanelH);
+    cx.strokeStyle='rgba(229,0,4,0.5)'; cx.lineWidth=1;
+    cx.beginPath();cx.moveTo(edX,epY);cx.lineTo(edX+edW+SBW,epY);cx.stroke();
+    cx.fillStyle='#2a0a0a'; cx.fillRect(edX,epY,edW+SBW,26);
+    cx.fillStyle=RED; cx.font=`bold 20px ${MONO}`; cx.textAlign='left';
+    cx.fillText('  ERRORS  (2)',edX+6,epY+18);
+    const errs=[
+      'gif_decode.c:50  use of patented LZW algorithm',
+      'gif_decode.c:34  compression: Unisys patent US4558302',
+    ];
+    errs.forEach((err,i)=>{
+      if(errorPanelH<60+i*30) return;
+      const ea=Math.min(1,(errorPanelH-30-i*30)/20);
+      cx.save(); cx.globalAlpha=ea;
+      cx.fillStyle='rgba(229,0,4,0.08)'; cx.fillRect(edX,epY+28+i*30,edW+SBW,28);
+      cx.fillStyle=RED; cx.font='18px '+MONO; cx.textAlign='left';
+      cx.fillText('●',edX+8,epY+46+i*30);
+      cx.fillStyle='#cc6060'; cx.fillText(err,edX+28,epY+46+i*30);
+      cx.restore();
+    });
+  }
+
+  // status
+  const stY=y+h-28;
+  cx.fillStyle='#202020'; cx.fillRect(sx+2,stY,w-4,26); bevel(sx+2,stY,w-4,26,false);
+  cx.fillStyle='#606060'; cx.font='17px '+MONO; cx.textAlign='left';
+  cx.fillText(`Ln ${linesTyped}  Col 1    C    SunOS 4.1`,sx+12,stY+18);
+  cx.textAlign='right';
+  if(sqInv>0){
+    cx.fillStyle=lerpHex('#606060',RED,sqInv);
+    cx.fillText(`⚠ 2 errors`,sx+w-12,stY+18);
+  } else {
+    cx.fillStyle='#606060';
+    cx.fillText(`${MAIN_C.length} lines    3.1 KB`,sx+w-12,stY+18);
+  }
+}
+
+// ── Header window
+function headerWindow(x,y,w,h,frac,shake){
+  const sx=x+shake*0.4;
+  cx.fillStyle='rgba(0,0,0,0.5)'; cx.fillRect(sx+8,y+8,w,h);
+  cx.fillStyle='#282828'; cx.fillRect(sx,y,w,h); bevel(sx,y,w,h,true);
+  const TH=34;
+  titleBar(sx+2,y+2,w-4,TH,'gif.h',false);
+  menuBar(sx+2,y+TH+2,w-4,26,['File','Edit','View','Help']);
+  const edX=sx+4,edY=y+TH+28+4,edW=w-8,edH=h-TH-32-8;
+  cx.fillStyle='#1a1a1a'; cx.fillRect(edX,edY,edW,edH); bevel(edX,edY,edW,edH,false);
+  const FS=21,LH=27,maxV=Math.floor((edH-6)/LH);
+  const shown=Math.floor(frac*HEADER.length);
+  cx.save(); cx.beginPath(); cx.rect(edX+2,edY+2,edW-4,edH-4); cx.clip();
+  for(let i=0;i<Math.min(shown,maxV);i++){
+    cx.fillStyle=synCol(HEADER[i]); cx.font=`${FS}px ${MONO}`; cx.textAlign='left';
+    cx.fillText(HEADER[i],edX+8,edY+8+i*LH+FS*0.82);
+  }
+  cx.restore();
+}
+
+// ── Terminal
+function terminal(x,y,w,h,shown,caretOn,shake){
+  const sx=x+shake*0.6;
+  cx.fillStyle='rgba(0,0,0,0.6)'; cx.fillRect(sx+8,y+8,w,h);
+  cx.fillStyle='#181818'; cx.fillRect(sx,y,w,h); bevel(sx,y,w,h,true);
+  const TH=34;
+  titleBar(sx+2,y+2,w-4,TH,'bash — alex@sunos:~/gif_reader',true);
+  const edX=sx+4,edY=y+TH+4,edW=w-8,edH=h-TH-8;
+  cx.fillStyle='#0e0e0e'; cx.fillRect(edX,edY,edW,edH);
+  const FS=22,LH=29,count=Math.min(shown,TERM_LINES.length);
+  cx.save(); cx.beginPath(); cx.rect(edX+2,edY+2,edW-4,edH-4); cx.clip();
+  for(let i=0;i<count;i++){
+    const line=TERM_LINES[i];
+    cx.fillStyle=line.startsWith('$')?'#3a8a3a'
+      :line.includes('warning')?'#888820'
+      :line.includes(' ok ')?'#3a803a'
+      :line.includes('-rwx')||line.includes('load_gif')||line.includes('lzw:')?'#5a7a8a'
+      :'#aaaaaa';
+    cx.font=`${FS}px ${MONO}`; cx.textAlign='left';
+    cx.fillText(line,edX+10,edY+10+i*LH+FS);
+  }
+  const sfInv=inv(T_SEGFAULT,T_SEGFAULT+1);
+  if(sfInv>0&&shown>=TERM_LINES.length){
+    cx.save(); cx.globalAlpha=Math.min(1,sfInv*3);
+    cx.fillStyle=RED; cx.font=`${FS}px ${MONO}`; cx.textAlign='left';
+    cx.fillText('Segmentation fault (core dumped)',edX+10,edY+10+count*LH+FS);
+    if(sfInv>0.7){
+      cx.globalAlpha=Math.min(1,(sfInv-0.7)*3);
+      cx.fillStyle='#cc4040';
+      cx.fillText('$ _',edX+10,edY+10+(count+1)*LH+FS);
+    }
+    cx.restore();
+  }
+  if(shown<TERM_LINES.length&&caretOn){
+    cx.fillStyle='#3a8a3a';
+    cx.fillRect(edX+10,edY+10+count*LH+FS-FS+4,FS*0.55,FS);
+  }
+  cx.restore();
+}
+
+// ── Desktop — rich with icons, file manager, widgets
+function desktop(){
+  cx.fillStyle='#181818'; cx.fillRect(0,0,W,H);
+  // dot grid
+  for(let y=0;y<H;y+=32) for(let x=0;x<W;x+=32){
+    cx.fillStyle='#202020'; cx.fillRect(x,y,1,1);
+  }
+
+  // ── Left column icons
+  const leftIcons=[
+    [40, 40,  'My\nComputer',  '💻','#5a7a9a'],
+    [40,140,  'Network',       '🌐','#4a6a8a'],
+    [40,240,  'Recycle\nBin',  '🗑','#6a6a6a'],
+    [40,340,  'gif_reader',    '📁','#8a6a30'],
+    [40,440,  'Makefile',      '📄','#5a7a5a'],
+    [40,540,  'gifshow',       '⚙','#4a8a4a'],
+    [40,640,  'README',        '📝','#6a6a9a'],
+    [40,740,  'test_imgs',     '🗂','#7a5a3a'],
+  ];
+  leftIcons.forEach(([ix,iy,lbl,ic,col])=>{
+    const lines=lbl.split('\n');
+    cx.fillStyle='#2a2a2a'; cx.fillRect(ix,iy,48,42); bevel(ix,iy,48,42,true);
+    cx.fillStyle=col; cx.font='26px '+MONO; cx.textAlign='center';
+    cx.fillText(ic,ix+24,iy+29);
+    cx.fillStyle='#888'; cx.font='15px '+MONO;
+    lines.forEach((ln,li)=>cx.fillText(ln,ix+24,iy+56+li*16));
+  });
+
+  // ── A small notepad / scratch window on the desktop (notes)
+  const nX=160,nY=40,nW=340,nH=200;
+  cx.fillStyle='rgba(0,0,0,0.4)'; cx.fillRect(nX+4,nY+4,nW,nH);
+  cx.fillStyle='#232323'; cx.fillRect(nX,nY,nW,nH); bevel(nX,nY,nW,nH,true);
+  titleBar(nX+2,nY+2,nW-4,26,'notes.txt — Notepad',false);
+  cx.fillStyle='#1a1a1a'; cx.fillRect(nX+2,nY+28,nW-4,nH-30);
+  const notes=[
+    'TODO:',
+    ' - test with more GIF files',
+    ' - add animation support',
+    ' - interlaced GIF support',
+    ' - error handling cleanup',
+    ' - ask on comp.graphics?',
+  ];
+  cx.font='15px '+MONO; cx.textAlign='left';
+  notes.forEach((n,i)=>{
+    cx.fillStyle=i===0?'#7a9a7a':'#707070';
+    cx.fillText(n,nX+8,nY+44+i*19);
+  });
+
+  // ── A tiny "xterm" window (second terminal, idle)
+  const xtX=160,xtY=260,xtW=340,xtH=160;
+  cx.fillStyle='rgba(0,0,0,0.4)'; cx.fillRect(xtX+4,xtY+4,xtW,xtH);
+  cx.fillStyle='#0e0e0e'; cx.fillRect(xtX,xtY,xtW,xtH); bevel(xtX,xtY,xtW,xtH,true);
+  // plain black titlebar for xterm
+  cx.fillStyle='#1a3550'; cx.fillRect(xtX+2,xtY+2,xtW-4,24);
+  cx.fillStyle='#aac'; cx.font='bold 14px '+MONO; cx.textAlign='left';
+  cx.fillText('xterm',xtX+8,xtY+16);
+  cx.fillStyle='#0e0e0e'; cx.fillRect(xtX+2,xtY+26,xtW-4,xtH-28);
+  const xtLines=['$ man giflib','$ apropos gif','$ ls *.gif'];
+  cx.font='15px '+MONO; cx.textAlign='left';
+  xtLines.forEach((l,i)=>{
+    cx.fillStyle=l.startsWith('$')?'#3a8a3a':'#888';
+    cx.fillText(l,xtX+8,xtY+44+i*22);
+  });
+  // blinking cursor
+  if(Math.floor(t*2)%2===0){
+    cx.fillStyle='#3a8a3a';
+    cx.fillRect(xtX+8,xtY+44+xtLines.length*22-13,9,15);
+  }
+
+  // ── CPU/mem monitor widget (top right of desktop, not covered by windows)
+  const monX=W-520,monY=20,monW=480,monH=120;
+  cx.fillStyle='rgba(0,0,0,0.4)'; cx.fillRect(monX+4,monY+4,monW,monH);
+  cx.fillStyle='#111'; cx.fillRect(monX,monY,monW,monH); bevel(monX,monY,monW,monH,true);
+  cx.fillStyle='#1a3550'; cx.fillRect(monX+2,monY+2,monW-4,22);
+  cx.fillStyle='#9ab'; cx.font='bold 14px '+MONO; cx.textAlign='left';
+  cx.fillText('System Monitor',monX+8,monY+15);
+  // cpu bar
+  cx.fillStyle='#3a7a3a';
+  const cpuPct=0.3+0.2*Math.sin(t*1.3+1);
+  cx.font='14px '+MONO; cx.textAlign='left';
+  cx.fillStyle='#666'; cx.fillText('CPU:',monX+8,monY+44);
+  cx.fillStyle='#1a1a1a'; cx.fillRect(monX+52,monY+32,340,16);
+  cx.fillStyle='#3a8a3a'; cx.fillRect(monX+52,monY+32,340*cpuPct,16);
+  cx.fillStyle='#888'; cx.fillText(`${Math.round(cpuPct*100)}%`,monX+400,monY+44);
+  // mem bar
+  const memPct=0.62+0.05*Math.sin(t*0.7);
+  cx.fillStyle='#666'; cx.fillText('MEM:',monX+8,monY+70);
+  cx.fillStyle='#1a1a1a'; cx.fillRect(monX+52,monY+58,340,16);
+  cx.fillStyle='#4a6a9a'; cx.fillRect(monX+52,monY+58,340*memPct,16);
+  cx.fillStyle='#888'; cx.fillText(`${Math.round(memPct*100)}%`,monX+400,monY+70);
+  cx.fillStyle='#555'; cx.fillText(`uptime: ${Math.floor(t/60)}h ${Math.floor(t%60)}m`,monX+8,monY+96);
+
+  // ── Clock widget (bottom right desktop area)
+  const clkX=W-200,clkY=H-130;
+  const now=new Date();
+  cx.fillStyle='#444'; cx.font='bold 48px '+MONO; cx.textAlign='center';
+  cx.fillText(`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,clkX+80,clkY+50);
+  cx.fillStyle='#333'; cx.font='18px '+MONO;
+  cx.fillText(now.toDateString(),clkX+80,clkY+75);
+
+  // red vignette from edges (invasion)
+  const dv=inv(T_VIGNETTE,TXT_START);
+  if(dv>0){
+    const g=cx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.9);
+    g.addColorStop(0,'rgba(0,0,0,0)');
+    g.addColorStop(1,`rgba(80,0,0,${dv*0.65})`);
+    cx.fillStyle=g; cx.fillRect(0,0,W,H);
+  }
+}
+
+// ── File manager (shown from start, on right side of desktop)
+function drawFileManager(){
+  fileManager(160,440,480,360);
+}
+
+// ── Taskbar
+function taskbar(names){
+  const TH=38;
+  cx.fillStyle='#202020'; cx.fillRect(0,H-TH,W,TH);
+  cx.strokeStyle='#383838'; cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(0,H-TH);cx.lineTo(W,H-TH);cx.stroke();
+  cx.fillStyle='#1a3248'; cx.fillRect(4,H-TH+2,96,TH-4); bevel(4,H-TH+2,96,TH-4,true);
+  cx.fillStyle='#b0c0d0'; cx.font='bold 19px '+MONO; cx.textAlign='center';
+  cx.fillText('▶ Start',52,H-TH+25);
+  names.forEach((n,i)=>{
+    if(!n)return;
+    const bx=108+i*260;
+    cx.fillStyle=i===0?'#2a3040':'#252525'; cx.fillRect(bx,H-TH+3,250,TH-6);
+    bevel(bx,H-TH+3,250,TH-6,i!==0);
+    cx.fillStyle=i===0?'#b8c4d0':'#888'; cx.font='18px '+MONO; cx.textAlign='left';
+    cx.fillText(n,bx+8,H-TH+24);
+  });
+  const now=new Date();
+  cx.fillStyle='#1a1a1a'; cx.fillRect(W-90,H-TH+3,86,TH-6); bevel(W-90,H-TH+3,86,TH-6,false);
+  cx.fillStyle='#909090'; cx.font='19px '+MONO; cx.textAlign='center';
+  cx.fillText(`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,W-47,H-TH+23);
+}
+
+function scanlines(){
+  cx.save(); cx.globalAlpha=0.028; cx.fillStyle='#000';
+  for(let y=0;y<H;y+=3) cx.fillRect(0,y,W,1);
+  cx.restore();
+}
+function vignette(){
+  const g=cx.createRadialGradient(W/2,H/2,H*0.28,W/2,H/2,H*0.82);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,0.42)');
+  cx.fillStyle=g; cx.fillRect(0,0,W,H);
+}
+function shakeAmt(){
+  const s=inv(T_SHAKE,TXT_START);
+  return s>0?Math.sin(t*40)*s*18:0;
+}
+
+// ── ВЫ НАРУШИТЕЛЬ
+function drawViolator(){
+  if(t<TXT_START) return;
+  const a=Math.min(1,(t-TXT_START)/0.6);
+  cx.save(); cx.globalAlpha=a*0.88; cx.fillStyle='#000'; cx.fillRect(0,0,W,H); cx.restore();
+  cx.save(); cx.globalAlpha=a*0.08; cx.fillStyle=RED;
+  for(let y=0;y<H;y+=5) cx.fillRect(0,y,W,2);
+  cx.restore();
+
+  cx.save(); cx.globalAlpha=a;
+  const LINE1='ВЫ', LINE2='НАРУШИТЕЛЬ';
+  let fs=900;
+  cx.font=`900 ${fs}px ${DISPLAY}`;
+  while(cx.measureText(LINE2).width>W*0.88&&fs>100){ fs-=10; cx.font=`900 ${fs}px ${DISPLAY}`; }
+
+  const gap=fs*0.08;
+  const cy1=H/2-(fs*2+gap)/2+fs*0.78;
+  const cy2=cy1+fs+gap;
+
+  cx.shadowColor=RED; cx.shadowBlur=120; cx.fillStyle=RED;
+  cx.textAlign='center'; cx.textBaseline='alphabetic';
+  const sh=a<1?Math.sin(t*80)*(1-a)*12:0;
+  cx.fillText(LINE1,W/2+sh,cy1);
+  cx.fillText(LINE2,W/2+sh,cy2);
+  cx.shadowBlur=0;
+
+  const ra=Math.min(1,(a-0.3)*3);
+  if(ra>0){
+    cx.save(); cx.globalAlpha=ra*0.5;
+    const rw=cx.measureText(LINE2).width*0.9;
+    cx.strokeStyle=RED; cx.lineWidth=2;
+    cx.beginPath();cx.moveTo(W/2-rw/2,cy1+gap*0.4);cx.lineTo(W/2+rw/2,cy1+gap*0.4);cx.stroke();
+    cx.restore();
+  }
+  cx.restore();
+}
+
+// ── Main render
+function render(ts){
+  if(!startTime) startTime=ts;
+  t=Math.min((ts-startTime)/1000,DUR);
+
+  const EW=1380,EH=1100,EX=680,EY=55;
+  const HW=820,HH=560,HX=W-HW-60,HY=50;
+  const TW=820,TH2=440,TX=W-TW-60,TY=HY+HH+18;
+
+  // type all 120 lines in ~7s → 17 lps
+  const LPS=17;
+  const linesTyped=Math.min(MAIN_C.length,Math.floor(Math.max(0,t-0.4)*LPS)+1);
+  const scrollFrac=linesTyped>30?Math.min(1,(linesTyped-30)/(MAIN_C.length-30)):0;
+
+  const headerFrac=Math.min(1,Math.max(0,(t-1.0)/4.0));
+  const termStart=7.0;
+  const termLines=Math.floor(Math.max(0,(t-termStart)/0.25));
+  const caretOn=Math.floor(t*2)%2===0;
+  const shake=shakeAmt();
+
+  desktop();
+  drawFileManager();
+  if(t>1.0) headerWindow(HX,HY,HW,HH,headerFrac,shake);
+  if(t>termStart) terminal(TX,TY,TW,TH2,termLines,caretOn,shake);
+  editorWindow(EX,EY,EW,EH,linesTyped,scrollFrac,caretOn,shake);
+  taskbar(['gif_decode.c',t>1.0?'gif.h':'',t>termStart?'bash':'','File Manager']);
+  scanlines(); vignette(); drawViolator();
+
+  if(t<DUR) raf=requestAnimationFrame(render);
+}
+
+function restart(){
+  if(raf) cancelAnimationFrame(raf);
+  startTime=null; t=0;
+  raf=requestAnimationFrame(render);
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К') restart();
+});
+setTimeout(restart,300);
+</script>
+</body>
+</html>

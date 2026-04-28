@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FFmpeg — X-Ray Anatomy v5</title>
+<style>
+  *{margin:0;padding:0}
+  body{background:#000;overflow:hidden}
+  canvas{display:block}
+</style>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Oswald:wght@400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const W=2560,H=1440;
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+cv.width=W;cv.height=H;
+cv.style.width='100vw';cv.style.height='100vh';
+cv.style.objectFit='contain';
+
+const gCv=document.createElement('canvas');
+const gCx=gCv.getContext('2d');
+gCv.width=512;gCv.height=512;
+
+const DUR=38;
+let t0=null,running=false,aId=null;
+
+const P={
+  bg:'#05080e',
+  teal:'#00d4c8',tealDim:'#00a89e',tealDark:'#004d48',
+  blue:'#1a6fff',blueBright:'#4d9aff',blueDim:'#2a5aaa',
+  cyan:'#00e5ff',
+  white:'#e8f4f4',
+  dim:'#7a9aaa',dimmer:'#506878',
+  orange:'#ff6a30',orangeBright:'#ff9060',orangeDim:'#cc5525',
+  purple:'#9060ff',purpleBright:'#b090ff',
+  red:'#ff3050',accent:'#00ffd0',green:'#40ff90',yellow:'#ffe040',
+};
+
+function eOC(t){return 1-Math.pow(1-t,3)}
+function eIOC(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+function eOB(t){const c=1.8;return 1+(c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2)}
+function eOQ(t){return 1-Math.pow(1-t,4)}
+function lp(a,b,t){return a+(b-a)*cl(t)}
+function cl(t){return Math.max(0,Math.min(1,t))}
+
+let _s=42;
+function sr(s){_s=s|0}
+function nr(){_s=(_s*1103515245+12345)&0x7fffffff;return _s/0x7fffffff}
+
+function updateGrain(time){
+  sr((time*8000)|0);
+  const id=gCx.createImageData(512,512);const d=id.data;
+  for(let i=0;i<d.length;i+=4){const v=(nr()*255)|0;d[i]=d[i+1]=d[i+2]=v;d[i+3]=55;}
+  gCx.putImageData(id,0,0);
+}
+function drawGrain(a){
+  ctx.save();ctx.globalCompositeOperation='overlay';ctx.globalAlpha=a;
+  for(let x=0;x<W;x+=512)for(let y=0;y<H;y+=512)ctx.drawImage(gCv,x,y);
+  ctx.globalCompositeOperation='source-over';ctx.restore();
+}
+
+function glitch(int){
+  if(int<=0)return;
+  const n=Math.floor(int*25)+1;
+  for(let i=0;i<n;i++){
+    const y=Math.random()*H;const h=Math.random()*25*int+2;
+    const off=(Math.random()-.5)*int*150;
+    try{const iy=Math.max(0,y|0);const ih=Math.min((h|0)+1,H-iy);
+    if(ih>0){const img=ctx.getImageData(0,iy,W,ih);ctx.putImageData(img,off,iy);}}catch(e){}
+  }
+  if(int>0.3){ctx.save();ctx.globalCompositeOperation='screen';ctx.globalAlpha=int*0.12;
+  ctx.drawImage(cv,3,0);ctx.globalCompositeOperation='source-over';ctx.restore();}
+}
+
+function hexB(v){const c='0123456789ABCDEF';return c[(v>>4)&0xf]+c[v&0xf]}
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+
+// ========= DATA =========
+const MKV_HEADER=[
+  0x1A,0x45,0xDF,0xA3,0x93,0x42,0x86,0x81,0x01,0x42,0xF7,0x81,0x01,0x42,0xF2,0x81,
+  0x04,0x42,0xF3,0x81,0x08,0x42,0x82,0x84,0x6D,0x61,0x74,0x72,0x6F,0x73,0x6B,0x61,
+  0x42,0x87,0x81,0x04,0x42,0x85,0x81,0x02,0x18,0x53,0x80,0x67,0x01,0xFF,0xFF,0xFF,
+  0xFF,0xFF,0xFF,0xFF,0x11,0x4D,0x9B,0x74,0x40,0x47,0x4D,0xBB,0x8B,0x53,0xAB,0x84,
+];
+
+const NAL_TYPES=[
+  {type:7,name:'SPS',color:P.cyan},
+  {type:8,name:'PPS',color:P.cyan},
+  {type:5,name:'IDR',color:P.blueBright},
+  {type:1,name:'SLICE',color:P.blueDim},
+  {type:6,name:'SEI',color:P.dim},
+];
+
+const VIDEO_DEC=[
+  {n:'MPEG-1',y:1993,use:'VCD, early web'},{n:'MPEG-2',y:1995,use:'DVD, broadcast TV'},
+  {n:'MPEG-4 ASP',y:2001,use:'DivX, Xvid'},{n:'H.264/AVC',y:2003,use:'Blu-ray, streaming'},
+  {n:'H.261',y:1990,use:'Video conferencing'},{n:'H.263',y:1996,use:'3G video calls'},
+  {n:'H.263+',y:1998,use:'Enhanced mobile'},{n:'VC-1',y:2006,use:'WMV9, Blu-ray'},
+  {n:'WMV1',y:1999,use:'Windows Media 7'},{n:'WMV2',y:2002,use:'Windows Media 8'},
+  {n:'WMV3',y:2003,use:'Windows Media 9'},{n:'VP3',y:2001,use:'On2 → open-sourced'},
+  {n:'VP5',y:2002,use:'On2 proprietary'},{n:'VP6',y:2003,use:'Flash video (FLV)'},
+  {n:'VP7',y:2005,use:'On2 proprietary'},{n:'VP8',y:2010,use:'WebM · быстрее Google'},
+  {n:'Theora',y:2004,use:'Open web video'},{n:'RV10',y:1997,use:'RealVideo 5.0'},
+  {n:'RV20',y:1998,use:'RealVideo G2'},{n:'RV30',y:2002,use:'RealVideo 8'},
+  {n:'RV40',y:2003,use:'RealVideo 9/10'},{n:'SVQ1',y:1998,use:'Sorenson (QT)'},
+  {n:'SVQ3',y:2001,use:'Sorenson 3 (QT)'},{n:'Indeo 2',y:1992,use:'Intel video'},
+  {n:'Indeo 3',y:1993,use:'Intel / gaming'},{n:'Indeo 5',y:1998,use:'Intel enhanced'},
+  {n:'Cinepak',y:1991,use:'CD-ROM video'},{n:'MS RLE',y:1992,use:'Bitmap anim'},
+  {n:'DV',y:1995,use:'Camcorders'},{n:'DVCPRO',y:1995,use:'Panasonic broadcast'},
+  {n:'MJPEG',y:1992,use:'Motion JPEG'},{n:'JPEG2000',y:2000,use:'Digital cinema'},
+  {n:'FFV1',y:2003,use:'Lossless (FFmpeg)'},{n:'Snow',y:2004,use:'Wavelet codec'},
+  {n:'Dirac',y:2008,use:'BBC open codec'},{n:'RoQ',y:1996,use:'id Software'},
+  {n:'C93',y:1993,use:'Cyberia FMV'},{n:'Raw',y:0,use:'Uncompressed'},
+];
+
+const AUDIO_DEC=[
+  {n:'MP2',y:1993,use:'Broadcasting'},{n:'MP3',y:1993,use:'Music'},
+  {n:'AAC',y:1997,use:'iTunes, YouTube'},{n:'AC3',y:1992,use:'Dolby Digital'},
+  {n:'EAC3',y:2005,use:'Dolby Digital+'},{n:'DTS',y:1993,use:'Cinema, Blu-ray'},
+  {n:'WMA v1',y:1999,use:'Windows Media'},{n:'WMA v2',y:2002,use:'WM 9'},
+  {n:'WMA v3',y:2006,use:'WMA Pro'},{n:'Vorbis',y:2000,use:'Ogg audio'},
+  {n:'Cook',y:1998,use:'RealAudio'},{n:'Sipr',y:1999,use:'RA voice'},
+  {n:'ATRAC3',y:1999,use:'Sony MiniDisc'},{n:'FLAC',y:2001,use:'Lossless'},
+  {n:'Opus',y:2011,use:'Low-latency'},{n:'ADPCM',y:1984,use:'Telephony'},
+  {n:'PCM',y:0,use:'Raw audio'},{n:'AMR-NB',y:1999,use:'GSM voice'},
+  {n:'AMR-WB',y:2001,use:'3G HD Voice'},
+];
+
+const CONTAINERS_R=[
+  {n:'AVI',y:1992,use:'Microsoft RIFF'},{n:'MOV/QT',y:1991,use:'Apple QuickTime'},
+  {n:'MP4/M4V',y:2001,use:'ISO base media'},{n:'3GP',y:2003,use:'Mobile video'},
+  {n:'MKV',y:2002,use:'Matroska'},{n:'WebM',y:2010,use:'Google web'},
+  {n:'MPEG-PS',y:1993,use:'DVD (VOB)'},{n:'MPEG-TS',y:1995,use:'Broadcast'},
+  {n:'ASF/WMV',y:1996,use:'Windows Media'},{n:'RealMedia',y:1997,use:'RealNetworks'},
+  {n:'FLV',y:2003,use:'Flash Video'},{n:'Ogg',y:1998,use:'Xiph.org'},
+  {n:'WAV',y:1991,use:'PCM audio'},{n:'AIFF',y:1988,use:'Apple PCM'},
+  {n:'AU',y:1992,use:'Sun/NeXT'},{n:'FLAC',y:2001,use:'FLAC native'},
+  {n:'MP3',y:1993,use:'Audio stream'},{n:'DV',y:1995,use:'DV cam'},
+  {n:'SGI',y:1987,use:'Silicon Graphics'},{n:'NUT',y:2003,use:'FFmpeg own'},
+  {n:'image2',y:0,use:'Image sequences'},
+];
+
+const CONTAINERS_W=[
+  {n:'AVI',y:1992},{n:'MOV',y:1991},{n:'MP4',y:2001},{n:'MKV',y:2002},
+  {n:'WebM',y:2010},{n:'MPEG-TS',y:1995},{n:'MPEG-PS',y:1993},
+  {n:'FLV',y:2003},{n:'Ogg',y:1998},{n:'WAV',y:1991},{n:'Raw',y:0},
+];
+
+
+// ========= SCENE 1: HEX + EBML (0–9s) =========
+function scn1(t, time) {
+  // Title
+  ctx.globalAlpha = eOC(cl(t / 1));
+  ctx.font = 'bold 64px "Oswald"';
+  ctx.fillStyle = P.teal;
+  ctx.textAlign = 'left';
+  ctx.fillText('.MKV', 80, 90);
+  ctx.font = '500 30px "Oswald"';
+  ctx.fillStyle = P.dim;
+  ctx.fillText('Matroska Video Container', 280, 90);
+
+  // HEX DUMP — left half, 8 columns for larger text
+  const hexCols = 8;
+  const hx0 = 80, hy0 = 160;
+  const cellW = 52, cellH = 58;
+  const addrW = 100;
+  const bytesVisible = Math.min(Math.floor(eOC(cl(t / 4)) * MKV_HEADER.length), MKV_HEADER.length);
+
+  ctx.font = '700 26px "IBM Plex Mono"';
+
+  for (let i = 0; i < bytesVisible; i++) {
+    const row = Math.floor(i / hexCols);
+    const col = i % hexCols;
+    const x = hx0 + addrW + col * cellW;
+    const y = hy0 + row * cellH;
+    if (y > H - 100) break;
+
+    if (col === 0) {
+      ctx.fillStyle = P.dimmer;
+      ctx.globalAlpha = 0.6;
+      ctx.textAlign = 'right';
+      ctx.font = '500 20px "IBM Plex Mono"';
+      ctx.fillText(hexB((row * hexCols) >> 8) + hexB((row * hexCols) & 0xff), hx0 + addrW - 20, y);
+      ctx.font = '700 26px "IBM Plex Mono"';
+    }
+
+    const isMagic = i < 4;
+    const isDocType = i >= 23 && i <= 30;
+    const isSegment = i >= 38 && i <= 41;
+
+    ctx.textAlign = 'left';
+    if (isMagic) {
+      ctx.fillStyle = P.teal; ctx.globalAlpha = 1;
+      ctx.fillRect(x - 3, y + 8, cellW - 8, 3);
+    } else if (isDocType) {
+      ctx.fillStyle = P.orange; ctx.globalAlpha = 0.95;
+    } else if (isSegment) {
+      ctx.fillStyle = P.blue; ctx.globalAlpha = 0.9;
+    } else {
+      ctx.fillStyle = P.dim; ctx.globalAlpha = 0.55;
+    }
+    ctx.fillText(hexB(MKV_HEADER[i]), x, y);
+  }
+
+  // ASCII sidebar
+  ctx.font = '20px "Share Tech Mono"';
+  for (let i = 0; i < bytesVisible; i++) {
+    const row = Math.floor(i / hexCols);
+    const col = i % hexCols;
+    const x = hx0 + addrW + hexCols * cellW + 50 + col * 18;
+    const y = hy0 + row * cellH;
+    if (y > H - 100) break;
+    const b = MKV_HEADER[i];
+    const ch = (b >= 32 && b < 127) ? String.fromCharCode(b) : '·';
+    const isDoc = i >= 23 && i <= 30;
+    ctx.fillStyle = isDoc ? P.orangeBright : P.dimmer;
+    ctx.globalAlpha = isDoc ? 0.9 : 0.5;
+    ctx.textAlign = 'left';
+    ctx.fillText(ch, x, y);
+  }
+
+  // Annotations
+  if (t > 1.2) {
+    const aT = eOC(cl((t - 1.2) / 1));
+    ctx.globalAlpha = aT;
+    ctx.font = 'bold 28px "Oswald"';
+    ctx.fillStyle = P.teal;
+    ctx.textAlign = 'left';
+    ctx.fillText('EBML Magic Number', hx0, hy0 - 30);
+    ctx.font = '20px "IBM Plex Mono"';
+    ctx.fillStyle = P.tealDim;
+    ctx.fillText('1A 45 DF A3 — сигнатура Matroska', hx0 + 340, hy0 - 30);
+  }
+
+  if (t > 2.5 && bytesVisible > 30) {
+    const aT = eOC(cl((t - 2.5) / 0.8));
+    const row1 = Math.floor(23 / hexCols);
+    const annotX = hx0 + addrW + hexCols * cellW + hexCols * 18 + 80;
+    if (annotX < 1200) {
+      ctx.globalAlpha = aT;
+      ctx.font = 'bold 22px "Oswald"';
+      ctx.fillStyle = P.orange;
+      ctx.textAlign = 'left';
+      ctx.fillText('← "matroska"', annotX, hy0 + row1 * cellH);
+    }
+  }
+
+  // EBML TREE — right side
+  if (t > 3) {
+    const treeT = t - 3;
+    const tx0 = 1280, ty0 = 100;
+
+    ctx.globalAlpha = eOC(cl(treeT / 0.8));
+    ctx.font = 'bold 40px "Oswald"';
+    ctx.fillStyle = P.teal;
+    ctx.textAlign = 'left';
+    ctx.fillText('EBML Structure', tx0, ty0);
+
+    const tree = [
+      {d:0,name:'EBML Header',id:'1A 45 DF A3',color:P.teal},
+      {d:0,name:'Segment',id:'18 53 80 67',color:P.blue},
+      {d:1,name:'SeekHead',id:'11 4D 9B 74',color:P.blueDim},
+      {d:1,name:'Info',id:'15 49 A9 66',color:P.blueBright},
+      {d:2,name:'TimecodeScale',id:'2A D7 B1',color:P.dim,val:'1000000 ns'},
+      {d:2,name:'Duration',id:'44 89',color:P.dim,val:'8594000 ms'},
+      {d:2,name:'MuxingApp',id:'4D 80',color:P.dim,val:'"libebml v1.3"'},
+      {d:1,name:'Tracks',id:'16 54 AE 6B',color:P.cyan},
+      {d:2,name:'TrackEntry',id:'AE',color:P.blueBright,val:'Video'},
+      {d:3,name:'CodecID',id:'86',color:P.blueBright,val:'V_MPEG4/ISO/AVC'},
+      {d:3,name:'PixelWidth',id:'B0',color:P.blueDim,val:'1920'},
+      {d:3,name:'PixelHeight',id:'BA',color:P.blueDim,val:'1080'},
+      {d:2,name:'TrackEntry',id:'AE',color:P.orangeBright,val:'Audio'},
+      {d:3,name:'CodecID',id:'86',color:P.orangeBright,val:'A_EAC3'},
+      {d:3,name:'SamplingFreq',id:'B5',color:P.orangeDim,val:'48000 Hz'},
+      {d:3,name:'Channels',id:'9F',color:P.orangeDim,val:'6 (5.1)'},
+    ];
+
+    const rowH = 68;
+    const indW = 55;
+
+    for (let i = 0; i < tree.length; i++) {
+      const nd = tree[i];
+      const delay = i * 0.14;
+      const nT = eOC(cl((treeT - 0.4 - delay) / 0.5));
+      if (nT <= 0) continue;
+
+      const ny = ty0 + 50 + i * rowH;
+      if (ny > H - 50) break;
+      const nx = tx0 + nd.d * indW;
+
+      ctx.save();
+      ctx.globalAlpha = nT;
+
+      if (nd.d > 0) {
+        ctx.strokeStyle = nd.color;
+        ctx.globalAlpha = nT * 0.25;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(nx - 18, ny - rowH + 36);
+        ctx.lineTo(nx - 18, ny + 14);
+        ctx.lineTo(nx - 3, ny + 14);
+        ctx.stroke();
+      }
+
+      ctx.globalAlpha = nT;
+      ctx.font = 'bold 26px "Oswald"';
+      ctx.fillStyle = nd.color;
+      ctx.textAlign = 'left';
+      ctx.fillText(nd.name, nx, ny + 14);
+
+      const nameW = ctx.measureText(nd.name).width;
+      ctx.font = '18px "IBM Plex Mono"';
+      ctx.fillStyle = P.dim;
+      ctx.globalAlpha = nT * 0.65;
+      ctx.fillText('[' + nd.id + ']', nx + nameW + 12, ny + 14);
+
+      if (nd.val) {
+        ctx.fillStyle = nd.color;
+        ctx.globalAlpha = nT * 0.8;
+        ctx.font = '600 19px "IBM Plex Mono"';
+        ctx.fillText('= ' + nd.val, nx, ny + 40);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // Watermark
+  ctx.globalAlpha = 0.04;
+  ctx.font = 'bold 200px "Oswald"';
+  ctx.fillStyle = P.teal;
+  ctx.textAlign = 'center';
+  ctx.fillText('КОНТЕЙНЕР', W / 2, H - 60);
+}
+
+
+// ========= SCENE 2: VIDEO + AUDIO (9–17s) =========
+function scn2(t, time) {
+  const topH = 700;
+
+  // Header
+  ctx.globalAlpha = eOC(cl(t / 0.7));
+  ctx.font = 'bold 48px "Oswald"';
+  ctx.fillStyle = P.blue;
+  ctx.textAlign = 'left';
+  ctx.fillText('H.264 / AVC', 80, 75);
+  ctx.font = '500 28px "Oswald"';
+  ctx.fillStyle = P.dim;
+  ctx.fillText('NAL Unit Stream', 420, 75);
+
+  // NAL stream
+  const nalY = 110, nalH = 90;
+  const nalPattern = [];
+  for (let g = 0; g < 3; g++) {
+    nalPattern.push({...NAL_TYPES[0],w:100});
+    nalPattern.push({...NAL_TYPES[1],w:80});
+    nalPattern.push({...NAL_TYPES[2],w:220});
+    for (let s = 0; s < 6; s++) nalPattern.push({...NAL_TYPES[3],w:65+Math.sin(g*7+s)*20});
+    nalPattern.push({...NAL_TYPES[4],w:55});
+  }
+
+  const totalNals = Math.floor(eOC(cl(t / 3)) * nalPattern.length);
+  let nx = 80;
+  for (let i = 0; i < totalNals; i++) {
+    const nal = nalPattern[i];
+    if (nx + nal.w > W - 40) break;
+    const nT = eOC(cl((t - i * 0.04) / 0.2));
+    if (nT <= 0) { nx += nal.w + 4; continue; }
+
+    ctx.save();
+    ctx.globalAlpha = nT * 0.1;
+    ctx.fillStyle = nal.color;
+    rr(nx, nalY, nal.w, nalH, 5);
+    ctx.fill();
+    ctx.globalAlpha = nT * 0.75;
+    ctx.strokeStyle = nal.color;
+    ctx.lineWidth = 1.5;
+    rr(nx, nalY, nal.w, nalH, 5);
+    ctx.stroke();
+
+    ctx.globalAlpha = nT * 0.3;
+    ctx.font = '13px "Share Tech Mono"';
+    ctx.fillStyle = nal.color;
+    ctx.textAlign = 'left';
+    ctx.fillText('00 00 01', nx + 5, nalY + 16);
+
+    ctx.globalAlpha = nT * 0.95;
+    ctx.font = 'bold 20px "IBM Plex Mono"';
+    ctx.fillStyle = nal.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(nal.name, nx + nal.w / 2, nalY + nalH / 2 + 6);
+
+    ctx.globalAlpha = nT * 0.4;
+    ctx.font = '14px "Share Tech Mono"';
+    ctx.fillText('type=' + nal.type, nx + nal.w / 2, nalY + nalH - 8);
+
+    ctx.restore();
+    nx += nal.w + 4;
+  }
+
+  // DCT blocks
+  if (t > 1.2) {
+    const dctT = eOC(cl((t - 1.2) / 2));
+    const dctX = 80, dctY = 240;
+    const bSz = 46, bGap = 3;
+    const bCols = 22, bRows = 7;
+
+    ctx.save();
+    ctx.globalAlpha = dctT;
+    ctx.font = 'bold 28px "Oswald"';
+    ctx.fillStyle = P.blueBright;
+    ctx.textAlign = 'left';
+    ctx.fillText('Макроблоки 8×8 DCT', dctX, dctY - 8);
+    ctx.font = '20px "IBM Plex Mono"';
+    ctx.fillStyle = P.dim;
+    ctx.fillText('Дискретное косинусное преобразование · I-кадр', dctX + 360, dctY - 8);
+
+    sr(42);
+    for (let by = 0; by < bRows; by++) {
+      for (let bx = 0; bx < bCols; bx++) {
+        const delay = (bx + by) * 0.01;
+        const bT2 = cl((dctT - delay) / 0.2);
+        if (bT2 <= 0) continue;
+        const px = dctX + bx * (bSz + bGap);
+        const py = dctY + 14 + by * (bSz + bGap);
+        if (px > 1180) continue;
+
+        const energy = nr() * 0.55 + 0.15;
+        ctx.globalAlpha = bT2 * energy * 0.8;
+        ctx.fillStyle = P.blue;
+        ctx.fillRect(px, py, bSz, bSz);
+
+        ctx.globalAlpha = bT2 * 0.08;
+        ctx.strokeStyle = P.cyan;
+        ctx.lineWidth = 0.5;
+        for (let g = 1; g < 4; g++) {
+          const gp = g * bSz / 4;
+          ctx.beginPath();ctx.moveTo(px + gp, py);ctx.lineTo(px + gp, py + bSz);ctx.stroke();
+          ctx.beginPath();ctx.moveTo(px, py + gp);ctx.lineTo(px + bSz, py + gp);ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  // Video specs — right side
+  if (t > 1.8) {
+    const sT = eOC(cl((t - 1.8) / 1.5));
+    const sx = 1280, sy = 240;
+    const specs = [
+      ['Profile','High 4.1'],['Resolution','1920 × 1080'],
+      ['Frame Rate','23.976 fps'],['Bitrate','8.2 Mbps VBR'],
+      ['Entropy','CABAC'],['Ref Frames','4'],
+      ['B-Frames','3 (pyramid)'],['Chroma','YUV 4:2:0'],
+      ['GOP Size','48 frames'],['Bit Depth','8-bit'],
+    ];
+    ctx.save();
+    for (let i = 0; i < specs.length; i++) {
+      const iT = eOC(cl((sT - i * 0.06) / 0.3));
+      if (iT <= 0) continue;
+      ctx.globalAlpha = iT;
+      ctx.font = '500 22px "Oswald"';
+      ctx.fillStyle = P.dim;
+      ctx.textAlign = 'left';
+      ctx.fillText(specs[i][0], sx, sy + i * 42);
+      ctx.font = '600 24px "IBM Plex Mono"';
+      ctx.fillStyle = P.blueBright;
+      ctx.fillText(specs[i][1], sx + 170, sy + i * 42);
+    }
+    ctx.restore();
+  }
+
+  // Divider
+  ctx.globalAlpha = 0.15;
+  ctx.strokeStyle = P.dim;
+  ctx.lineWidth = 1;
+  ctx.beginPath();ctx.moveTo(80, topH);ctx.lineTo(W - 80, topH);ctx.stroke();
+
+  // AUDIO — bottom half
+  if (t > 2.2) {
+    const aT = t - 2.2;
+
+    ctx.save();
+    ctx.globalAlpha = eOC(cl(aT / 0.7));
+    ctx.font = 'bold 48px "Oswald"';
+    ctx.fillStyle = P.orange;
+    ctx.textAlign = 'left';
+    ctx.fillText('EAC3', 80, topH + 55);
+    ctx.font = '500 28px "Oswald"';
+    ctx.fillStyle = P.dim;
+    ctx.fillText('Dolby Digital Plus · MDCT · 48 kHz · 5.1', 260, topH + 55);
+    ctx.restore();
+
+    // Spectrogram
+    const specX = 80, specY = topH + 75, specW = 1200, specH = 350;
+    const bands = 120;
+    const bandW = specW / bands;
+    const freqBins = 45;
+    sr(777);
+
+    for (let b = 0; b < bands; b++) {
+      const bDelay = b * 0.005;
+      const bT2 = cl((aT - 0.3 - bDelay) / 0.3);
+      if (bT2 <= 0) continue;
+
+      for (let f = 0; f < freqBins; f++) {
+        const freq = f / freqBins;
+        const baseE = Math.exp(-freq * 2.5) * 0.8;
+        const harm = Math.sin(freq * 15 + b * 0.3) * 0.3 * Math.exp(-freq);
+        const noise = nr() * 0.15;
+        const energy = cl(baseE + harm + noise) * bT2;
+        if (energy < 0.05) continue;
+
+        const bx2 = specX + b * bandW;
+        const by2 = specY + specH - (f / freqBins) * specH;
+        const bh2 = specH / freqBins;
+
+        const r = Math.floor(255 * cl(energy * 1.4));
+        const g = Math.floor(130 * energy + 50);
+        ctx.fillStyle = `rgb(${r},${g},20)`;
+        ctx.globalAlpha = energy * 0.75;
+        ctx.fillRect(bx2, by2, bandW - 0.5, bh2);
+      }
+    }
+
+    // Freq labels
+    ctx.globalAlpha = eOC(cl(aT / 0.8)) * 0.6;
+    ctx.font = '16px "IBM Plex Mono"';
+    ctx.fillStyle = P.orangeBright;
+    ctx.textAlign = 'right';
+    ['20 kHz','10 kHz','5 kHz','1 kHz','100 Hz','20 Hz'].forEach((f, i) => {
+      ctx.fillText(f, specX - 10, specY + 5 + i * (specH / 5));
+    });
+
+    // Audio specs right
+    if (aT > 1) {
+      const spT = eOC(cl((aT - 1) / 1));
+      const aspecs = [
+        ['Codec','EAC3'],['Profile','Dolby Digital+'],
+        ['Sample Rate','48000 Hz'],['Channels','5.1 Surround'],
+        ['Layout','FL FR C LFE BL BR'],['Bitrate','640 kbps'],
+        ['Frame Size','1536 samples'],['Bit Depth','24-bit float'],
+      ];
+      const asx = 1400, asy = topH + 80;
+      ctx.save();
+      for (let i = 0; i < aspecs.length; i++) {
+        const iT2 = eOC(cl((spT - i * 0.07) / 0.3));
+        if (iT2 <= 0) continue;
+        ctx.globalAlpha = iT2;
+        ctx.font = '500 20px "Oswald"';
+        ctx.fillStyle = P.dim;
+        ctx.textAlign = 'left';
+        ctx.fillText(aspecs[i][0], asx, asy + i * 36);
+        ctx.font = '600 22px "IBM Plex Mono"';
+        ctx.fillStyle = P.orangeBright;
+        ctx.fillText(aspecs[i][1], asx + 160, asy + i * 36);
+      }
+      ctx.restore();
+
+      // 5.1 layout
+      if (aT > 2.5) {
+        const chT = eOC(cl((aT - 2.5) / 0.8));
+        const chCx = 1580, chCy = H - 160;
+        const chs = [
+          {name:'FL',x:-80,y:-65},{name:'FR',x:80,y:-65},
+          {name:'C',x:0,y:-85},{name:'LFE',x:0,y:20},
+          {name:'BL',x:-95,y:45},{name:'BR',x:95,y:45},
+        ];
+        ctx.save();
+        ctx.globalAlpha = chT * 0.3;
+        ctx.strokeStyle = P.orange;ctx.lineWidth = 1;
+        ctx.beginPath();ctx.arc(chCx, chCy, 14, 0, Math.PI * 2);ctx.stroke();
+
+        chs.forEach((ch, i) => {
+          const cT2 = eOC(cl((chT - i * 0.06) / 0.3));
+          if (cT2 <= 0) return;
+          const sx2 = chCx + ch.x * 1.4, sy2 = chCy + ch.y * 1.4;
+          ctx.globalAlpha = cT2 * 0.15;
+          ctx.beginPath();ctx.moveTo(chCx, chCy);ctx.lineTo(sx2, sy2);ctx.stroke();
+          ctx.globalAlpha = cT2 * 0.85;
+          ctx.fillStyle = P.orange;
+          ctx.beginPath();ctx.arc(sx2, sy2, 9, 0, Math.PI * 2);ctx.fill();
+          ctx.font = 'bold 18px "IBM Plex Mono"';
+          ctx.fillStyle = P.white;ctx.textAlign = 'center';
+          ctx.fillText(ch.name, sx2, sy2 - 18);
+        });
+        ctx.restore();
+      }
+    }
+  }
+
+  if (t < 0.3) glitch((1 - t / 0.3) * 0.7);
+}
+
+
+// ========= SCENE 3: FRAGMENTATION (17–23s) =========
+function scn3(t, time) {
+  const cx = W / 2;
+  const pipes = [
+    {label:'container-tools',sub:'Container Parser v2.3',color:P.teal,
+     ok:['AVI','MOV','FLV'],no:['MKV','WebM','ASF','MPEG-TS']},
+    {label:'vdec-lib',sub:'Video Decoder v1.8',color:P.blue,
+     ok:['MPEG-2','DivX','H.263'],no:['H.264','VP6','VP8','VC-1','Theora']},
+    {label:'afilter',sub:'AV Filter v0.9',color:P.purple,
+     ok:['resize','crop'],no:['deinterlace','overlay','stabilize','denoise','5.1→stereo']},
+  ];
+
+  const colW = 720, colH = 850, gap = 50;
+  const totalW = colW * 3 + gap * 2;
+  const startX = cx - totalW / 2;
+
+  for (let i = 0; i < 3; i++) {
+    const p = pipes[i];
+    const px = startX + i * (colW + gap);
+    const py = 60;
+    const pt = eOC(cl((t - i * 0.2) / 0.8));
+    if (pt <= 0) continue;
+
+    ctx.save();
+    ctx.globalAlpha = pt;
+
+    ctx.font = 'bold 36px "Oswald"';
+    ctx.fillStyle = p.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(p.label, px + 20, py + 50);
+    ctx.font = '22px "IBM Plex Mono"';
+    ctx.fillStyle = P.dim;
+    ctx.fillText(p.sub, px + 20, py + 82);
+
+    ctx.font = '600 28px "IBM Plex Mono"';
+    p.ok.forEach((f, j) => {
+      const fy = py + 140 + j * 60;
+      const fT = eOC(cl((t - i * 0.2 - 0.5 - j * 0.1) / 0.35));
+      if (fT <= 0) return;
+      ctx.globalAlpha = pt * fT;
+      ctx.fillStyle = P.green;ctx.textAlign = 'left';
+      ctx.fillText('✓', px + 25, fy);
+      ctx.fillStyle = p.color;
+      ctx.fillText(f, px + 65, fy);
+    });
+
+    if (t > 1.5) {
+      ctx.font = '600 28px "IBM Plex Mono"';
+      p.no.forEach((f, j) => {
+        const fy = py + 140 + (p.ok.length + j) * 60;
+        if (fy > H - 180) return;
+        const fT = eOC(cl((t - 1.5 - i * 0.15 - j * 0.1) / 0.3));
+        if (fT <= 0) return;
+        ctx.globalAlpha = pt * fT;
+        ctx.fillStyle = P.red;ctx.textAlign = 'left';
+        ctx.fillText('✗', px + 25, fy);
+        ctx.fillStyle = P.dimmer;
+        ctx.fillText(f, px + 65, fy);
+        ctx.globalAlpha = pt * fT * 0.5;
+        ctx.strokeStyle = P.red;ctx.lineWidth = 1.5;
+        const tw = ctx.measureText(f).width;
+        ctx.beginPath();ctx.moveTo(px + 65, fy - 8);ctx.lineTo(px + 65 + tw, fy - 8);ctx.stroke();
+      });
+    }
+
+    ctx.restore();
+
+    if (i < 2 && t > 2) {
+      const crT = eOC(cl((t - 2) / 0.8));
+      ctx.save();
+      ctx.globalAlpha = crT * 0.5;
+      ctx.strokeStyle = P.red;ctx.lineWidth = 1.5;
+      const mx = px + colW + gap / 2;
+      ctx.setLineDash([4, 8]);
+      ctx.beginPath();ctx.moveTo(mx, py);ctx.lineTo(mx, py + colH);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = crT * 0.7;
+      ctx.font = 'bold 20px "IBM Plex Mono"';
+      ctx.fillStyle = P.red;ctx.textAlign = 'center';
+      ctx.save();ctx.translate(mx, H / 2 + 80);ctx.rotate(-Math.PI / 2);
+      ctx.fillText('НЕСОВМЕСТИМО', 0, 0);
+      ctx.restore();
+      ctx.restore();
+    }
+  }
+
+  // Errors
+  if (t > 3) {
+    const errs = [
+      {t:'ERROR',m:'Unsupported codec: avc1 (H.264) in stream #0:0',c:P.red},
+      {t:'WARN',m:'Unknown container: matroska — skipping',c:P.yellow},
+      {t:'FATAL',m:'No suitable decoder for VP8 bitstream',c:P.red},
+      {t:'ERROR',m:'Filter \'vidstab\' not found in registry',c:P.red},
+    ];
+    ctx.font = '600 22px "IBM Plex Mono"';
+    errs.forEach((e, i) => {
+      const eT = eOC(cl((t - 3 - i * 0.2) / 0.35));
+      if (eT <= 0) return;
+      ctx.globalAlpha = eT * 0.85;
+      ctx.fillStyle = e.c;ctx.textAlign = 'left';
+      ctx.fillText(`[${e.t}] ${e.m}`, 80, H - 160 + i * 38);
+    });
+  }
+
+  if (t < 0.3) glitch((1 - t / 0.3) * 0.8);
+}
+
+
+// ========= SCENE 4: FFMPEG PIPELINE (23–30s) =========
+function scn4(t, time) {
+  const cx = W / 2, cy = 400;
+
+  // Header
+  if (t > 0.3) {
+    const hT = eOC(cl((t - 0.3) / 0.7));
+    ctx.save();ctx.globalAlpha = hT;
+    ctx.font = 'bold 72px "Oswald"';
+    ctx.fillStyle = P.accent;ctx.textAlign = 'center';
+    ctx.fillText('FFMPEG', cx, 90);
+    ctx.font = '500 30px "Oswald"';
+    ctx.fillStyle = P.dim;
+    ctx.fillText('Один инструмент — три библиотеки', cx, 130);
+    ctx.restore();
+  }
+
+  // Three lib blocks
+  const libs = [
+    {name:'libavformat',sub:'Demuxing + Muxing',color:P.teal,desc:'Все контейнеры'},
+    {name:'libavcodec',sub:'Decoding + Encoding',color:P.blue,desc:'Все кодеки'},
+    {name:'libavfilter',sub:'Filtering + Processing',color:P.purple,desc:'Фильтры, обработка'},
+  ];
+
+  const bW = 560, bH = 260, gap = 100;
+  const totalW = bW * 3 + gap * 2;
+  const sx = cx - totalW / 2;
+
+  for (let i = 0; i < 3; i++) {
+    const lib = libs[i];
+    const bx = sx + i * (bW + gap);
+    const by = cy - bH / 2;
+    const bt = eOC(cl((t - 0.6 - i * 0.3) / 0.8));
+    if (bt <= 0) continue;
+
+    ctx.save();ctx.globalAlpha = bt;
+    ctx.fillStyle = lib.color;ctx.globalAlpha = bt * 0.06;
+    rr(bx, by, bW, bH, 14);ctx.fill();
+    ctx.globalAlpha = bt * 0.75;ctx.strokeStyle = lib.color;ctx.lineWidth = 2;
+    rr(bx, by, bW, bH, 14);ctx.stroke();
+
+    ctx.globalAlpha = bt;
+    ctx.font = 'bold 36px "Oswald"';ctx.fillStyle = lib.color;ctx.textAlign = 'center';
+    ctx.fillText(lib.name, bx + bW / 2, by + 70);
+    ctx.font = '500 24px "Oswald"';ctx.fillStyle = P.dim;
+    ctx.fillText(lib.sub, bx + bW / 2, by + 105);
+    ctx.font = '20px "IBM Plex Mono"';ctx.fillStyle = lib.color;ctx.globalAlpha = bt * 0.6;
+    ctx.fillText(lib.desc, bx + bW / 2, by + 140);
+
+    ctx.globalAlpha = bt * 0.15;
+    for (let d = 0; d < 8; d++) {
+      const dx = bx + 25 + ((time * 70 + d * 65) % (bW - 50));
+      ctx.fillStyle = lib.color;ctx.fillRect(dx, by + 175, 35, 3);
+    }
+    ctx.restore();
+
+    if (i < 2 && bt > 0.5) {
+      const aT2 = eOC(cl((bt - 0.5) / 0.5));
+      ctx.save();ctx.globalAlpha = aT2 * 0.75;
+      ctx.strokeStyle = P.accent;ctx.lineWidth = 3;
+      const ax = bx + bW;
+      // Main arrow line
+      ctx.beginPath();ctx.moveTo(ax + 10, cy);ctx.lineTo(ax + gap - 10, cy);ctx.stroke();
+      // Arrowhead (larger)
+      ctx.fillStyle = P.accent;ctx.globalAlpha = aT2 * 0.75;
+      ctx.beginPath();
+      ctx.moveTo(ax + gap - 24, cy - 12);ctx.lineTo(ax + gap - 6, cy);ctx.lineTo(ax + gap - 24, cy + 12);
+      ctx.closePath();ctx.fill();
+
+      for (let p = 0; p < 4; p++) {
+        const pp = ((time * 2 + p / 4) % 1);
+        const ppx = ax + 10 + pp * (gap - 20);
+        ctx.globalAlpha = aT2 * Math.sin(pp * Math.PI) * 0.7;
+        ctx.fillStyle = P.accent;
+        ctx.beginPath();ctx.arc(ppx, cy, 5, 0, Math.PI * 2);ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  // Input/Output streams
+  if (t > 2) {
+    const fT = t - 2;
+    const flowY = cy + bH / 2 + 60;
+
+    ctx.save();
+    ctx.font = 'bold 24px "Oswald"';
+    ctx.fillStyle = P.dim;ctx.textAlign = 'left';
+    ctx.globalAlpha = eOC(cl(fT / 0.5)) * 0.7;
+    ctx.fillText('INPUT →', 80, flowY + 8);
+
+    const inputs = ['MKV','AVI','FLV','MOV','WebM','MPEG-TS','MP4','ASF','Ogg','RM','WAV'];
+    ctx.font = '600 22px "IBM Plex Mono"';
+    for (let i = 0; i < inputs.length; i++) {
+      const iT = eOC(cl((fT - 0.2 - i * 0.08) / 0.3));
+      if (iT <= 0) continue;
+      ctx.globalAlpha = iT * 0.7;ctx.fillStyle = P.teal;
+      ctx.fillText(inputs[i], 220 + i * 115, flowY + 8);
+    }
+
+    ctx.globalAlpha = eOC(cl((fT - 0.8) / 0.5)) * 0.7;
+    ctx.font = 'bold 24px "Oswald"';ctx.fillStyle = P.dim;ctx.textAlign = 'right';
+    ctx.fillText('→ OUTPUT', W - 80, flowY + 8);
+
+    const outputs = ['MP4','MKV','WebM','AVI','TS','FLV','MOV','Ogg','WAV','Raw'];
+    ctx.font = '600 22px "IBM Plex Mono"';ctx.textAlign = 'right';
+    for (let i = 0; i < outputs.length; i++) {
+      const oT = eOC(cl((fT - 1 - i * 0.08) / 0.3));
+      if (oT <= 0) continue;
+      ctx.globalAlpha = oT * 0.7;ctx.fillStyle = P.accent;
+      ctx.fillText(outputs[i], W - 220 - i * 115, flowY + 8);
+    }
+
+    // Stats
+    if (fT > 2) {
+      const sT2 = eOC(cl((fT - 2) / 1.5));
+      const sumY = flowY + 100;
+      const stats = [
+        {label:'~180',desc:'декодеров',color:P.blue},
+        {label:'~50',desc:'энкодеров',color:P.blueBright},
+        {label:'~80',desc:'демуксеров',color:P.teal},
+        {label:'~50',desc:'муксеров',color:P.accent},
+      ];
+      ctx.textAlign = 'center';
+      stats.forEach((s, i) => {
+        const iT2 = eOC(cl((sT2 - i * 0.12) / 0.35));
+        if (iT2 <= 0) return;
+        const sx2 = cx - 500 + i * 330;
+        ctx.globalAlpha = iT2;
+        ctx.font = 'bold 64px "Oswald"';ctx.fillStyle = s.color;
+        ctx.fillText(s.label, sx2, sumY + 35);
+        ctx.font = '500 26px "Oswald"';ctx.fillStyle = P.dim;
+        ctx.fillText(s.desc, sx2, sumY + 68);
+      });
+    }
+    ctx.restore();
+  }
+
+  if (t < 0.3) glitch((1 - t / 0.3) * 0.9);
+}
+
+
+// ========= SCENE 5: FULL CATALOG (30–38s) =========
+function scn5(t, time) {
+  // Larger fonts, use full height
+  const cols = [
+    {title:'ВИДЕО-КОДЕКИ',sub:'libavcodec',count:VIDEO_DEC.length,items:VIDEO_DEC,color:P.blueBright},
+    {title:'АУДИО-КОДЕКИ',sub:'libavcodec',count:AUDIO_DEC.length,items:AUDIO_DEC,color:P.orangeBright},
+    {title:'ДЕМУКСЕРЫ',sub:'libavformat',count:CONTAINERS_R.length,items:CONTAINERS_R,color:P.teal},
+    {title:'МУКСЕРЫ',sub:'libavformat',count:CONTAINERS_W.length,items:CONTAINERS_W,color:P.accent},
+  ];
+
+  const colW = 580, gap = 35;
+  const totalW = colW * 4 + gap * 3;
+  const sx = (W - totalW) / 2;
+  const headerY = 55;
+  const itemStartY = 140;
+  const itemH = 37;
+
+  for (let ci = 0; ci < 4; ci++) {
+    const col = cols[ci];
+    const cx2 = sx + ci * (colW + gap);
+    const cDelay = ci * 0.2;
+    const cT = eOC(cl((t - cDelay) / 0.6));
+    if (cT <= 0) continue;
+
+    ctx.save();
+    ctx.globalAlpha = cT;
+    ctx.font = 'bold 34px "Oswald"';
+    ctx.fillStyle = col.color;ctx.textAlign = 'left';
+    ctx.fillText(col.title, cx2, headerY);
+
+    const titleW = ctx.measureText(col.title).width;
+    ctx.font = 'bold 28px "IBM Plex Mono"';
+    ctx.globalAlpha = cT * 0.7;
+    ctx.fillText(col.count + '', cx2 + titleW + 14, headerY);
+
+    ctx.font = '18px "IBM Plex Mono"';
+    ctx.fillStyle = P.dim;ctx.globalAlpha = cT * 0.6;
+    ctx.fillText(col.sub, cx2, headerY + 28);
+
+    ctx.globalAlpha = cT * 0.25;ctx.strokeStyle = col.color;ctx.lineWidth = 1;
+    ctx.beginPath();ctx.moveTo(cx2, headerY + 40);ctx.lineTo(cx2 + colW, headerY + 40);ctx.stroke();
+    ctx.restore();
+
+    const ips = 10;
+    for (let ii = 0; ii < col.items.length; ii++) {
+      const item = col.items[ii];
+      const iDelay = cDelay + 0.35 + ii / ips;
+      const iT = eOC(cl((t - iDelay) / 0.18));
+      if (iT <= 0) continue;
+
+      const iy = itemStartY + ii * itemH;
+      if (iy > H - 70) break;
+
+      ctx.save();
+      const slideX = lp(-12, 0, iT);
+      ctx.translate(slideX, 0);
+      ctx.globalAlpha = iT;
+
+      // Name — bigger
+      ctx.font = '600 22px "IBM Plex Mono"';
+      ctx.fillStyle = col.color;ctx.textAlign = 'left';
+      ctx.fillText(item.n, cx2 + 8, iy);
+
+      // Year
+      if (item.y && item.y > 0) {
+        ctx.font = '500 16px "IBM Plex Mono"';
+        ctx.fillStyle = P.dim;ctx.globalAlpha = iT * 0.6;
+        ctx.fillText(item.y + '', cx2 + 170, iy);
+      }
+
+      // Use
+      if (item.use) {
+        ctx.font = '16px "IBM Plex Mono"';
+        ctx.fillStyle = P.dim;ctx.globalAlpha = iT * 0.5;
+        ctx.fillText(item.use, cx2 + 225, iy);
+      }
+
+      // Dot
+      ctx.globalAlpha = iT * 0.3;ctx.fillStyle = col.color;
+      ctx.beginPath();ctx.arc(cx2 - 4, iy - 5, 2.5, 0, Math.PI * 2);ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  // Counter
+  if (t > 3) {
+    const total = VIDEO_DEC.length + AUDIO_DEC.length + CONTAINERS_R.length + CONTAINERS_W.length;
+    const countT = eOC(cl((t - 3) / 1.5));
+    const shown = Math.floor(total * countT);
+    ctx.save();
+    ctx.globalAlpha = countT * 0.9;
+    ctx.font = 'bold 44px "Oswald"';ctx.fillStyle = P.accent;ctx.textAlign = 'center';
+    ctx.fillText(shown + '+ ФОРМАТОВ', W / 2 - 260, H - 30);
+    ctx.font = '500 34px "Oswald"';ctx.fillStyle = P.dim;
+    ctx.fillText('· ОДНА ПРОГРАММА · FFmpeg 0.10 · 2011', W / 2 + 200, H - 30);
+    ctx.restore();
+  }
+
+  if (t < 0.3) glitch((1 - t / 0.3) * 0.6);
+}
+
+
+// =========== MAIN ===========
+function render(ts) {
+  if (!running) return;
+  if (!t0) t0 = ts;
+  const time = (ts - t0) / 1000;
+  if (time > DUR) { running = false; return; }
+
+  ctx.fillStyle = P.bg;ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = P.dimmer;ctx.globalAlpha = 0.04;
+  for (let x = 25; x < W; x += 50)for (let y = 25; y < H; y += 50)ctx.fillRect(x, y, 1.2, 1.2);
+  ctx.globalAlpha = 1;
+
+  const scenes = [
+    {s:0,e:9,fn:scn1},{s:9,e:17,fn:scn2},{s:17,e:23,fn:scn3},
+    {s:23,e:30,fn:scn4},{s:30,e:38,fn:scn5},
+  ];
+
+  for (const sc of scenes) {
+    if (time >= sc.s && time < sc.e) {
+      sc.fn(time - sc.s, time);
+      if (time - sc.s < 0.25 && sc.s > 0) glitch((1 - (time - sc.s) / 0.25) * 0.5);
+      break;
+    }
+  }
+
+  updateGrain(time);drawGrain(0.04);
+
+  const vg = ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.85);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,0.3)');
+  ctx.fillStyle = vg;ctx.fillRect(0,0,W,H);
+
+  aId = requestAnimationFrame(render);
+}
+
+function start() {
+  if (aId) cancelAnimationFrame(aId);
+  t0 = null; running = true;
+  aId = requestAnimationFrame(render);
+}
+
+ctx.fillStyle = P.bg;ctx.fillRect(0,0,W,H);
+ctx.font = '28px "IBM Plex Mono"';ctx.fillStyle = P.dim;ctx.textAlign = 'center';
+ctx.fillText('R / К — запуск', W/2, H/2);
+
+document.addEventListener('keydown', e => {
+  if (e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К') start();
+});
+</script>
+</body>
+</html>

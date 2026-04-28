@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DivX // Irony</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=Rajdhani:wght@300;600&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000000;width:100vw;height:100vh;overflow:hidden;font-family:'Share Tech Mono',monospace;color:#fff;}
+#noise{position:absolute;inset:0;z-index:8999;pointer-events:none;opacity:0.012;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:300px 300px;animation:nz .5s steps(3) infinite;}
+@keyframes nz{0%{background-position:0 0}33%{background-position:70px -50px}66%{background-position:-60px 40px}}
+#vig{display:none;}
+#beam{position:absolute;left:0;right:0;height:1px;z-index:200;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(160,0,20,0.03) 30%,rgba(160,0,20,0.08) 50%,rgba(160,0,20,0.03) 70%,transparent);
+  animation:beam 10s linear infinite;}
+@keyframes beam{from{top:-1px}to{top:1442px}}
+#grid{display:none;}
+.brk{position:absolute;z-index:300;}
+.brk::before,.brk::after{content:'';position:absolute;background:rgba(160,0,20,0.5);}
+.brk.tl{top:55px;left:55px}.brk.tr{top:55px;right:55px}
+.brk.bl{bottom:55px;left:55px}.brk.br{bottom:55px;right:55px}
+.brk::before{width:80px;height:1px;}.brk::after{width:1px;height:80px;}
+.brk.tl::before{top:0;left:0}.brk.tl::after{top:0;left:0}
+.brk.tr::before{top:0;right:0}.brk.tr::after{top:0;right:0}
+.brk.bl::before{bottom:0;left:0}.brk.bl::after{bottom:0;left:0}
+.brk.br::before{bottom:0;right:0}.brk.br::after{bottom:0;right:0}
+#topbar{position:absolute;top:0;left:0;right:0;height:52px;z-index:300;
+  border-bottom:1px solid rgba(160,0,20,0.18);
+  display:flex;align-items:center;justify-content:space-between;padding:0 90px;}
+.tb{font-size:14px;letter-spacing:4px;color:rgba(160,0,20,0.65);text-transform:uppercase;}
+.tb.mid{color:rgba(255,255,255,0.18);letter-spacing:6px;font-size:13px;}
+#botbar{position:absolute;bottom:0;left:0;right:0;height:52px;z-index:300;
+  border-top:1px solid rgba(160,0,20,0.15);overflow:hidden;display:flex;align-items:center;}
+#tick{white-space:nowrap;font-size:13px;letter-spacing:3px;color:rgba(160,0,20,0.6);
+  animation:tickmove 50s linear infinite;padding-left:2560px;}
+@keyframes tickmove{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+#stage{position:absolute;top:52px;bottom:52px;left:0;right:0;z-index:50;overflow:hidden;}
+#mainCanvas{position:absolute;inset:0;}
+
+/* ACT 3 DOM */
+#act3overlay{position:absolute;inset:0;opacity:0;pointer-events:none;display:flex;}
+.panel{width:50%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;}
+.panel-left{border-right:1px solid rgba(160,0,20,0.2);}
+.p-corp{font-family:'Bebas Neue',sans-serif;font-size:190px;letter-spacing:5px;line-height:0.88;
+  text-align:center;opacity:0;transform:translateY(30px);transition:opacity .6s ease,transform .6s ease;}
+.p-corp.blue{color:rgba(0,120,215,0.85);text-shadow:0 0 60px rgba(0,100,200,0.4);}
+.p-corp.red{color:#C0001A;text-shadow:0 0 60px rgba(192,0,26,0.5);}
+.p-action{font-family:'Rajdhani',sans-serif;font-weight:600;font-size:26px;letter-spacing:7px;
+  text-transform:uppercase;color:rgba(255,255,255,0.3);text-align:center;margin-top:18px;
+  opacity:0;transition:opacity .5s ease .15s;}
+.p-lockbox{width:700px;padding:36px 44px;margin-top:36px;border:1px solid;
+  opacity:0;transform:translateY(12px);transition:opacity .5s ease .25s,transform .5s ease .25s;}
+.p-lockbox.blue{border-color:rgba(0,100,200,0.3);background:rgba(0,0,0,0.85);}
+.p-lockbox.red{border-color:rgba(192,0,26,0.3);background:rgba(0,0,0,0.85);}
+.p-lb-title{font-size:14px;letter-spacing:6px;text-transform:uppercase;margin-bottom:18px;}
+.blue .p-lb-title{color:rgba(0,150,255,0.55);}
+.red .p-lb-title{color:rgba(192,0,26,0.55);}
+.p-lock-row{font-size:20px;letter-spacing:2px;line-height:2.3;display:flex;gap:14px;align-items:center;}
+.blue .p-lock-row{color:rgba(0,150,255,0.5);}
+.red .p-lock-row{color:rgba(255,70,70,0.6);}
+.p-date{font-size:16px;letter-spacing:6px;color:rgba(255,255,255,0.18);margin-top:24px;
+  opacity:0;transition:opacity .4s ease .45s;}
+.panel.vis .p-corp,.panel.vis .p-action,.panel.vis .p-date{opacity:1;transform:none;}
+.panel.vis .p-lockbox{opacity:1;transform:none;}
+
+#blackout{position:fixed;inset:0;z-index:9500;background:#000;opacity:0;pointer-events:none;}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="wf" x="0%" y="0%" width="100%" height="100%">
+      <feTurbulence id="wt" type="turbulence" baseFrequency="0 0.04" numOctaves="2" seed="3" result="noise"/>
+      <feDisplacementMap id="wd" in="SourceGraphic" in2="noise" scale="0" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
+<div id="noise"></div><div id="vig"></div><div id="beam"></div><div id="grid"></div>
+<div class="brk tl"></div><div class="brk tr"></div><div class="brk bl"></div><div class="brk br"></div>
+<div id="topbar">
+  <div class="tb" id="topLeft">// FORMAT_WAR // 1999</div>
+  <div class="tb mid" id="topMid">REVOLT_SEQUENCE</div>
+  <div class="tb" id="clk">----.--.-- // --:--:--</div>
+</div>
+<div id="stage">
+  <canvas id="mainCanvas" width="2560" height="1336"></canvas>
+  <div id="act3overlay">
+    <div class="panel panel-left" id="panelLeft">
+      <div class="p-corp blue">MICROSOFT<br><span style="font-size:90px;color:rgba(0,100,200,0.4)">CORP.</span></div>
+      <div class="p-action">закрыл формат</div>
+      <div class="p-lockbox blue">
+        <div class="p-lb-title">// access control</div>
+        <div class="p-lock-row">🔒 MS-MPEG4 — только Windows</div>
+        <div class="p-lock-row">🔒 Лицензия WMP обязательна</div>
+        <div class="p-lock-row">🔒 Linux: чёрный экран</div>
+        <div class="p-lock-row">🔒 Патентный пул активен</div>
+      </div>
+      <div class="p-date">// 1999</div>
+    </div>
+    <div class="panel" id="panelRight">
+      <div class="p-corp red">DivX<br><span style="font-size:90px;color:rgba(192,0,26,0.4)">INC.</span></div>
+      <div class="p-action">закрыл формат</div>
+      <div class="p-lockbox red">
+        <div class="p-lb-title">// access control</div>
+        <div class="p-lock-row">🔒 DivX codec — проприетарный</div>
+        <div class="p-lock-row">🔒 Коммерческая лицензия</div>
+        <div class="p-lock-row">🔒 Разработчики брошены</div>
+        <div class="p-lock-row">🔒 Продан за $323M → $75M</div>
+      </div>
+      <div class="p-date">// 2002</div>
+    </div>
+  </div>
+</div>
+<div id="botbar">
+  <div id="tick">░░ JÉRÔME ROTA — ANIMATOR — MONTPELLIER FR — MS-MPEG4 CRACKED IN 7 DAYS // DivX — OPEN SOURCE — FREE — VIRAL SPREAD // DivX INC. — SOURCE CLOSED — COMMUNITY ABANDONED — SOLD $323M → $75M → $62.5M // XVID FORKED IN PROTEST // «IL A GRANDI PAR LUI-MÊME» — J. ROTA ░░</div>
+</div>
+<div id="blackout"></div>
+
+<script>
+const W=window.innerWidth,H=window.innerHeight-104;
+const canvas=document.getElementById('mainCanvas');
+canvas.width=W;
+canvas.height=H;
+const ctx=canvas.getContext('2d');
+
+// clock
+function tickClock(){const n=new Date(),p=v=>String(v).padStart(2,'0');document.getElementById('clk').textContent=`${n.getFullYear()}.${p(n.getMonth()+1)}.${p(n.getDate())} // ${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;}
+setInterval(tickClock,1000);tickClock();
+
+// warp
+(function(){
+  const te=document.getElementById('wt'),de=document.getElementById('wd');
+  function mkO(){const e=document.createElement('div');Object.assign(e.style,{position:'fixed',left:'0',top:'0',width:'100%',height:'40px',pointerEvents:'none',zIndex:'8000',backdropFilter:'url(#wf)',WebkitBackdropFilter:'url(#wf)',opacity:'0'});document.body.appendChild(e);return e;}
+  const os=[mkO(),mkO()];
+  function setS(s){de.setAttribute('scale',s.toFixed(1));}
+  setS(0);
+  function run(o,d){setTimeout(()=>{te.setAttribute('seed',Math.floor(Math.random()*99)+1);te.setAttribute('baseFrequency',`0 ${0.03+Math.random()*0.018}`);const st=performance.now();function step(now){const el=(now-st)/1000,y=-38+el*480;if(y>1440+38){o.style.opacity='0';setS(0);run(o,900+Math.random()*2000);return;}const top=Math.max(0,y),bot=Math.min(1440,y+38),visH=bot-top,frac=y<0?(y+38)/38:y>1402?(1440-y)/38:1;if(visH>0){o.style.top=(top/1440*100)+'%';o.style.height=(visH/1440*100)+'%';o.style.opacity='1';setS(24*Math.max(0,frac));}else o.style.opacity='0';requestAnimationFrame(step);}requestAnimationFrame(step);},d);}
+  run(os[0],1800);run(os[1],3400);
+})();
+
+// ── CRACK GEOMETRY ──
+// We pre-generate crack lines radiating from center
+const CRACK_LINES = [];
+(function(){
+  const cx=W/2, cy=H/2;
+  const angles=[0.15,0.55,1.0,1.45,1.9,2.35,2.8,3.2,3.7,4.1,4.6,5.0,5.5,5.9,
+                0.35,0.75,1.2,1.65,2.1,2.55,3.0,3.45,3.9,4.3,4.75,5.2];
+  angles.forEach((a,i)=>{
+    const len=700+Math.random()*900;
+    // each crack has 2-4 segments with slight bends
+    const segs=2+Math.floor(Math.random()*2);
+    const pts=[{x:cx,y:cy}];
+    let ca=a, cl=0;
+    for(let s=0;s<segs;s++){
+      cl+=len/segs*(0.7+Math.random()*0.6);
+      ca+=( Math.random()-.5)*0.4;
+      pts.push({x:cx+Math.cos(ca)*cl, y:cy+Math.sin(ca)*cl});
+    }
+    // secondary smaller cracks branching off
+    const branches=[];
+    if(Math.random()>0.4){
+      const bi=1;
+      const bx=pts[bi].x, by2=pts[bi].y;
+      const ba=ca+(Math.random()>0.5?1:-1)*(0.3+Math.random()*0.5);
+      const bl=200+Math.random()*350;
+      branches.push([{x:bx,y:by2},{x:bx+Math.cos(ba)*bl,y:by2+Math.sin(ba)*bl}]);
+    }
+    CRACK_LINES.push({pts,branches,delay:i*0.028+Math.random()*0.04});
+  });
+})();
+
+// ── DEBRIS PARTICLES ──
+const debris=[];
+function spawnDebris(cx,cy,count,col){
+  for(let i=0;i<count;i++){
+    const a=Math.random()*Math.PI*2, spd=6+Math.random()*22;
+    debris.push({
+      x:cx,y:cy,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd-4,
+      w:4+Math.random()*28,h:2+Math.random()*8,
+      rot:Math.random()*Math.PI*2,rspd:(Math.random()-.5)*0.25,
+      life:1,decay:0.008+Math.random()*0.018,col
+    });
+  }
+}
+
+// ── HEX DUMP for ACT 2 ──
+// Simulate memory addresses changing as codec is cracked
+const HEX='0123456789ABCDEF';
+function rHex(n){let s='';for(let i=0;i<n;i++)s+=HEX[Math.floor(Math.random()*16)];return s;}
+
+// Pre-baked "before" hex block (MS-MPEG4 locked bytes)
+const LOCKED_ROWS=18;
+const lockedDump=[];
+for(let i=0;i<LOCKED_ROWS;i++){
+  const addr=0x0040A800+i*16;
+  lockedDump.push({
+    addr:`${addr.toString(16).toUpperCase().padStart(8,'0')}`,
+    bytes:Array.from({length:16},()=>Math.floor(Math.random()*256))
+  });
+}
+
+// "After" — specific bytes change to show the crack
+const CRACK_MARKS=[
+  {row:2, cols:[4,5,6,7], label:'// bypass license check'},
+  {row:5, cols:[0,1,2,3], label:'// codec_id patched'},
+  {row:8, cols:[8,9,10,11,12], label:'// DRM disabled'},
+  {row:11,cols:[2,3,4], label:'// format unlocked'},
+  {row:14,cols:[12,13,14,15], label:'// free'},
+];
+
+// Matrix rain columns
+const rainCols=[];
+for(let x=0;x<W;x+=24){rainCols.push({x,y:Math.random()*H,spd:4+Math.random()*9,a:0.2+Math.random()*0.6});}
+
+// ── MAIN STATE ──
+let startTime=null, rafId=null, seqRunning=false;
+let act3shown=false, panelLeftDone=false, panelRightDone=false;
+let tIds=[];
+function TQ(fn,d){const id=setTimeout(fn,d);tIds.push(id);}
+
+function render(ts){
+  if(!startTime)startTime=ts;
+  const t=(ts-startTime)/1000;
+  rafId=requestAnimationFrame(render);
+  ctx.clearRect(0,0,W,H);
+
+  // ════════════════════════════
+  //  ACT 1 — DESTRUCTION (0–2.2s)
+  // ════════════════════════════
+  if(t<2.5){
+    // draw WMP box — shatters in first 0.1s
+    const wAlpha=Math.max(0,1-t*14);
+    if(wAlpha>0){
+      ctx.save();ctx.globalAlpha=wAlpha;
+      const bx=W/2-300,by=H/2-160,bw=600,bh=320;
+      ctx.fillStyle='rgba(0,8,28,0.9)';ctx.fillRect(bx,by,bw,bh);
+      ctx.fillStyle='rgba(0,60,160,0.8)';ctx.fillRect(bx,by,bw,42);
+      ctx.strokeStyle='rgba(0,80,200,0.6)';ctx.lineWidth=2;ctx.strokeRect(bx,by,bw,bh);
+      ctx.font='18px Share Tech Mono';ctx.fillStyle='rgba(200,220,255,0.8)';
+      ctx.textAlign='left';ctx.fillText('Windows Media Player 8.0',bx+16,by+27);
+      ctx.font='16px Share Tech Mono';ctx.fillStyle='rgba(0,160,255,0.6)';
+      ctx.fillText('Format: MS-MPEG4 v2  |  PROPRIETARY  |  WINDOWS ONLY',bx+20,by+90);
+      ctx.fillStyle='rgba(255,80,80,0.8)';
+      ctx.fillText('⚠  Error 0xC00D11B1: Codec not supported on this platform.',bx+20,by+150);
+      ctx.fillStyle='rgba(255,255,255,0.15)';ctx.font='13px Share Tech Mono';
+      ctx.fillText('Linux support: NONE   |   © 1999 Microsoft Corp.',bx+20,by+220);
+      ctx.restore();
+    }
+
+    // IMPACT FLASH
+    if(t<0.06){
+      ctx.save();ctx.globalAlpha=(0.06-t)/0.06*0.85;
+      ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.restore();
+    }
+    if(t>0.04&&t<0.14){
+      ctx.save();ctx.globalAlpha=(0.14-t)/0.1*0.5;
+      ctx.fillStyle='#C0001A';ctx.fillRect(0,0,W,H);ctx.restore();
+    }
+
+    // CRACKS spread from center
+    const crackFade=t>=1.8?Math.max(0,(2.5-t)/0.7):1;
+    CRACK_LINES.forEach(cl=>{
+      const age=t-cl.delay;
+      if(age<=0)return;
+      const spd=4.2;
+      const totalLen=cl.pts.reduce((s,p,i)=>{
+        if(i===0)return 0;
+        const pp=cl.pts[i-1];
+        return s+Math.hypot(p.x-pp.x,p.y-pp.y);
+      },0);
+      const drawn=age*spd*600;
+
+      ctx.save();
+      ctx.strokeStyle=`rgba(255,255,255,${0.55*crackFade})`;
+      ctx.lineWidth=1.5;
+      ctx.shadowColor='rgba(255,200,200,0.6)';ctx.shadowBlur=6;
+      ctx.beginPath();
+      let accumulated=0, started=false;
+      for(let i=1;i<cl.pts.length;i++){
+        const pp=cl.pts[i-1],cp=cl.pts[i];
+        const segLen=Math.hypot(cp.x-pp.x,cp.y-pp.y);
+        if(!started){ctx.moveTo(pp.x,pp.y);started=true;}
+        if(accumulated+segLen<=drawn){
+          ctx.lineTo(cp.x,cp.y);
+          accumulated+=segLen;
+        } else {
+          const rem=drawn-accumulated;
+          const frac=rem/segLen;
+          ctx.lineTo(pp.x+(cp.x-pp.x)*frac, pp.y+(cp.y-pp.y)*frac);
+          break;
+        }
+      }
+      ctx.stroke();
+
+      // branches
+      cl.branches.forEach(br=>{
+        const brAge=age-0.15;if(brAge<=0)return;
+        const brLen=Math.hypot(br[1].x-br[0].x,br[1].y-br[0].y);
+        const brDrawn=Math.min(brAge*spd*600,brLen);
+        const frac=brDrawn/brLen;
+        ctx.strokeStyle=`rgba(255,255,255,${0.3*crackFade})`;
+        ctx.lineWidth=1;ctx.shadowBlur=3;
+        ctx.beginPath();ctx.moveTo(br[0].x,br[0].y);
+        ctx.lineTo(br[0].x+(br[1].x-br[0].x)*frac,br[0].y+(br[1].y-br[0].y)*frac);
+        ctx.stroke();
+      });
+      ctx.restore();
+    });
+
+    // Dark voids opening along cracks — chunks of screen "fall away"
+    if(t>0.3){
+      const voidAge=Math.min((t-0.3)/0.8,1);
+      ctx.save();
+      ctx.globalAlpha=voidAge*0.7;
+      // Triangular shards of darkness
+      const voidSeeds=[
+        [W/2-80,H/2-60, W/2+120,H/2-180, W/2+60,H/2+40],
+        [W/2+80,H/2+50, W/2+280,H/2-80, W/2+200,H/2+180],
+        [W/2-200,H/2+80, W/2-80,H/2+200, W/2-300,H/2+220],
+        [W/2-180,H/2-80, W/2-40,H/2-220, W/2-350,H/2-120],
+        [W/2+100,H/2+120,W/2+350,H/2+200,W/2+280,H/2+320],
+      ];
+      voidSeeds.forEach(([x1,y1,x2,y2,x3,y3])=>{
+        ctx.fillStyle='rgba(0,0,0,0.9)';
+        ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.lineTo(x3,y3);ctx.closePath();ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    // DivX erupts from the void
+    if(t>0.5){
+      const da=Math.min((t-0.5)/0.5,1);
+      const shake=da<1?Math.sin(t*80)*(1-da)*12:0;
+      ctx.save();
+      ctx.globalAlpha=da;
+      ctx.translate(W/2+shake,H/2);
+      // Glow layers
+      ctx.shadowColor='rgba(192,0,26,1)';ctx.shadowBlur=120;
+      ctx.font=`bold 280px 'Bebas Neue'`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillStyle='rgba(192,0,26,0.2)';ctx.fillText('DivX',0,0);
+      ctx.shadowBlur=60;
+      ctx.fillStyle='rgba(192,0,26,0.5)';ctx.fillText('DivX',0,0);
+      ctx.shadowBlur=20;
+      ctx.fillStyle='#C0001A';ctx.fillText('DivX',0,0);
+      ctx.shadowBlur=0;ctx.restore();
+    }
+
+    // "OPEN SOURCE" under it
+    if(t>1.1){
+      const sa=Math.min((t-1.1)/0.35,1);
+      ctx.save();ctx.globalAlpha=sa;
+      ctx.font='22px Share Tech Mono';ctx.textAlign='center';
+      ctx.fillStyle='rgba(255,255,255,0.4)';ctx.letterSpacing='8px';
+      ctx.fillText('OPEN  SOURCE  //  FREE  //  FOR  EVERYONE',W/2,H/2+195);
+      ctx.restore();
+    }
+
+    // Spawn debris on impact
+    if(t>0.02&&t<0.07){
+      spawnDebris(W/2,H/2,60,'rgba(0,120,215,1)');
+      spawnDebris(W/2,H/2,30,'rgba(255,255,255,0.9)');
+      spawnDebris(W/2,H/2,20,'rgba(192,0,26,0.8)');
+    }
+  }
+
+  // debris physics
+  for(let i=debris.length-1;i>=0;i--){
+    const d=debris[i];
+    d.x+=d.vx;d.y+=d.vy;d.vy+=0.35;d.vx*=0.98;
+    d.rot+=d.rspd;d.life-=d.decay;
+    if(d.life<=0){debris.splice(i,1);continue;}
+    ctx.save();ctx.globalAlpha=d.life*0.75;
+    ctx.translate(d.x,d.y);ctx.rotate(d.rot);
+    ctx.fillStyle=d.col;ctx.shadowColor=d.col;ctx.shadowBlur=6;
+    ctx.fillRect(-d.w/2,-d.h/2,d.w,d.h);
+    ctx.restore();
+  }
+
+  // ════════════════════════════
+  //  ACT 2 — HACK SEQUENCE (2.2–5s)
+  // ════════════════════════════
+  if(t>=2.0&&t<5.3){
+    const localT=t-2.0;
+    const fadeIn=Math.min(localT/0.35,1);
+    const fadeOut=t>=4.9?Math.max(0,1-(t-4.9)/0.4):1;
+    const alpha=fadeIn*fadeOut;
+
+    ctx.save();ctx.globalAlpha=alpha;
+
+    // Black bg wipe
+    ctx.fillStyle='rgba(0,0,0,0.65)';ctx.fillRect(0,0,W,H);
+
+    // Sparse matrix rain BG
+    ctx.font='15px Share Tech Mono';
+    rainCols.forEach(col=>{
+      ctx.fillStyle=`rgba(140,0,20,${col.a*0.25})`;
+      ctx.fillText(HEX[Math.floor(Math.random()*16)],col.x,col.y);
+      col.y+=col.spd;if(col.y>H)col.y=0;
+    });
+
+    // ── HEX DUMP — left half ──
+    const dumpX=140, dumpY=160, lineH=44;
+    const crackProgress=Math.min(localT/2.8,1); // 0→1 over 2.8s
+
+    ctx.font='20px Share Tech Mono';
+    lockedDump.forEach((row,ri)=>{
+      const y=dumpY+ri*lineH;
+      if(y>H-80)return;
+
+      // address
+      ctx.fillStyle='rgba(100,100,120,0.5)';
+      ctx.textAlign='left';ctx.fillText(`${row.addr}:`,dumpX,y);
+
+      // find crack mark for this row
+      const cm=CRACK_MARKS.find(c=>c.row===ri);
+
+      row.bytes.forEach((b,bi)=>{
+        const bx=dumpX+160+bi*58;
+        const isCracked=cm&&cm.cols.includes(bi);
+        // crack timing: each row cracks at staggered time
+        const rowCrackT=ri/LOCKED_ROWS;
+        const cracked=crackProgress>rowCrackT&&isCracked;
+        const activeRow=Math.abs(crackProgress*LOCKED_ROWS-ri)<1.5;
+
+        if(cracked){
+          // cracked byte — show new value, red/green
+          const newByte=(b^0xFF).toString(16).padStart(2,'0').toUpperCase();
+          ctx.fillStyle='rgba(60,255,100,0.85)';
+          ctx.shadowColor='rgba(60,255,100,0.5)';ctx.shadowBlur=8;
+          ctx.fillText(newByte,bx,y);
+          ctx.shadowBlur=0;
+        } else if(activeRow&&isCracked){
+          // currently cracking — flicker
+          ctx.fillStyle=`rgba(255,60,60,${0.7+Math.sin(localT*40+bi)*0.3})`;
+          ctx.fillText(rHex(2),bx,y);
+        } else {
+          ctx.fillStyle=activeRow?'rgba(200,200,220,0.7)':'rgba(80,80,100,0.35)';
+          ctx.fillText(b.toString(16).padStart(2,'0').toUpperCase(),bx,y);
+        }
+      });
+
+      // crack label
+      if(cm&&crackProgress>cm.row/LOCKED_ROWS){
+        ctx.fillStyle='rgba(60,255,100,0.5)';ctx.font='14px Share Tech Mono';
+        ctx.fillText(cm.label,dumpX+160+16*58+20,y);
+        ctx.font='20px Share Tech Mono';
+      }
+    });
+
+    // ── RIGHT SIDE: status + DivX ──
+    const rx=W*0.58;
+
+    // DivX
+    ctx.shadowColor='rgba(192,0,26,0.8)';ctx.shadowBlur=50;
+    ctx.font=`bold 220px 'Bebas Neue'`;ctx.textAlign='center';
+    ctx.fillStyle=`rgba(192,0,26,${0.85+Math.sin(localT*6)*0.1})`;
+    ctx.fillText('DivX',rx+240,H/2-40);
+    ctx.shadowBlur=0;
+
+    // Status lines
+    const STATUS=[
+      {t:0.2, txt:'TARGET: MS-MPEG4 v2 CODEC',      done:false},
+      {t:0.5, txt:'ANALYZING BINARY STRUCTURE...',    done:false},
+      {t:0.9, txt:'FOUND: license_check() @ 0x0040A84C', done:false},
+      {t:1.3, txt:'PATCHING codec_id byte...',          done:false},
+      {t:1.7, txt:'DISABLING DRM routines...',          done:false},
+      {t:2.1, txt:'REMOVING platform lock...',          done:false},
+      {t:2.5, txt:'COMPILING DIVX.DLL...',              done:false},
+      {t:2.75,txt:'[ DONE ] — FREE CODEC RELEASED',     done:true},
+    ];
+    ctx.font='18px Share Tech Mono';ctx.textAlign='left';
+    const sY=H/2+100;
+    STATUS.forEach((s,i)=>{
+      if(localT<s.t)return;
+      const sa=Math.min((localT-s.t)/0.2,1);
+      ctx.globalAlpha=alpha*sa;
+      if(s.done){
+        ctx.fillStyle='rgba(60,255,100,0.85)';ctx.shadowColor='rgba(60,255,100,0.4)';ctx.shadowBlur=10;
+      } else if(i===STATUS.filter(x=>localT>=x.t).length-1&&!s.done){
+        ctx.fillStyle=`rgba(255,200,60,${0.7+Math.sin(localT*12)*0.3})`; // active — flicker
+        ctx.shadowBlur=0;
+      } else {
+        ctx.fillStyle='rgba(255,255,255,0.3)';ctx.shadowBlur=0;
+      }
+      ctx.fillText(`> ${s.txt}`,rx,sY+i*46);
+      ctx.shadowBlur=0;
+    });
+
+    // Progress bar
+    const pb=localT/2.9;
+    const barX=rx,barY=sY-50,barW=700,barH=4;
+    ctx.fillStyle='rgba(255,255,255,0.05)';ctx.fillRect(barX,barY,barW,barH);
+    ctx.fillStyle=pb>=1?'rgba(60,255,100,0.8)':'#C0001A';
+    ctx.shadowColor=pb>=1?'rgba(60,255,100,0.6)':'rgba(192,0,26,0.7)';ctx.shadowBlur=8;
+    ctx.fillRect(barX,barY,barW*Math.min(pb,1),barH);
+    ctx.shadowBlur=0;
+    ctx.fillStyle='rgba(255,255,255,0.3)';ctx.font='14px Share Tech Mono';
+    ctx.fillText(`${Math.min(Math.floor(pb*100),100)}%`,barX+barW+16,barY+4);
+
+    ctx.restore();
+  }
+
+  // ════════════════════════════
+  //  ACT 3 — MIRROR (5–8s) — DOM
+  // ════════════════════════════
+  if(t>=4.9&&!act3shown){
+    act3shown=true;
+    document.getElementById('act3overlay').style.transition='opacity 0.5s ease';
+    document.getElementById('act3overlay').style.opacity='1';
+  }
+  if(t>=5.1&&!panelLeftDone){
+    panelLeftDone=true;
+    document.getElementById('panelLeft').classList.add('vis');
+  }
+  if(t>=6.0&&!panelRightDone){
+    panelRightDone=true;
+    document.getElementById('panelRight').classList.add('vis');
+  }
+
+  // Add vertical separator line on canvas when act3 is up
+  if(t>=5.0&&t<8){
+    const la=Math.min((t-5.0)/0.3,1)*(t>=7.4?Math.max(0,(8-t)/0.6):1);
+    ctx.save();ctx.globalAlpha=la*0.25;
+    // very subtle: just dim the bg a bit to make DOM readable
+    ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,W,H);
+    ctx.restore();
+  }
+
+  // ── FADE TO BLACK ──
+  if(t>=7.2){
+    const bo=document.getElementById('blackout');
+    bo.style.opacity=Math.min((t-7.2)/0.8,1).toString();
+  }
+}
+
+// ── START / RESET ──
+function startSeq(){
+  seqRunning=true;startTime=null;
+  debris.length=0;
+  rainCols.forEach(c=>{c.y=Math.random()*H;c.a=0.2+Math.random()*0.6;});
+  act3shown=false;panelLeftDone=false;panelRightDone=false;
+  document.getElementById('act3overlay').style.transition='none';
+  document.getElementById('act3overlay').style.opacity='0';
+  document.getElementById('panelLeft').classList.remove('vis');
+  document.getElementById('panelRight').classList.remove('vis');
+  document.getElementById('blackout').style.opacity='0';
+  document.getElementById('topMid').textContent='REVOLT_SEQUENCE';
+  TQ(()=>document.getElementById('topMid').textContent='ACT_I — РАЗРЫВ',50);
+  TQ(()=>document.getElementById('topMid').textContent='ACT_II — ВЗЛОМ',2100);
+  TQ(()=>document.getElementById('topMid').textContent='ACT_III — ЗЕРКАЛО',5000);
+  rafId=requestAnimationFrame(render);
+}
+
+function reset(){
+  seqRunning=false;tIds.forEach(clearTimeout);tIds=[];
+  if(rafId)cancelAnimationFrame(rafId);rafId=null;
+  startTime=null;ctx.clearRect(0,0,W,H);debris.length=0;
+  document.getElementById('act3overlay').style.transition='none';
+  document.getElementById('act3overlay').style.opacity='0';
+  document.getElementById('panelLeft').classList.remove('vis');
+  document.getElementById('panelRight').classList.remove('vis');
+  document.getElementById('blackout').style.opacity='0';
+  act3shown=false;panelLeftDone=false;panelRightDone=false;
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key.toLowerCase()!=='r'&&e.key.toLowerCase()!=='к')return;
+  reset();setTimeout(startSeq,50);
+});
+</script>
+</body>
+</html>

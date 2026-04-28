@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; width:100vw; height:100vh; overflow:hidden; }
+canvas { width:100vw; height:100vh; display:block; position:absolute; top:0; left:0; }
+
+#ui {
+  position: absolute;
+  top: 0; right: 0;
+  background: rgba(0,0,0,0.96);
+  border-left: 1px solid rgba(229,0,4,0.28);
+  border-bottom: 1px solid rgba(229,0,4,0.28);
+  padding: 18px 22px 18px 18px;
+  color: #f0ede8;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  z-index: 10;
+  width: 380px;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+#ui.open { transform: translateX(0); }
+#uiTab {
+  position: absolute;
+  top: 50%; right: 0;
+  z-index: 11;
+  background: rgba(0,0,0,0.85);
+  border: 1px solid rgba(229,0,4,0.38);
+  border-right: none;
+  color: #e50004;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  padding: 10px 6px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: translateY(-50%) rotate(180deg);
+  user-select: none;
+}
+#ui h3 { color:#e50004; font-size:11px; letter-spacing:3px; margin-bottom:12px; text-transform:uppercase; }
+.sl { color:rgba(229,0,4,0.5); font-size:10px; letter-spacing:2px; text-transform:uppercase; margin:14px 0 5px 0; }
+.row { display:flex; align-items:center; margin-bottom:7px; gap:7px; }
+.sw { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.row label { flex:1; color:rgba(240,237,232,0.48); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row input[type=range] { width:88px; accent-color:#e50004; flex-shrink:0; }
+.val { width:36px; text-align:right; color:#e50004; font-size:11px; flex-shrink:0; }
+.sublabel { color:rgba(240,237,232,0.28); font-size:10px; padding-left:14px; margin-bottom:4px; }
+.div { border-top:1px solid rgba(229,0,4,0.12); margin:10px 0; }
+#btnR { width:100%; background:#e50004; color:#000; border:none; padding:7px; font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:bold; letter-spacing:2px; cursor:pointer; margin-top:8px; }
+#btnR:hover { background:#ff2020; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="uiTab" onclick="toggleUI()">ТАЙМИНГ</div>
+<div id="ui">
+  <h3>Тайминг (секунды)</h3>
+
+  <div class="sl">Philips · Sony · Pioneer — $5.00</div>
+  <div class="row"><div class="sw" style="background:#e50004"></div><label>Philips</label><input type="range" id="tn0" min="0" max="21" step="0.5" value="1.5"><span class="val" id="vn0">1.5s</span></div>
+  <div class="row"><div class="sw" style="background:#e50004"></div><label>Sony</label><input type="range" id="tn1" min="0" max="21" step="0.5" value="2.5"><span class="val" id="vn1">2.5s</span></div>
+  <div class="row"><div class="sw" style="background:#e50004"></div><label>Pioneer</label><input type="range" id="tn2" min="0" max="21" step="0.5" value="3.5"><span class="val" id="vn2">3.5s</span></div>
+  <div class="row"><div class="sw" style="background:#e50004;opacity:0.4"></div><label>→ Цена $5.00</label><input type="range" id="tp0" min="0" max="21" step="0.5" value="4.5"><span class="val" id="vp0">4.5s</span></div>
+
+  <div class="sl">Hitachi · IBM · Toshiba · Time Warner — $4.00</div>
+  <div class="row"><div class="sw" style="background:#f78b04"></div><label>Hitachi</label><input type="range" id="tn3" min="0" max="21" step="0.5" value="6.0"><span class="val" id="vn3">6.0s</span></div>
+  <div class="row"><div class="sw" style="background:#f78b04"></div><label>IBM</label><input type="range" id="tn4" min="0" max="21" step="0.5" value="7.0"><span class="val" id="vn4">7.0s</span></div>
+  <div class="row"><div class="sw" style="background:#f78b04"></div><label>Toshiba</label><input type="range" id="tn5" min="0" max="21" step="0.5" value="8.0"><span class="val" id="vn5">8.0s</span></div>
+  <div class="row"><div class="sw" style="background:#f78b04"></div><label>Time Warner</label><input type="range" id="tn6" min="0" max="21" step="0.5" value="9.0"><span class="val" id="vn6">9.0s</span></div>
+  <div class="row"><div class="sw" style="background:#f78b04;opacity:0.4"></div><label>→ Цена $4.00</label><input type="range" id="tp1" min="0" max="21" step="0.5" value="10.0"><span class="val" id="vp1">10.0s</span></div>
+
+  <div class="sl">MPEG LA — $2.50</div>
+  <div class="row"><div class="sw" style="background:#fcec0c"></div><label>MPEG LA</label><input type="range" id="tn7" min="0" max="21" step="0.5" value="12.0"><span class="val" id="vn7">12.0s</span></div>
+  <div class="row"><div class="sw" style="background:#fcec0c;opacity:0.4"></div><label>→ Цена $2.50</label><input type="range" id="tp2" min="0" max="21" step="0.5" value="13.0"><span class="val" id="vp2">13.0s</span></div>
+
+  <div class="sl">Thomson — $1.00</div>
+  <div class="row"><div class="sw" style="background:#888"></div><label>Thomson</label><input type="range" id="tn8" min="0" max="21" step="0.5" value="15.0"><span class="val" id="vn8">15.0s</span></div>
+  <div class="row"><div class="sw" style="background:#888;opacity:0.4"></div><label>→ Цена $1.00</label><input type="range" id="tp3" min="0" max="21" step="0.5" value="16.0"><span class="val" id="vp3">16.0s</span></div>
+
+  <div class="div"></div>
+  <div class="row"><label>Итог</label><input type="range" id="tTot" min="0" max="22" step="0.5" value="19.0"><span class="val" id="vTot">19.0s</span></div>
+  <div class="row"><label>Длит. сплэша (ms)</label><input type="range" id="tSD" min="200" max="1600" step="50" value="800"><span class="val" id="vSD">800</span></div>
+  <div class="div"></div>
+  <button id="btnR">▶  RESTART  (R)</button>
+</div>
+
+<script>
+const cv=document.getElementById('c'),g=cv.getContext('2d');
+const W=2560,H=1440;
+cv.width=W;cv.height=H;
+
+const RED='#e50004',WHITE='#f0ede8';
+const FD="'Bebas Neue',sans-serif",FM="'IBM Plex Mono',monospace";
+
+// ── DATA ─────────────────────────────────────────────────────────────────────
+const TOTAL=49.99;
+const GROUPS=[
+  {line:'Philips · Sony · Pioneer',              amount:5.00,color:'#e50004',note:'DVD-механизм, лазер, оптика',   ci:[0,1,2]},
+  {line:'Hitachi · IBM · Toshiba · Time Warner', amount:4.00,color:'#f78b04',note:'MPEG-2 видео',                  ci:[3,4,5,6]},
+  {line:'MPEG LA',                               amount:2.50,color:'#fcec0c',note:'Видеокодек',                    ci:[7]},
+  {line:'Thomson',                               amount:1.00,color:'#888888',note:'Прочие стандарты',              ci:[8]},
+];
+const PAT=GROUPS.reduce((s,x)=>s+x.amount,0);
+
+// Companies — name splashes
+const NAMES=[
+  {name:'Philips',     gi:0,color:'#e50004'},
+  {name:'Sony',        gi:0,color:'#e50004'},
+  {name:'Pioneer',     gi:0,color:'#e50004'},
+  {name:'Hitachi',     gi:1,color:'#f78b04'},
+  {name:'IBM',         gi:1,color:'#f78b04'},
+  {name:'Toshiba',     gi:1,color:'#f78b04'},
+  {name:'Time Warner', gi:1,color:'#f78b04'},
+  {name:'MPEG LA',     gi:2,color:'#fcec0c'},
+  {name:'Thomson',     gi:3,color:'#888888'},
+];
+
+// Price splashes — one per group
+const PRICES=[
+  {label:'$5.00', sub:'Philips · Sony · Pioneer',              gi:0,color:'#e50004'},
+  {label:'$4.00', sub:'Hitachi · IBM · Toshiba · Time Warner', gi:1,color:'#f78b04'},
+  {label:'$2.50', sub:'MPEG LA',                               gi:2,color:'#fcec0c'},
+  {label:'$1.00', sub:'Thomson',                               gi:3,color:'#888888'},
+];
+
+// ── TIMING ───────────────────────────────────────────────────────────────────
+let T={
+  names: [1500,2500,3500, 6000,7000,8000,9000, 12000, 15000],
+  prices:[4500, 10000, 13000, 16000],
+  total: 19000,
+  sd:    800,
+};
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+let uiOpen=false;
+function toggleUI(){uiOpen=!uiOpen;document.getElementById('ui').classList.toggle('open',uiOpen);}
+(function(){
+  for(let i=0;i<9;i++){
+    const sl=document.getElementById('tn'+i),vl=document.getElementById('vn'+i);
+    sl.addEventListener('input',()=>{T.names[i]=parseFloat(sl.value)*1000;vl.textContent=parseFloat(sl.value).toFixed(1)+'s';});
+  }
+  for(let i=0;i<4;i++){
+    const sl=document.getElementById('tp'+i),vl=document.getElementById('vp'+i);
+    sl.addEventListener('input',()=>{T.prices[i]=parseFloat(sl.value)*1000;vl.textContent=parseFloat(sl.value).toFixed(1)+'s';});
+  }
+  const ts=document.getElementById('tTot'),tv=document.getElementById('vTot');
+  ts.addEventListener('input',()=>{T.total=parseFloat(ts.value)*1000;tv.textContent=parseFloat(ts.value).toFixed(1)+'s';});
+  const ss=document.getElementById('tSD'),sv=document.getElementById('vSD');
+  ss.addEventListener('input',()=>{T.sd=parseInt(ss.value);sv.textContent=ss.value;});
+  document.getElementById('btnR').addEventListener('click',reset);
+})();
+
+// ── LAYOUT ───────────────────────────────────────────────────────────────────
+const VW=620,VH=465,VX=100,VY=120;
+const IX0=VX+VW+90,IX1=W-100,IW=IX1-IX0;
+const BTY=120,BY=250,BH=140,RY=BY+BH+44,RH=118,RG=16,TOY=RY+4*(RH+RG)+24;
+const PPX=IW/TOTAL;
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+const eo=t=>1-Math.pow(1-Math.min(1,Math.max(0,t)),3);
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+function hr(hex){
+  hex=hex.replace('#','');
+  if(hex.length===3)hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return `${parseInt(hex.slice(0,2),16)||0},${parseInt(hex.slice(2,4),16)||0},${parseInt(hex.slice(4,6),16)||0}`;
+}
+function rr(c,x,y,w,h,r){
+  if(typeof r==='number')r=[r,r,r,r];
+  const[a,b,d,e]=r;
+  c.beginPath();c.moveTo(x+a,y);c.lineTo(x+w-b,y);c.quadraticCurveTo(x+w,y,x+w,y+b);
+  c.lineTo(x+w,y+h-d);c.quadraticCurveTo(x+w,y+h,x+w-d,y+h);c.lineTo(x+e,y+h);
+  c.quadraticCurveTo(x,y+h,x,y+h-e);c.lineTo(x,y+a);c.quadraticCurveTo(x,y,x+a,y);c.closePath();
+}
+
+// ── NOISE ─────────────────────────────────────────────────────────────────────
+const nC=document.createElement('canvas');nC.width=W;nC.height=H;
+const nG=nC.getContext('2d');let ln=-999;
+function noise(ms){
+  if(ms-ln<100)return;ln=ms;
+  const id=nG.createImageData(W,H),d=id.data;
+  for(let i=0;i<d.length;i+=4){const v=Math.random()*9;d[i]=d[i+1]=d[i+2]=v;d[i+3]=18;}
+  nG.putImageData(id,0,0);
+}
+
+// ── WARP ──────────────────────────────────────────────────────────────────────
+const wC=document.createElement('canvas');wC.width=W;wC.height=H;
+const wG=wC.getContext('2d');
+function blitWarp(src,amt,ms){
+  if(amt<0.005){g.drawImage(src,0,0);return;}
+  const sh=6,rows=Math.ceil(H/sh);
+  for(let r=0;r<rows;r++){
+    const y=r*sh,ph=y*0.004+ms*0.0008;
+    const dx=Math.sin(ph)*14*amt+Math.sin(ph*2.1+0.7)*5*amt;
+    g.drawImage(src,0,y,W,sh,dx,y,W,sh);
+  }
+}
+
+// ── BG ────────────────────────────────────────────────────────────────────────
+function drawBg(){
+  g.fillStyle='#000';g.fillRect(0,0,W,H);
+  g.save();g.strokeStyle='rgba(255,255,255,0.013)';g.lineWidth=1;
+  for(let x=0;x<W;x+=120){g.beginPath();g.moveTo(x,0);g.lineTo(x,H);g.stroke();}
+  for(let y=0;y<H;y+=120){g.beginPath();g.moveTo(0,y);g.lineTo(W,y);g.stroke();}
+  g.restore();
+  for(let y=0;y<H;y+=3){g.fillStyle='rgba(0,0,0,0.18)';g.fillRect(0,y,W,1);}
+  g.save();g.globalAlpha=0.17;g.drawImage(nC,0,0);g.restore();
+  g.save();g.strokeStyle='rgba(229,0,4,0.12)';g.lineWidth=2;
+  [[0,0],[W,0],[0,H],[W,H]].forEach(([cx,cy])=>{
+    const dx=cx?-1:1,dy=cy?-1:1;
+    g.beginPath();g.moveTo(cx+dx*50,cy);g.lineTo(cx,cy);g.lineTo(cx,cy+dy*50);g.stroke();
+  });
+  g.restore();
+}
+
+// ── VIDEO PLACEHOLDER + WIRING ────────────────────────────────────────────────
+function drawVid(ms){
+  g.save();
+
+  // Bezel
+  g.fillStyle='#060606';rr(g,VX-14,VY-14,VW+28,VH+28,10);g.fill();
+  g.strokeStyle='rgba(255,255,255,0.04)';g.lineWidth=1.5;rr(g,VX-14,VY-14,VW+28,VH+28,10);g.stroke();
+
+  // Screen
+  g.fillStyle='#000';g.fillRect(VX,VY,VW,VH);
+  g.strokeStyle='rgba(255,255,255,0.06)';g.lineWidth=1;g.setLineDash([6,8]);
+  g.beginPath();g.moveTo(VX+VW/2,VY);g.lineTo(VX+VW/2,VY+VH);g.stroke();
+  g.beginPath();g.moveTo(VX,VY+VH/2);g.lineTo(VX+VW,VY+VH/2);g.stroke();
+  g.setLineDash([]);
+
+  // Corner ticks
+  g.strokeStyle='rgba(255,255,255,0.15)';g.lineWidth=2;
+  [[VX,VY],[VX+VW,VY],[VX,VY+VH],[VX+VW,VY+VH]].forEach(([cx,cy])=>{
+    const dx=cx===VX?1:-1,dy=cy===VY?1:-1,t=18;
+    g.beginPath();g.moveTo(cx+dx*t,cy);g.lineTo(cx,cy);g.lineTo(cx,cy+dy*t);g.stroke();
+  });
+
+  // Labels
+  g.font=`bold 22px ${FM}`;g.fillStyle='rgba(255,255,255,0.09)';
+  g.textAlign='center';g.textBaseline='middle';
+  g.fillText('4 : 3',VX+VW/2,VY+VH/2-14);
+  g.font=`18px ${FM}`;g.fillStyle='rgba(255,255,255,0.05)';
+  g.fillText('VIDEO PLACEHOLDER',VX+VW/2,VY+VH/2+14);
+  g.textAlign='left';
+
+  // ── WIRING BELOW ──────────────────────────────────────────────────────────
+  const wireT = ms !== undefined ? ms : 0;
+  const bezelBot = VY + VH + 14;
+
+  // 7 cables, each defined by exit X on bezel bottom, a series of waypoints, terminal type & label
+  // Waypoints are [x,y] relative to absolute canvas coords
+  // Types: 'rca' = circular RCA plug, 'rect' = rectangular connector, 'mini' = small jack
+  const CABLES = [
+    { exitX: VX+40,      color:'rgba(255,255,255,0.20)', label:'VIDEO',    type:'rca',
+      pts: (b)=>[[VX+40,b+40],[VX+40,b+180],[VX-30,b+180],[VX-30,b+520]] },
+    { exitX: VX+130,     color:'rgba(255,255,255,0.16)', label:'AUDIO L',  type:'rca',
+      pts: (b)=>[[VX+130,b+80],[VX+130,b+300],[VX+60,b+300],[VX+60,b+520]] },
+    { exitX: VX+220,     color:'rgba(255,255,255,0.14)', label:'AUDIO R',  type:'rca',
+      pts: (b)=>[[VX+220,b+60],[VX+220,b+240],[VX+160,b+240],[VX+160,b+520]] },
+    { exitX: VX+VW/2-20, color:'rgba(255,255,255,0.18)', label:'S-VIDEO',  type:'rect',
+      pts: (b)=>[[VX+VW/2-20,b+50],[VX+VW/2-20,b+380],[VX+VW/2-20,b+520]] },
+    { exitX: VX+VW/2+20, color:'rgba(255,255,255,0.12)', label:'COAXIAL',  type:'rect',
+      pts: (b)=>[[VX+VW/2+20,b+90],[VX+VW/2+20,b+340],[VX+VW/2+60,b+340],[VX+VW/2+60,b+520]] },
+    { exitX: VX+VW-130,  color:'rgba(255,255,255,0.15)', label:'OPTICAL',  type:'mini',
+      pts: (b)=>[[VX+VW-130,b+70],[VX+VW-130,b+260],[VX+VW-60,b+260],[VX+VW-60,b+520]] },
+    { exitX: VX+VW-40,   color:'rgba(255,255,255,0.10)', label:'SCART',    type:'rect',
+      pts: (b)=>[[VX+VW-40,b+100],[VX+VW-40,b+200],[VX+VW+40,b+200],[VX+VW+40,b+520]] },
+  ];
+
+  CABLES.forEach((cab, ci) => {
+    const pts = [[cab.exitX, bezelBot], ...cab.pts(bezelBot)];
+    const totalLen = pts.reduce((s,p,i)=> i===0?0:s+Math.hypot(p[0]-pts[i-1][0],p[1]-pts[i-1][1]),0);
+
+    // pulse 0..1 along wire
+    const pulse = (wireT * 0.00055 + ci * 0.142) % 1;
+    let pDist = pulse * totalLen;
+    let pulseX = pts[0][0], pulseY2 = pts[0][1];
+    for(let i=1;i<pts.length;i++){
+      const seg=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+      if(pDist<=seg){
+        const frac=pDist/seg;
+        pulseX=pts[i-1][0]+(pts[i][0]-pts[i-1][0])*frac;
+        pulseY2=pts[i-1][1]+(pts[i][1]-pts[i-1][1])*frac;
+        break;
+      }
+      pDist-=seg;
+    }
+
+    g.save();
+    // Wire path
+    g.strokeStyle=cab.color; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(pts[0][0],pts[0][1]);
+    for(let i=1;i<pts.length;i++) g.lineTo(pts[i][0],pts[i][1]);
+    g.stroke();
+
+    // Terminal plug at end
+    const ep=pts[pts.length-1];
+    g.fillStyle=cab.color;
+    if(cab.type==='rca'){
+      // RCA: outer ring + centre dot
+      g.beginPath();g.arc(ep[0],ep[1],10,0,Math.PI*2);g.stroke();
+      g.beginPath();g.arc(ep[0],ep[1],4,0,Math.PI*2);g.fill();
+    } else if(cab.type==='rect'){
+      g.fillRect(ep[0]-7,ep[1],14,20);
+      g.fillRect(ep[0]-3,ep[1]+20,3,10);
+      g.fillRect(ep[0]+1,ep[1]+20,3,10);
+    } else { // mini jack
+      g.beginPath();g.arc(ep[0],ep[1]+5,5,0,Math.PI*2);g.fill();
+      g.fillRect(ep[0]-1.5,ep[1]+10,3,18);
+    }
+
+    // Label
+    g.font=`bold 18px ${FM}`;
+    g.fillStyle=cab.color;
+    g.textAlign='center';g.textBaseline='top';
+    g.fillText(cab.label, ep[0], ep[1]+34);
+
+    // Signal pulse
+    g.save();
+    g.globalAlpha=Math.sin(pulse*Math.PI)*0.85;
+    g.fillStyle='#e50004';g.shadowColor='#e50004';g.shadowBlur=10;
+    g.beginPath();g.arc(pulseX,pulseY2,3.5,0,Math.PI*2);g.fill();
+    g.shadowBlur=0;g.restore();
+
+    g.restore();
+  });
+
+  // Model label — very subtle, right below bezel
+  g.font=`bold 22px ${FM}`;g.fillStyle='rgba(255,255,255,0.12)';
+  g.textAlign='center';g.textBaseline='top';
+  g.fillText('DVD PLAYER  ·  MODEL DX-9900',VX+VW/2,VY+VH+16);
+  g.textAlign='left';
+
+  g.restore();
+}
+
+// ── INFOGRAPHIC → wC ─────────────────────────────────────────────────────────
+function drawIG(ms,tA,bA,gS,gR,totA){
+  const c=wG;c.clearRect(0,0,W,H);
+  if(tA>0){
+    c.save();c.globalAlpha=tA;
+    c.font=`bold 26px ${FM}`;c.fillStyle='rgba(229,0,4,0.58)';c.textBaseline='top';
+    c.fillText('СТОИМОСТЬ ПАТЕНТНЫХ ЛИЦЕНЗИЙ — НА ЕДИНИЦУ ТОВАРА — ~2001',IX0,BTY);
+    c.font=`110px ${FD}`;c.fillStyle=WHITE;c.textAlign='right';
+    c.fillText('DVD PLAYER  $49.99',IX1,BTY-8);c.textAlign='left';c.restore();
+  }
+  if(bA>0){
+    c.save();c.globalAlpha=bA;
+    const pPx=PAT*PPX;
+    c.fillStyle='#111';rr(c,IX0,BY,IW,BH,6);c.fill();
+    c.fillStyle='#181818';rr(c,IX0+pPx,BY,IW-pPx,BH,[0,6,6,0]);c.fill();
+    let xc=IX0;
+    GROUPS.forEach((gr,i)=>{
+      const s=gS[i],sw=gr.amount*PPX;
+      if(s>0){c.fillStyle=gr.color;c.shadowColor=gr.color;c.shadowBlur=14*s;
+        rr(c,xc,BY,sw*eo(s),BH,i===0?[6,0,0,6]:0);c.fill();c.shadowBlur=0;}
+      xc+=sw;
+    });
+    c.strokeStyle='rgba(255,255,255,0.05)';c.lineWidth=2;rr(c,IX0,BY,IW,BH,6);c.stroke();
+    c.font=`bold 26px ${FM}`;c.fillStyle='rgba(255,255,255,0.10)';
+    c.textAlign='center';c.textBaseline='middle';
+    c.fillText('СЕБЕСТОИМОСТЬ + ПРИБЫЛЬ',IX0+pPx+(IW-pPx)/2,BY+BH/2);c.textAlign='left';
+    c.strokeStyle='rgba(229,0,4,0.32)';c.lineWidth=1.5;c.setLineDash([4,5]);
+    c.beginPath();c.moveTo(IX0+pPx,BY-12);c.lineTo(IX0+pPx,BY+BH+12);c.stroke();c.setLineDash([]);
+    c.restore();
+  }
+  GROUPS.forEach((gr,i)=>{
+    const ra=gR[i];if(ra<=0)return;
+    const y=RY+i*(RH+RG),rgb=hr(gr.color);
+    c.save();c.globalAlpha=ra;
+    c.fillStyle=`rgba(${rgb},0.05)`;c.fillRect(IX0,y,IW,RH);
+    c.fillStyle=`rgba(${rgb},0.10)`;c.fillRect(IX0,y,(gr.amount/TOTAL)*IW,RH);
+    c.fillStyle=gr.color;c.fillRect(IX0,y,5,RH);
+    const sh=0.5+0.5*Math.sin(ms*0.0015+i*1.7);
+    c.fillStyle=`rgba(${rgb},${0.03*sh})`;c.fillRect(IX0,y,IW,RH);
+    c.font=`bold 42px ${FM}`;c.fillStyle=gr.color;c.textBaseline='top';c.fillText(gr.line,IX0+26,y+14);
+    c.font=`22px ${FM}`;c.fillStyle='rgba(240,237,232,0.30)';c.fillText(gr.note,IX0+26,y+64);
+    c.font=`bold 76px ${FD}`;c.fillStyle=gr.color;c.shadowColor=gr.color;c.shadowBlur=12;
+    c.textAlign='right';c.fillText(`$${gr.amount.toFixed(2)}`,IX1-180,y+18);c.shadowBlur=0;
+    c.font=`bold 32px ${FM}`;c.fillStyle=`rgba(${rgb},0.34)`;
+    c.fillText(`${(gr.amount/TOTAL*100).toFixed(1)}%`,IX1-174,y+68);c.textAlign='left';
+    const sl=IX0+GROUPS.slice(0,i).reduce((s,x)=>s+x.amount*PPX,0);
+    c.strokeStyle=`rgba(${rgb},0.13)`;c.lineWidth=1;c.setLineDash([4,8]);
+    c.beginPath();c.moveTo(sl+gr.amount*PPX/2,BY+BH);c.lineTo(sl+gr.amount*PPX/2,y);c.stroke();c.setLineDash([]);
+    c.restore();
+  });
+  if(totA>0){
+    c.save();c.globalAlpha=totA;
+    c.strokeStyle='rgba(229,0,4,0.20)';c.lineWidth=1;
+    c.beginPath();c.moveTo(IX0,TOY);c.lineTo(IX1,TOY);c.stroke();
+    c.font=`bold 36px ${FM}`;c.fillStyle='rgba(240,237,232,0.32)';c.textBaseline='top';
+    c.fillText('ИТОГО ПАТЕНТНЫХ ЛИЦЕНЗИЙ:',IX0,TOY+12);
+    c.font=`150px ${FD}`;c.fillStyle=RED;c.shadowColor=RED;c.shadowBlur=45;
+    c.fillText(`$${PAT.toFixed(2)}`,IX0,TOY+48);c.shadowBlur=0;
+    c.font=`27px ${FM}`;c.fillStyle='rgba(240,237,232,0.22)';
+    c.fillText(`из $${TOTAL} розничной цены — ${Math.round(PAT/TOTAL*100)}% уходит держателям патентов`,IX0,TOY+212);
+    const mx=IX0+820,mw=IX1-(IX0+820),mh=62,my=TOY+68,mp=(PAT/TOTAL)*mw;
+    c.fillStyle='#111';rr(c,mx,my,mw,mh,4);c.fill();
+    c.fillStyle=RED;c.shadowColor=RED;c.shadowBlur=16;rr(c,mx,my,mp,mh,[4,0,0,4]);c.fill();c.shadowBlur=0;
+    c.fillStyle='#1a1a1a';rr(c,mx+mp,my,mw-mp,mh,[0,4,4,0]);c.fill();
+    c.strokeStyle='rgba(255,255,255,0.05)';c.lineWidth=1;rr(c,mx,my,mw,mh,4);c.stroke();
+    c.font=`bold 24px ${FM}`;c.textAlign='center';c.textBaseline='top';
+    c.fillStyle=RED;c.fillText('ПАТЕНТЫ  25%',mx+mp/2,my+mh+10);
+    c.fillStyle='rgba(255,255,255,0.14)';c.fillText('ОСТАЛЬНОЕ  75%',mx+mp+(mw-mp)/2,my+mh+10);
+    c.textAlign='left';c.restore();
+  }
+}
+
+// ── SCREEN GLITCH BARS ────────────────────────────────────────────────────────
+function glitch(color, intensity){
+  if(intensity<=0)return;
+  const rgb=hr(color);
+  for(let i=0;i<Math.floor(intensity*8);i++){
+    const sy=Math.random()*H,sh=1+Math.random()*14*intensity;
+    g.fillStyle=`rgba(${rgb},${0.08*intensity})`;g.fillRect(0,sy,W,sh);
+  }
+  for(let i=0;i<Math.floor(intensity*4);i++){
+    const sy=Math.random()*H;
+    g.fillStyle=`rgba(229,0,4,${0.18*intensity})`;g.fillRect(0,sy,W,1+Math.random()*2);
+    g.fillStyle=`rgba(0,60,255,${0.12*intensity})`;g.fillRect(0,sy+2,W,1);
+  }
+}
+
+// ── GLITCH TEXT RENDER ────────────────────────────────────────────────────────
+// Draws text with glitch slice displacement. intensity 0=clean, 1=heavy chaos.
+// 'appear' mode: intensity goes 1→0 as t goes 0→1 (materialise)
+// 'hold'  mode: light ambient glitch
+// 'vanish' mode: intensity goes 0→1 as t goes 0→1 (dematerialise)
+
+function glitchText(ctx, text, x, y, font, color, intensity, ms, seed=0){
+  if(intensity<0.005){
+    ctx.save();ctx.font=font;ctx.fillStyle=color;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,x,y);ctx.restore();return;
+  }
+  // Measure text width safely
+  ctx.save();ctx.font=font;
+  const measured=ctx.measureText(text).width||100;
+  ctx.restore();
+  const tw=measured;
+  const th=Math.max(10, parseInt(font)*1.4)||120;
+  const oC=document.createElement('canvas');
+  oC.width=Math.max(1, Math.min(W, Math.ceil(tw)+120));
+  oC.height=Math.max(1, Math.ceil(th)+60);
+  const oG=oC.getContext('2d');
+  oG.font=font;oG.fillStyle=color;
+  oG.textAlign='center';oG.textBaseline='middle';
+  oG.shadowColor=color;oG.shadowBlur=20;
+  oG.fillText(text,oC.width/2,oC.height/2);
+  oG.shadowBlur=0;
+
+  // RGB ghost layers
+  if(intensity>0.05){
+    const shift=intensity*18;
+    ctx.save();ctx.globalAlpha=0.25*intensity;
+    ctx.globalCompositeOperation='screen';
+    ctx.drawImage(oC,x-oC.width/2-shift,y-oC.height/2+3);
+    ctx.globalAlpha=0.18*intensity;
+    ctx.drawImage(oC,x-oC.width/2+shift,y-oC.height/2-3);
+    ctx.restore();
+  }
+
+  // Main text with slice glitch
+  const slices=Math.floor(3+intensity*18);
+  const sliceH=Math.ceil(oC.height/slices);
+  ctx.save();
+  ctx.globalAlpha=Math.max(0.05, 1-intensity*0.4);
+  for(let i=0;i<slices;i++){
+    const sy2=i*sliceH;
+    const sh2=Math.min(sliceH,oC.height-sy2);
+    if(sh2<=0)continue;
+    // Each slice: random offset scaled by intensity, some slices skip (dropout)
+    const rng=Math.sin(seed*91.3+i*17.7+ms*0.003)*43758.5;
+    const rngFrac=rng-Math.floor(rng);
+    if(intensity>0.6 && rngFrac<intensity*0.3) continue; // dropout
+    const dx=(rngFrac-0.5)*80*intensity;
+    ctx.drawImage(oC,0,sy2,oC.width,sh2, x-oC.width/2+dx, y-oC.height/2+sy2, oC.width,sh2);
+  }
+  ctx.restore();
+}
+
+// ── NAME SPLASH ───────────────────────────────────────────────────────────────
+function drawNameSplash(co, t, ms){
+  const color=co.color,rgb=hr(color);
+  g.fillStyle='#000';g.fillRect(0,0,W,H);
+  const vig=g.createRadialGradient(W/2,H/2,H*0.25,W/2,H/2,H*0.88);
+  vig.addColorStop(0,'rgba(0,0,0,0)');
+  vig.addColorStop(1,`rgba(${rgb},0.05)`);
+  g.fillStyle=vig;g.fillRect(0,0,W,H);
+  for(let y=0;y<H;y+=3){g.fillStyle='rgba(0,0,0,0.20)';g.fillRect(0,y,W,1);}
+
+  // Glitch intensity: appear burst at t=0, hold low, vanish burst near end
+  const appearI = cl(1 - t*6, 0, 1);           // 0..~0.17: heavy glitch in
+  const vanishI  = cl((t-0.78)*5, 0, 1);        // 0.78..1: glitch out
+  const ambientI = 0.06 + 0.04*Math.sin(ms*0.004);
+  const gi = Math.max(appearI, vanishI, ambientI);
+
+  glitch(color, Math.max(appearI, vanishI)*0.8);
+
+  const fs=300;
+  const overallAlpha = cl(1 - vanishI*1.2, 0.02, 1);
+
+  g.save();g.globalAlpha=overallAlpha;
+  glitchText(g, co.name, W/2, H/2, `${fs}px ${FD}`, color, gi, ms, 0);
+  g.restore();
+
+  // Group label bottom — glitch in slightly delayed
+  const labI = cl(1 - (t-0.1)*5, 0, 1);
+  const labVanish = cl((t-0.75)*6, 0, 1);
+  g.save();g.globalAlpha=cl(1-labVanish,0,1)*0.38;
+  glitchText(g, GROUPS[co.gi].line, W/2, H-130, `bold 36px ${FM}`, color, Math.max(labI,labVanish)*0.7, ms, 10);
+  g.restore();
+}
+
+// ── PRICE SPLASH ─────────────────────────────────────────────────────────────
+function drawPriceSplash(pr, t, ms){
+  const color=pr.color,rgb=hr(color);
+  g.fillStyle='#000';g.fillRect(0,0,W,H);
+  // Stronger vignette — price feels heavier
+  const vig=g.createRadialGradient(W/2,H/2,H*0.12,W/2,H/2,H*0.85);
+  vig.addColorStop(0,'rgba(0,0,0,0)');
+  vig.addColorStop(1,`rgba(${rgb},0.12)`);
+  g.fillStyle=vig;g.fillRect(0,0,W,H);
+  for(let y=0;y<H;y+=3){g.fillStyle='rgba(0,0,0,0.20)';g.fillRect(0,y,W,1);}
+
+  const appearI = cl(1-t*5,0,1);
+  const vanishI  = cl((t-0.80)*5,0,1);
+  const ambientI = 0.04+0.03*Math.sin(ms*0.005+1);
+  const gi = Math.max(appearI,vanishI,ambientI);
+
+  glitch(color, Math.max(appearI,vanishI)*1.1);
+
+  const fs=520;
+  const overallAlpha=cl(1-vanishI*1.3,0.02,1);
+
+  // Price number — centered, massive
+  g.save();g.globalAlpha=overallAlpha;
+  g.shadowColor=color;g.shadowBlur=60+20*Math.sin(ms*0.006);
+  glitchText(g, pr.label, W/2, H/2, `${fs}px ${FD}`, color, gi, ms, 1);
+  g.shadowBlur=0;g.restore();
+
+  // "НА УСТРОЙСТВО" — below price, glitches in slightly after
+  const subAppear=cl(1-(t-0.08)*5,0,1);
+  const subVanish=cl((t-0.78)*6,0,1);
+  g.save();g.globalAlpha=cl(1-subVanish,0,1)*0.55;
+  glitchText(g, 'НА УСТРОЙСТВО', W/2, H/2+fs*0.47+20, `bold 56px ${FM}`, color, Math.max(subAppear,subVanish)*0.8, ms, 2);
+  g.restore();
+
+  // Company list bottom
+  const labVanish=cl((t-0.76)*6,0,1);
+  const labAppear=cl(1-(t-0.05)*4,0,1);
+  g.save();g.globalAlpha=cl(1-labVanish,0,1)*0.30;
+  glitchText(g, pr.sub, W/2, H-130, `bold 32px ${FM}`, color, Math.max(labAppear,labVanish)*0.6, ms, 3);
+  g.restore();
+}
+
+// ── MAIN ─────────────────────────────────────────────────────────────────────
+let t0=null,running=false,igAlphaSmooth=1;
+const FADE=180; // splash fade-out ms
+
+function phaseOf(startMs, ms){
+  const sd=T.sd;
+  const t=cl((ms-startMs)/sd,0,1);
+  const out=cl((ms-startMs-sd)/FADE,0,1);
+  return {t, out, active: t>0 && out<1, alpha: t>0?cl(1-out,0,1):0};
+}
+
+function groupSettled(ms){
+  return GROUPS.map(gr=>{
+    // Bar slice appears after the group's price splash finishes
+    const pi=gr.ci[0]===0?0:gr.ci[0]<=2?0:gr.ci[0]<=6?1:gr.ci[0]===7?2:3;
+    // Actually: each group index matches price index
+    const pEnd=T.prices[GROUPS.indexOf(gr)]+T.sd+FADE;
+    return cl((ms-pEnd)/350,0,1);
+  });
+}
+function groupRow(ms){
+  // Row text appears when all company names for that group have started
+  return GROUPS.map((gr,gi)=>{
+    const pEnd=T.prices[gi]+T.sd+FADE;
+    return cl((ms-pEnd)/350,0,1);
+  });
+}
+
+function frame(now){
+  if(!running){
+    noise(0);g.fillStyle='#000';g.fillRect(0,0,W,H);
+    for(let y=0;y<H;y+=3){g.fillStyle='rgba(0,0,0,0.18)';g.fillRect(0,y,W,1);}
+    g.save();g.globalAlpha=0.15;g.drawImage(nC,0,0);g.restore();
+    drawVid(now);
+    const p=0.35+0.65*Math.abs(Math.sin(now*0.0013));
+    g.save();g.font=`bold 50px ${FM}`;g.fillStyle=`rgba(229,0,4,${p})`;
+    g.textAlign='center';g.textBaseline='middle';
+    g.fillText('R — ЗАПУСТИТЬ',W/2,H/2);g.textAlign='left';g.restore();
+    requestAnimationFrame(frame);return;
+  }
+
+  const ms=now-t0;
+  noise(ms);
+
+  // Compute active splash: name or price, newest one wins
+  const namePhases=NAMES.map((_,i)=>phaseOf(T.names[i],ms));
+  const pricePhases=PRICES.map((_,i)=>phaseOf(T.prices[i],ms));
+
+  // Find active (most recently started, not yet faded out)
+  let activeKind=null, activeIdx=-1, activeAlpha=0, activeT=0;
+  // Check all events by start time, pick the one that's currently active
+  // (if multiple active simultaneously, latest start wins)
+  let latestStart=-1;
+  NAMES.forEach((_,i)=>{
+    if(namePhases[i].active && T.names[i]>latestStart){
+      latestStart=T.names[i]; activeKind='name'; activeIdx=i;
+      activeAlpha=namePhases[i].alpha; activeT=namePhases[i].t;
+    }
+  });
+  PRICES.forEach((_,i)=>{
+    if(pricePhases[i].active && T.prices[i]>latestStart){
+      latestStart=T.prices[i]; activeKind='price'; activeIdx=i;
+      activeAlpha=pricePhases[i].alpha; activeT=pricePhases[i].t;
+    }
+  });
+
+  const gS=groupSettled(ms);
+  const gR=groupRow(ms);
+  const tA=cl((ms-600)/400,0,1);
+  const bA=cl((ms-900)/400,0,1);
+  const totA=cl((ms-T.total)/600,0,1);
+
+  // Smooth infographic alpha — lerps to 0.08 during splash, back to 1.0 otherwise
+  const splashActive = activeKind !== null;
+  const igTarget = splashActive ? 0.08 : 1.0;
+  igAlphaSmooth += (igTarget - igAlphaSmooth) * 0.08;
+
+  // 1. BG
+  drawBg();
+
+  // 2. Infographic to wC
+  drawIG(ms,tA,bA,gS,gR,totA);
+
+  // 3. Blit infographic with smooth alpha
+  g.save();g.globalAlpha=igAlphaSmooth;
+  blitWarp(wC, splashActive ? 0.3 : 0.035+0.02*Math.sin(ms*0.0005), ms);
+  g.restore();
+
+  // 4. Video placeholder
+  drawVid(ms);
+
+  // 5. Active splash
+  if(activeKind==='name'){
+    g.save();g.globalAlpha=activeAlpha;
+    drawNameSplash(NAMES[activeIdx],activeT,ms);
+    g.restore();
+  } else if(activeKind==='price'){
+    g.save();g.globalAlpha=activeAlpha;
+    drawPriceSplash(PRICES[activeIdx],activeT,ms);
+    g.restore();
+  }
+
+  // 6. Final scanlines
+  for(let y=0;y<H;y+=3){g.fillStyle='rgba(0,0,0,0.11)';g.fillRect(0,y,W,1);}
+
+  requestAnimationFrame(frame);
+}
+
+function reset(){t0=performance.now();running=true;igAlphaSmooth=0.08;}
+document.addEventListener('keydown',e=>{'rRкК'.includes(e.key)&&reset();});
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

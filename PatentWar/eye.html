@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>High-Res Dark Eye</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* Ограничиваем отображение на экране, сохраняя высокое внутреннее разрешение */
+        canvas { 
+            max-width: 90vw; 
+            max-height: 90vh;
+            display: block; 
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="eyeCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('eyeCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Увеличенное разрешение для рендеринга
+    canvas.width = 1200;
+    canvas.height = 800;
+
+    const eye = {
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        w: 350, // Увеличенная ширина
+        h: 160, // Увеличенная высота
+        openness: 0,
+        state: 'opening',
+        lookX: 0,
+        lookY: 0,
+        targetLookX: 0,
+        targetLookY: 0,
+        timer: 0
+    };
+
+    const COLORS = {
+        bg: '#000000',
+        sclera: '#0a0a0a', // Очень тёмный серый
+        iris: '#660000',   // Глубокий кровяной
+        pupil: '#000000'
+    };
+
+    function drawEyePath(open) {
+        const { x, y, w, h } = eye;
+        // Верхнее веко с сильным изгибом
+        const topY = y - (h * 1.2 * open);
+        // Нижнее веко более пологое
+        const bottomY = y + (h * 0.9 * open);
+
+        ctx.beginPath();
+        ctx.moveTo(x - w, y);
+        // Рисуем дуги
+        ctx.bezierCurveTo(x - w/2, topY, x + w/2, topY, x + w, y);
+        ctx.bezierCurveTo(x + w/2, bottomY, x - w/2, bottomY, x - w, y);
+        ctx.closePath();
+    }
+
+    function render() {
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if (eye.state === 'hidden') return;
+
+        ctx.save();
+        drawEyePath(eye.openness);
+        ctx.clip();
+
+        // 1. Склера (Почти черная)
+        ctx.fillStyle = COLORS.sclera;
+        ctx.fill();
+
+        // 2. Радужка и Зрачок с микро-саккадами
+        const jitterX = (Math.random() - 0.5) * 2;
+        const jitterY = (Math.random() - 0.5) * 2;
+        
+        const ix = eye.x + eye.lookX + jitterX;
+        const iy = eye.y + eye.lookY + jitterY;
+        
+        // Радужка (увеличена пропорционально глазу)
+        ctx.beginPath();
+        ctx.arc(ix, iy, 110, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.iris;
+        ctx.fill();
+
+        // Зрачок (увеличен)
+        ctx.beginPath();
+        ctx.arc(ix, iy, 45, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.pupil;
+        ctx.fill();
+
+        // 3. Градиентная тень от век для объема
+        const shadowGrad = ctx.createLinearGradient(0, eye.y - eye.h, 0, eye.y + eye.h);
+        shadowGrad.addColorStop(0, 'rgba(0,0,0,0.85)');
+        shadowGrad.addColorStop(0.35, 'rgba(0,0,0,0)');
+        shadowGrad.addColorStop(0.65, 'rgba(0,0,0,0)');
+        shadowGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+        ctx.fillStyle = shadowGrad;
+        drawEyePath(eye.openness);
+        ctx.fill();
+
+        ctx.restore();
+
+        // 4. Тонкий контур кожи (едва заметный)
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = eye.openness;
+        drawEyePath(eye.openness);
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+    }
+
+    function animate() {
+        eye.timer++;
+
+        switch (eye.state) {
+            case 'opening':
+                eye.openness += 0.004; // Замедлено ещё сильнее
+                if (eye.openness >= 1) { 
+                    eye.state = 'looking'; 
+                    eye.timer = 0; 
+                }
+                break;
+
+            case 'looking':
+                // Взгляд движется плавно, но на большие расстояния
+                eye.lookX += (eye.targetLookX - eye.lookX) * 0.03; 
+                eye.lookY += (eye.targetLookY - eye.lookY) * 0.03;
+
+                // Точка взгляда меняется редко
+                if (eye.timer % 300 === 0) {
+                    eye.targetLookX = (Math.random() - 0.5) * 220;
+                    eye.targetLookY = (Math.random() - 0.5) * 60;
+                }
+
+                if (eye.timer > 800) { 
+                    eye.state = 'closing';
+                }
+                break;
+
+            case 'closing':
+                eye.openness -= 0.008; // Плавное, тяжелое закрытие
+                if (eye.openness <= 0) {
+                    eye.state = 'hidden';
+                    setTimeout(() => {
+                        eye.state = 'opening';
+                        eye.timer = 0;
+                        eye.lookX = 0; eye.lookY = 0;
+                        eye.targetLookX = 0; eye.targetLookY = 0;
+                    }, 4000); 
+                }
+                break;
+        }
+
+        render();
+        requestAnimationFrame(animate);
+    }
+
+    animate();
+</script>
+
+</body>
+</html>

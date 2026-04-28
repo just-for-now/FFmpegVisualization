@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:2560px;height:1440px;overflow:hidden;background:#000}
+canvas{position:fixed;top:0;left:0}
+#hint{position:fixed;bottom:22px;right:34px;font:11px 'Share Tech Mono';color:rgba(255,255,255,.18);letter-spacing:3px;z-index:99;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<div id="hint">R · К — RESTART</div>
+<script>
+'use strict';
+const W=2560,H=1440;
+const cv=document.getElementById('c');
+const g=cv.getContext('2d');
+
+let T=0,dT=0,prev=0,scT=0,scN=0;
+const SC_DUR=[8,11,9];
+
+// colours — pumped up brightness
+const RED='#ff2828',YLW='#ffe600',WHT='#ffffff',CYN='#00f0ff';
+// renamed to avoid collision with local params named y/w/r/cy
+const CR=(a=1)=>`rgba(255,40,40,${a})`;
+const CY=(a=1)=>`rgba(255,230,0,${a})`;
+const CW=(a=1)=>`rgba(255,255,255,${a})`;
+const CC=(a=1)=>`rgba(0,240,255,${a})`;
+// legacy aliases so old code still works
+const r=CR, y=CY, w=CW, cy=CC;
+
+const eo=t=>1-Math.pow(1-t,3);
+const eEl=t=>t===0?0:t===1?1:Math.pow(2,-10*t)*Math.sin((t*10-.75)*Math.PI*2/3)+1;
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+const pr=(s,d,now)=>cl((now-s)/d,0,1);
+const lp=(a,b,t)=>a+(b-a)*t;
+
+// ── PARTICLES ──────────────────────────────────────
+const PS=[];
+function pt(x,y,vx,vy,life,sz,col){PS.push({x,y,vx,vy,life,age:0,sz,col});}
+function tickPS(){for(let i=PS.length-1;i>=0;i--){const p=PS[i];p.age+=dT;p.x+=p.vx*dT;p.y+=p.vy*dT;if(p.age>p.life)PS.splice(i,1);}}
+function drawPS(){PS.forEach(p=>{const a=1-p.age/p.life;g.save();g.globalAlpha=a*.95;g.shadowColor=p.col;g.shadowBlur=2;g.fillStyle=p.col;g.fillRect(p.x-p.sz*.5,p.y-p.sz*.5,p.sz,p.sz);g.restore();});}
+
+// ── GLITCH ─────────────────────────────────────────
+let GL_T=0,GL_I=0;
+function glitch(i=1,d=.12){GL_T=d;GL_I=i;}
+function drawGlitch(){
+  if(GL_T<=0)return;GL_T-=dT;
+  const n=4+Math.random()*10|0;
+  for(let i=0;i<n;i++){
+    const y2=Math.random()*H,h=1+Math.random()*22*GL_I;
+    try{const d2=g.getImageData(0,y2|0,W,Math.max(1,h|0));g.putImageData(d2,(Math.random()-.5)*50*GL_I,y2);}catch(e){}
+  }
+  if(Math.random()<.5*GL_I){g.fillStyle=r(.07*GL_I);g.fillRect(0,0,W,H);}
+  if(Math.random()<.3*GL_I){
+    const y3=Math.random()*H;
+    g.fillStyle=`rgba(255,230,0,${.12*GL_I})`;g.fillRect(0,y3,W,2+Math.random()*3);
+  }
+}
+
+// ── DATA RAIN ──────────────────────────────────────
+const RAIN=[];
+const RCH='01MPEG#$@■▪░PATENT//><§';
+for(let i=0;i<44;i++)RAIN.push({x:Math.random()*W,y:Math.random()*H,spd:25+Math.random()*70,op:.025+Math.random()*.06,col:Math.random()<.28?[255,50,50]:[200,200,200],chs:Array(16).fill(0).map(()=>RCH[Math.random()*RCH.length|0])});
+function drawRain(){
+  RAIN.forEach(r2=>{
+    r2.y+=r2.spd*dT;if(r2.y>H+120)r2.y=-120;
+    r2.chs.forEach((ch,i)=>{
+      const ry=r2.y-i*22;if(ry<-20||ry>H+10)return;
+      const fade=Math.max(0,.7-i*.055);
+      g.fillStyle=`rgba(${r2.col[0]},${r2.col[1]},${r2.col[2]},${r2.op*fade})`;
+      g.font='11px Share Tech Mono';
+      if(Math.random()<.007)r2.chs[i]=RCH[Math.random()*RCH.length|0];
+      g.fillText(ch,r2.x,ry);
+    });
+  });
+}
+
+// ── HUD ────────────────────────────────────────────
+function drawHUD(){
+  g.save();
+  [[32,32,1,1],[W-92,32,-1,1],[32,H-92,1,-1],[W-92,H-92,-1,-1]].forEach(([x,y2,dx,dy])=>{
+    g.strokeStyle=`rgba(255,50,50,.6)`;g.lineWidth=1.5;
+    g.beginPath();g.moveTo(x,y2);g.lineTo(x+dx*65,y2);g.stroke();
+    g.beginPath();g.moveTo(x,y2);g.lineTo(x,y2+dy*65);g.stroke();
+    g.fillStyle=r(.9);g.fillRect(x+dx*2-1.5,y2+dy*2-1.5,3,3);
+  });
+  g.fillStyle=w(.15);g.font="11px 'Share Tech Mono'";g.textAlign='center';
+  g.fillText('MPEG_PATENT_PROTOCOL // SYS:0x1A3F // REC●',W/2,26);
+  // scanlines
+  g.globalAlpha=.03;
+  for(let sy=0;sy<H;sy+=4){g.fillStyle='#000';g.fillRect(0,sy,W,1.5);}
+  g.globalAlpha=1;
+  // vignette — lighter, only edge darkening
+  const vg=g.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,W*.72);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.38)');
+  g.fillStyle=vg;g.fillRect(0,0,W,H);
+  g.restore();
+}
+
+// ── CLIP RECT ──────────────────────────────────────
+function cpth(x,y,w2,h2,cl2=12){
+  g.beginPath();g.moveTo(x+cl2,y);g.lineTo(x+w2-cl2,y);g.lineTo(x+w2,y+cl2);
+  g.lineTo(x+w2,y+h2-cl2);g.lineTo(x+w2-cl2,y+h2);g.lineTo(x+cl2,y+h2);
+  g.lineTo(x,y+h2-cl2);g.lineTo(x,y+cl2);g.closePath();
+}
+function fillC(x,y,w2,h2,col,cl2=12){g.save();cpth(x,y,w2,h2,cl2);g.fillStyle=col;g.fill();g.restore();}
+function strkC(x,y,w2,h2,col,lw=1,cl2=12){g.save();cpth(x,y,w2,h2,cl2);g.strokeStyle=col;g.lineWidth=lw;g.stroke();g.restore();}
+
+function scanLine(sy,col){
+  const sg=g.createLinearGradient(0,sy-12,0,sy+12);
+  sg.addColorStop(0,'rgba(0,0,0,0)');sg.addColorStop(.5,col);sg.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=sg;g.fillRect(0,sy-12,W,24);
+}
+
+// ════════════════════════════════════════════════════════
+// SCENE 1  MPEG first → patent ideas fly in → vote → winner accepted
+// Timeline:
+//   0.0–1.8  MPEG hex builds in centre
+//   1.8–3.2  5 patent idea cards slide in from right
+//   3.2–4.4  vote ticks appear on each
+//   4.4–5.2  winner highlights, others dim
+//   5.2–6.2  winner bubble flies into hex
+//   6.2–8.0  right panel text
+// ════════════════════════════════════════════════════════
+
+// Patent ideas — no companies, just ideas
+const IDEAS=[
+  {id:'IDEA_01',title:'Предсказание движения',sub:'Предсказание блоков кадра'},
+  {id:'IDEA_02',title:'Таблицы Хаффмана',sub:'Энтропийное кодирование'},
+  {id:'IDEA_03',title:'DCT-преобразование',sub:'Дискретное косинус-преобразование'},
+  {id:'IDEA_04',title:'Квантизация',sub:'Адаптивный шаг квантования'},
+  {id:'IDEA_05',title:'Битрейт-контроль',sub:'Переменный битрейт потока'},
+];
+const VOTE_WIN2=0; // "Предсказание движения" wins
+const IY=[160,285,410,535,660];
+const IW=400,IH=84,IX=1460; // ideas come from right side
+
+const HX=660,HY=H/2,HR=240;
+function hexPt(i,rr){const a=Math.PI/180*(60*i-90);return[HX+rr*Math.cos(a),HY+rr*Math.sin(a)];}
+
+function drawHex(p,accepted=0){
+  if(p<=0)return;
+  g.save();
+  const se=p*6;
+  for(let i=0;i<6;i++){
+    const ep=cl(se-i,0,1);if(ep<=0)break;
+    const[x1,y1]=hexPt(i,HR),[x2,y2]=hexPt((i+1)%6,HR);
+    g.save();g.shadowColor=YLW;g.shadowBlur=4;
+    g.strokeStyle=y(.95);g.lineWidth=2.5;
+    g.beginPath();g.moveTo(x1,y1);g.lineTo(lp(x1,x2,ep),lp(y1,y2,ep));g.stroke();
+    g.restore();
+  }
+  if(p>.75){
+    const rp=(p-.75)/.25;
+    [HR-28,HR-54].forEach((ir,ii)=>{
+      g.globalAlpha=rp*(.3-ii*.12);g.strokeStyle=YLW;g.lineWidth=.8;
+      g.beginPath();for(let i=0;i<6;i++){const[px,py]=hexPt(i,ir);i===0?g.moveTo(px,py):g.lineTo(px,py);}g.closePath();g.stroke();
+    });
+    g.globalAlpha=1;
+    const gf=g.createRadialGradient(HX,HY,0,HX,HY,HR);
+    const innerCol=accepted>.3?`rgba(255,230,0,${.18*rp*(1+accepted*.4)})`:`rgba(255,230,0,${.12*rp})`;
+    gf.addColorStop(0,innerCol);gf.addColorStop(1,y(0));
+    g.fillStyle=gf;
+    g.beginPath();for(let i=0;i<6;i++){const[px,py]=hexPt(i,HR);i===0?g.moveTo(px,py):g.lineTo(px,py);}g.closePath();g.fill();
+    g.save();g.translate(HX,HY);g.rotate(T*.22);g.globalAlpha=rp*.35;
+    g.setLineDash([9,13]);g.shadowColor=YLW;g.shadowBlur=2;g.strokeStyle=YLW;g.lineWidth=1;
+    g.beginPath();g.arc(0,0,HR+22,0,Math.PI*2);g.stroke();
+    g.setLineDash([]);g.restore();
+    g.globalAlpha=rp*.8;g.shadowColor=YLW;g.shadowBlur=2;g.strokeStyle=YLW;g.lineWidth=2;
+    for(let i=0;i<6;i++){const[px,py]=hexPt(i,HR),[ox,oy]=hexPt(i,HR+16);g.beginPath();g.moveTo(px,py);g.lineTo(ox,oy);g.stroke();}
+    g.shadowBlur=0;g.globalAlpha=1;
+  }
+  if(p>.82){
+    const lp2=(p-.82)/.18;
+    g.save();g.globalAlpha=lp2;
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.fillStyle=YLW;g.shadowColor=YLW;g.shadowBlur=4;g.font="13px 'Share Tech Mono'";g.textAlign='center';g.fillText('СТАНДАРТ',HX,HY-58);
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.fillStyle=YLW;g.font="900 82px 'Bebas Neue'";g.fillText('MPEG',HX,HY+12);
+    g.shadowBlur=0;
+    // sub label
+    g.fillStyle=YLW;g.font="600 18px 'Rajdhani'";g.fillText('Moving Picture Experts Group',HX,HY+40);
+    g.restore();
+  }
+  // accepted pulse ring
+  if(accepted>0){
+    g.globalAlpha=accepted*(1-accepted)*4*.6; // pulse fade
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.strokeStyle=YLW;g.lineWidth=3;
+    g.beginPath();g.arc(HX,HY,HR+accepted*60,0,Math.PI*2);g.stroke();
+    g.shadowBlur=0;g.globalAlpha=1;
+  }
+  g.restore();
+}
+
+function drawIdeaCard(i,alpha,highlight=0,dimmed=false){
+  if(alpha<=0)return;
+  const idea=IDEAS[i];
+  const isWin=(i===VOTE_WIN2);
+  const accentCol=highlight>.2?YLW:RED;
+  const x=IX,yy=IY[i];
+  g.save();g.globalAlpha=alpha*(dimmed?.22:1);
+  fillC(x,yy,IW,IH,highlight>.2?'rgba(24,18,4,.97)':'rgba(18,5,5,.97)',10);
+  strkC(x,yy,IW,IH,accentCol,highlight>.3?2.5:1.5,10);
+  const tg2=g.createLinearGradient(x,yy,x+IW,yy);
+  tg2.addColorStop(0,accentCol);tg2.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=tg2;g.fillRect(x+10,yy,IW-20,2);
+  // id tag
+  g.fillStyle=highlight>.2?CY(.7):CR(.9);g.font="10px 'Share Tech Mono'";g.textAlign='left';
+  g.fillText(idea.id,x+14,yy+16);
+  // title
+  g.shadowColor=accentCol;g.shadowBlur=highlight>.3?14:0;
+  g.fillStyle=highlight>.2?YLW:CW(.72);g.font="700 26px 'Rajdhani'";
+  g.fillText(idea.title,x+14,yy+44);
+  g.shadowBlur=0;
+  // sub
+  g.fillStyle=CW(.5);g.font="400 15px 'Rajdhani'";
+  g.fillText(idea.sub,x+14,yy+66);
+  // winner badge
+  if(highlight>.65){
+    const bp2=(highlight-.65)/.35;
+    g.globalAlpha=alpha*bp2;
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.fillStyle=YLW;g.font="700 11px 'Share Tech Mono'";g.textAlign='right';
+    g.fillText('✓ ПРИНЯТО В СТАНДАРТ',x+IW-10,yy+18);
+    g.shadowBlur=0;
+  }
+  g.restore();
+}
+
+// vote checkmarks left of each card
+function drawVote2(i,p){
+  if(p<=0)return;
+  const isWin=(i===VOTE_WIN2);
+  const vcounts=[5,2,3,1,2];
+  const count=vcounts[i];
+  const x=IX-14,yy=IY[i]+IH/2;
+  g.save();g.globalAlpha=p;
+  for(let v=0;v<count;v++){
+    const vp=cl(p*count-v,0,1);if(vp<=0)continue;
+    const tx=x-v*13;
+    g.shadowColor=isWin?YLW:r(.5);g.shadowBlur=isWin?10:3;
+    g.strokeStyle=isWin?YLW:r(.65);g.lineWidth=isWin?2.2:1.2;
+    g.beginPath();g.moveTo(tx-5,yy-5);g.lineTo(tx,yy+5);g.lineTo(tx+7,yy-9);g.stroke();
+  }
+  g.shadowBlur=0;g.restore();
+}
+
+// winner idea flies from card into hex
+function drawWinnerFly(p){
+  if(p<=0||p>=1)return;
+  const startX=IX,startY=IY[VOTE_WIN2]+IH/2;
+  const ep=eo(p); // eased progress
+  const cx2=lp(startX,HX,ep),cy2=lp(startY,HY,ep);
+  const fade=p<.1?(p/.1):p>.8?((1-p)/.2):1;
+  g.save();g.globalAlpha=fade;
+  // glowing orb
+  g.shadowColor=YLW;g.shadowBlur=4;
+  g.fillStyle=YLW;g.beginPath();g.arc(cx2,cy2,12,0,Math.PI*2);g.fill();
+  g.shadowBlur=0;
+  g.fillStyle=WHT;g.beginPath();g.arc(cx2,cy2,5,0,Math.PI*2);g.fill();
+  // idea name label
+  if(p<.6){
+    const lbl=IDEAS[VOTE_WIN2].title;
+    g.fillStyle=YLW;g.font="700 14px 'Share Tech Mono'";g.textAlign='center';
+    g.shadowColor=YLW;g.shadowBlur=2;
+    g.fillText(lbl,cx2,cy2-20);
+    g.shadowBlur=0;
+  }
+  // trail
+  g.shadowColor=YLW;g.shadowBlur=2;
+  g.strokeStyle=y(.5);g.lineWidth=1.5;g.setLineDash([4,6]);
+  g.beginPath();g.moveTo(startX,startY);g.lineTo(cx2,cy2);g.stroke();
+  g.setLineDash([]);g.shadowBlur=0;
+  g.restore();
+}
+
+function s1Right(st){
+  const t1=pr(6.2,.5,st),t2=pr(6.7,.5,st),t3=pr(7.4,.5,st);
+  const rx=1090;
+  g.save();
+  if(t1>0){
+    g.globalAlpha=eo(t1)*.75;
+    const vg=g.createLinearGradient(rx,180,rx,860);
+    vg.addColorStop(0,'rgba(255,40,40,0)');vg.addColorStop(.15,RED);vg.addColorStop(.85,RED);vg.addColorStop(1,'rgba(255,40,40,0)');
+    g.shadowColor=RED;g.shadowBlur=4;g.fillStyle=vg;g.fillRect(rx,180,2,680);g.shadowBlur=0;
+    g.globalAlpha=eo(t1)*.6;g.fillStyle=r(.8);g.font="12px 'Share Tech Mono'";g.textAlign='left';
+    g.fillText('// МЕХАНИКА MPEG',rx+22,298);
+  }
+  if(t2>0){
+    g.globalAlpha=eo(t2);g.fillStyle=WHT;g.font="700 46px 'Rajdhani'";g.textAlign='left';
+    g.fillText('Лучшие идеи',rx+22,388);
+  }
+  if(t2>.15){
+    g.globalAlpha=eo((t2-.15)/.85);
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.fillStyle=YLW;g.font="900 104px 'Bebas Neue'";
+    g.fillText('ВХОДЯТ',rx+22,502);g.fillText('В СТАНДАРТ',rx+22,608);
+    g.shadowBlur=0;
+  }
+  if(t3>0){
+    const uw=eo(t3)*740;
+    g.globalAlpha=eo(t3)*.8;g.shadowColor=YLW;g.shadowBlur=2;
+    g.fillStyle=YLW;g.fillRect(rx+22,626,uw,2.5);g.shadowBlur=0;
+  }
+  if(t3>.45){
+    g.globalAlpha=eo((t3-.45)/.55)*.85;
+    g.fillStyle=w(.75);g.font="400 26px 'Rajdhani'";
+    g.fillText('→ компания получает ПАТЕНТ',rx+22,678);
+  }
+  g.restore();
+}
+
+function scene1(st){
+  // MPEG hex builds first
+  const hexP=eo(pr(.2,1.6,st));
+  drawHex(hexP, eo(pr(5.4,.6,st)));
+
+  // idea cards slide in from right
+  const slideT=[1.8,2.05,2.3,2.55,2.8];
+  IDEAS.forEach((_,i)=>{
+    const ap=eo(pr(slideT[i],.4,st));
+    if(ap<=0)return;
+    const slideX=lp(W+20,0,ap); // slide in from right edge
+    const isWin=(i===VOTE_WIN2);
+    const winHL=eo(pr(4.4,.5,st));
+    const dimmed=winHL>.35&&!isWin;
+    g.save();g.translate(slideX,0);
+    drawIdeaCard(i,ap,isWin?winHL:0,dimmed);
+    g.restore();
+    // votes appear 3.2s
+    if(st>3.2) drawVote2(i,eo(pr(3.2+i*.15,.5,st)));
+  });
+
+  // winner flies to hex 5.2–6.2
+  const flyP=pr(5.2,1.0,st);
+  if(flyP>0&&flyP<1) drawWinnerFly(flyP);
+
+  s1Right(st);
+  if(st<.45)scanLine(H*(st/.45),r(.9));
+}
+
+// ════════════════════════════════════════════════════════
+// SCENE 2  Patent Definition (11s)
+// Rotating stamp, 2 def cards with REAL patent examples,
+// less small text, strong visuals
+// ════════════════════════════════════════════════════════
+
+// Real MPEG-related patents (verified)
+const PATENTS=[
+  {id:'US5,138,447',holder:'Dolby Labs',year:'1992',desc:'Сжатие аудио AC-3\nDolby Digital'},
+  {id:'US6,038,256',holder:'Sony Corp',year:'1998',desc:'Кодирование\nвидеопотока MPEG'},
+  {id:'US5,748,789',holder:'Lucent Tech',year:'1996',desc:'Предсказание\nдвижения блоков'},
+  {id:'US5,825,929',holder:'Philips',year:'1996',desc:'Синтаксис потока\nи таблицы VLC'},
+];
+
+function drawStamp(cx2,cy2,radius,p){
+  if(p<=0)return;
+  const R=Math.max(0,radius*p);
+  g.save();g.translate(cx2,cy2);g.rotate(-.05+Math.sin(T*.09)*.02);g.globalAlpha=p;
+  // outer ring glow
+  g.shadowColor=RED;g.shadowBlur=4;
+  g.strokeStyle=RED;g.lineWidth=3;g.beginPath();g.arc(0,0,R,0,Math.PI*2);g.stroke();
+  g.shadowBlur=0;
+  // inner ring
+  g.strokeStyle=r(.3);g.lineWidth=1;g.beginPath();g.arc(0,0,R*.84,0,Math.PI*2);g.stroke();
+  // ticks
+  g.strokeStyle=r(.65);
+  for(let i=0;i<24;i++){
+    const a=i*Math.PI*2/24,r1=R,r2=R+(i%6===0?18:9);
+    g.lineWidth=i%6===0?2:1;
+    g.beginPath();g.moveTo(Math.cos(a)*r1,Math.sin(a)*r1);g.lineTo(Math.cos(a)*r2,Math.sin(a)*r2);g.stroke();
+  }
+  // rotating dashed ring
+  g.save();g.rotate(T*.18);g.setLineDash([8,10]);g.lineDashOffset=0;
+  g.strokeStyle=r(.35);g.lineWidth=1;g.beginPath();g.arc(0,0,R+32,0,Math.PI*2);g.stroke();
+  g.setLineDash([]);g.restore();
+  // main text
+  if(p>.5){
+    const tp=(p-.5)/.5;g.globalAlpha=p*tp;
+    g.shadowColor=RED;g.shadowBlur=4;
+    g.fillStyle=RED;g.font="900 80px 'Bebas Neue'";g.textAlign='center';g.fillText('ПАТЕНТ',0,8);
+    g.shadowBlur=0;
+    g.fillStyle=r(.55);g.font="600 14px 'Rajdhani'";g.fillText('35 U.S.C. § 154',0,40);
+    g.fillStyle=RED;g.shadowColor=RED;g.shadowBlur=2;g.font="700 11px 'Share Tech Mono'";g.fillText('EXCLUSIVE RIGHT',0,62);
+  }
+  g.restore();
+}
+
+function drawDefCard(bx,by2,bw,bh,alpha,accent,tag,line1,line2){
+  if(alpha<=0)return;
+  g.save();g.globalAlpha=alpha;
+  fillC(bx,by2,bw,bh,'rgba(14,5,5,.97)',14);
+  strkC(bx,by2,bw,bh,accent,1.5,14);
+  const gg=g.createLinearGradient(bx,by2,bx+bw,by2);
+  gg.addColorStop(0,accent);gg.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=gg;g.fillRect(bx+14,by2,bw-14,2);
+  g.fillStyle=accent===RED?CR(.95):CY(.75);
+  g.font="13px 'Share Tech Mono'";g.textAlign='left';
+  g.fillText(tag,bx+22,by2+28);
+  g.shadowColor=accent;g.shadowBlur=2;
+  g.fillStyle=WHT;g.font="700 42px 'Rajdhani'";g.fillText(line1,bx+22,by2+80);
+  g.shadowBlur=0;
+  if(line2){g.fillStyle=CW(.94);g.font="300 28px 'Rajdhani'";g.fillText(line2,bx+22,by2+118);}
+  g.restore();
+}
+
+function drawPatentCard(px,py2,pat,alpha){
+  if(alpha<=0)return;
+  const bw=285,bh=190;
+  g.save();g.globalAlpha=alpha;
+  fillC(px,py2,bw,bh,'rgba(8,5,16,.97)',10);
+  strkC(px,py2,bw,bh,cy(.85),1.2,10);
+  const tg=g.createLinearGradient(px,py2,px+bw,py2);
+  tg.addColorStop(0,CYN);tg.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=tg;g.fillRect(px+8,py2,bw-8,1.5);
+  // id
+  g.shadowColor=CYN;g.shadowBlur=4;
+  g.fillStyle=CYN;g.font="700 14px 'Share Tech Mono'";g.textAlign='left';
+  g.fillText(pat.id,px+14,py2+28);g.shadowBlur=0;
+  g.fillStyle=CW(.82);g.font="12px 'Share Tech Mono'";g.textAlign='right';
+  g.fillText(pat.year,px+bw-14,py2+28);
+  // holder — bigger
+  g.shadowColor=WHT;g.shadowBlur=2;
+  g.fillStyle=WHT;g.font="700 26px 'Rajdhani'";g.textAlign='left';
+  g.fillText(pat.holder,px+14,py2+66);g.shadowBlur=0;
+  // desc lines — bigger
+  const lines=pat.desc.split('\n');
+  g.fillStyle=CW(.97);g.font="400 22px 'Rajdhani'";
+  lines.forEach((l,i)=>g.fillText(l,px+14,py2+100+i*26));
+  // corner accent
+  g.fillStyle=CC(.94);g.fillRect(px+bw-14,py2+bh-14,7,7);
+  g.restore();
+}
+
+function scene2(st){
+  // ghost BG
+  g.save();g.globalAlpha=eo(pr(.1,.3,st))*.055;
+  g.translate(W/2,H/2+120);g.rotate(-.13);
+  g.fillStyle=RED;g.font="900 520px 'Bebas Neue'";g.textAlign='center';g.fillText('PATENT',0,180);
+  g.restore();
+
+  // vertical divider
+  const dp=eo(pr(.4,.35,st));
+  if(dp>0){
+    g.save();g.globalAlpha=dp*.6;
+    const dvg=g.createLinearGradient(640,80,640,H-80);
+    dvg.addColorStop(0,'rgba(255,40,40,0)');dvg.addColorStop(.15,RED);dvg.addColorStop(.85,RED);dvg.addColorStop(1,'rgba(255,40,40,0)');
+    g.shadowColor=RED;g.shadowBlur=4;g.fillStyle=dvg;g.fillRect(640,80,2,H-160);g.shadowBlur=0;
+    g.restore();
+  }
+
+  drawStamp(310,H/2,220,eEl(pr(.2,.7,st)));
+
+  // ── REAL LAW DOCUMENT — parchment style
+  const docP=eo(pr(.8,.5,st));
+  if(docP>0){
+    const dx=670,dy=80,dw=1220,dh=740;
+    g.save();g.globalAlpha=docP;
+    fillC(dx,dy,dw,dh,'rgba(12,9,6,.98)',16);
+    strkC(dx,dy,dw,dh,'rgba(180,160,100,.5)',1.2,16);
+    const docGrad=g.createLinearGradient(dx,dy,dx+dw,dy);
+    docGrad.addColorStop(0,'rgba(180,160,100,0)');
+    docGrad.addColorStop(.3,'rgba(180,160,100,.7)');
+    docGrad.addColorStop(.7,'rgba(180,160,100,.7)');
+    docGrad.addColorStop(1,'rgba(180,160,100,0)');
+    g.fillStyle=docGrad;g.fillRect(dx+16,dy,dw-32,1.5);
+    g.fillStyle='rgba(200,185,120,.9)';g.font="11px 'Share Tech Mono'";g.textAlign='center';
+    g.fillText('UNITED STATES CODE · TITLE 35 · PATENTS',dx+dw/2,dy+22);
+    g.strokeStyle='rgba(180,160,100,.2)';g.lineWidth=1;
+    g.beginPath();g.moveTo(dx+40,dy+30);g.lineTo(dx+dw-40,dy+30);g.stroke();
+    // ghost §154
+    g.globalAlpha=docP*.07;
+    g.fillStyle='rgba(255,40,40,1)';g.font="900 280px 'Bebas Neue'";g.textAlign='center';
+    g.fillText('§154',dx+dw/2,dy+340);
+    g.globalAlpha=docP;
+
+    // § 154(a)(1) — law text
+    const t1=eo(pr(1.1,.5,st));
+    if(t1>0){
+      g.globalAlpha=docP*t1;
+      g.shadowColor=RED;g.shadowBlur=2;
+      g.fillStyle=RED;g.font="700 13px 'Share Tech Mono'";g.textAlign='left';
+      g.fillText('§ 154(a)(1)  CONTENTS AND TERM OF PATENT',dx+40,dy+68);
+      g.shadowBlur=0;
+      const lawLines=[
+        '"Every patent shall contain a short title of the invention',
+        'and a grant to the patentee, his heirs or assigns, of the',
+        'right to exclude others from making, using, offering for sale,',
+        'or selling the invention throughout the United States or',
+        'importing the invention into the United States..."',
+      ];
+      g.fillStyle='rgba(240,235,210,.98)';g.font="italic 400 18px Georgia, serif";
+      lawLines.forEach((line,i)=>{
+        const lf=cl((t1*lawLines.length-i),0,1);
+        if(lf<=0)return;
+        g.globalAlpha=docP*t1*lf;
+        g.fillText(line,dx+40,dy+100+i*28);
+      });
+    }
+
+    // Translation box — fixed wrapping
+    const t2=eo(pr(2.4,.45,st));
+    if(t2>0){
+      g.globalAlpha=docP*t2;
+      const tx=dx+40,ty2=dy+260,tw=dw-80,th2=96;
+      fillC(tx,ty2,tw,th2,'rgba(255,40,40,.08)',8);
+      strkC(tx,ty2,tw,th2,RED,.8,8);
+      g.fillStyle=r(.6);g.font="11px 'Share Tech Mono'";g.textAlign='left';
+      g.fillText('// ПЕРЕВОД',tx+12,ty2+18);
+      g.shadowColor=RED;g.shadowBlur=2;
+      g.fillStyle=WHT;g.font="700 21px 'Rajdhani'";
+      g.fillText('Патент даёт право ЗАПРЕЩАТЬ другим производить,',tx+12,ty2+44);
+      g.shadowBlur=0;
+      g.fillStyle=CW(.98);g.font="700 21px 'Rajdhani'";
+      g.fillText('использовать и продавать изобретение на территории США.',tx+12,ty2+68);
+      g.fillStyle=CW(.85);g.font="400 16px 'Rajdhani'";
+      g.fillText('(не «владеть» — а именно запрещать другим)',tx+12,ty2+90);
+    }
+
+    // § 154(a)(2) — term
+    const t3=eo(pr(3.2,.4,st));
+    if(t3>0){
+      g.globalAlpha=docP*t3;
+      g.shadowColor=YLW;g.shadowBlur=2;
+      g.fillStyle=YLW;g.font="700 13px 'Share Tech Mono'";g.textAlign='left';
+      g.fillText('§ 154(a)(2)  TERM',dx+40,dy+386);
+      g.shadowBlur=0;
+      g.fillStyle='rgba(240,235,210,.98)';g.font="italic 400 18px Georgia, serif";
+      g.fillText('"...the term of the patent shall be 20 years from the date',dx+40,dy+414);
+      g.fillText('on which the application for the patent was filed..."',dx+40,dy+442);
+    }
+
+    // 20 years highlight
+    const t4=eo(pr(3.8,.4,st));
+    if(t4>0){
+      g.globalAlpha=docP*t4;
+      const hx=dx+40,hy=dy+468,hw=dw-80,hh2=108;
+      fillC(hx,hy,hw,hh2,'rgba(255,230,0,.08)',8);
+      strkC(hx,hy,hw,hh2,YLW,.8,8);
+      // big number left-anchored
+      g.shadowColor=YLW;g.shadowBlur=4;
+      g.fillStyle=YLW;g.font="900 52px 'Bebas Neue'";g.textAlign='left';
+      g.fillText('20 ЛЕТ',hx+14,hy+54);g.shadowBlur=0;
+      // description below, smaller
+      g.fillStyle=CW(.96);g.font="400 20px 'Rajdhani'";
+      g.fillText('— исключительное право.',hx+14,hy+82);
+      g.fillStyle=CW(.88);g.font="400 18px 'Rajdhani'";
+      g.fillText('Никто не может использовать идею без разрешения правообладателя.',hx+14,hy+104);
+    }
+
+    // patent cards label
+    const labP=eo(pr(4.5,.4,st));
+    if(labP>0){
+      g.globalAlpha=docP*labP;
+      g.shadowColor=CYN;g.shadowBlur=2;
+      g.fillStyle=CYN;g.font="700 14px 'Share Tech Mono'";g.textAlign='left';
+      g.fillText('// РЕАЛЬНЫЕ ПАТЕНТЫ В ПУЛЕ MPEG',dx+40,dy+606);
+      g.shadowBlur=0;
+      g.strokeStyle=CC(.6);g.lineWidth=1;g.setLineDash([4,6]);
+      g.beginPath();g.moveTo(dx+40,dy+612);g.lineTo(dx+dw-40,dy+612);g.stroke();g.setLineDash([]);
+    }
+    g.restore();
+  }
+
+  // 4 patent cards
+  const patT=[4.7,5.05,5.4,5.75];
+  const patX=[670,975,1280,1585];
+  PATENTS.forEach((pat,i)=>{
+    const pp=eo(pr(patT[i],.5,st));
+    if(pp>0){
+      g.save();g.translate(0,lp(22,0,pp));
+      drawPatentCard(patX[i],826,pat,pp);
+      g.restore();
+    }
+  });
+
+  if(st<.4)scanLine(H*(st/.4),r(.9));
+}
+
+// ════════════════════════════════════════════════════════
+// SCENE 3  Patent Pool (9s)
+// Visual metaphor: pool = cash register / collector
+// Orbs fly from corps into centre
+// Right panel: mechanic text
+// ════════════════════════════════════════════════════════
+const PCX=680,PCY=510,PR2=158;
+const PC=[
+  {name:'PHILIPS',abbr:'PHI',pat:12,angle:-105,dist:375},
+  {name:'SONY',abbr:'SON',pat:8,angle:-45,dist:358},
+  {name:'MICROSOFT',abbr:'MSF',pat:15,angle:18,dist:395},
+  {name:'TOSHIBA',abbr:'TOS',pat:6,angle:95,dist:368},
+  {name:'IBM',abbr:'IBM',pat:11,angle:158,dist:378},
+  {name:'THOMSON',abbr:'THO',pat:9,angle:222,dist:355},
+];
+
+// Money orbs flying into pool
+const ORBS=[];
+let orbTimer=0;
+function spawnOrb(fromX,fromY){
+  ORBS.push({x:fromX,y:fromY,tx:PCX,ty:PCY,age:0,life:.9,trail:[]});
+}
+function tickOrbs(){
+  orbTimer-=dT;
+  if(orbTimer<0&&scT>1.5&&scN===2){
+    const co=PC[Math.random()*PC.length|0];
+    const rad=co.angle*Math.PI/180;
+    spawnOrb(PCX+Math.cos(rad)*co.dist,PCY+Math.sin(rad)*co.dist);
+    orbTimer=.18+Math.random()*.22;
+  }
+  for(let i=ORBS.length-1;i>=0;i--){
+    const o=ORBS[i];o.age+=dT;
+    const p=o.age/o.life;
+    o.x=lp(o.x,o.tx,dT*4);o.y=lp(o.y,o.ty,dT*4);
+    o.trail.push({x:o.x,y:o.y});
+    if(o.trail.length>12)o.trail.shift();
+    if(o.age>o.life)ORBS.splice(i,1);
+  }
+}
+function drawOrbs(){
+  ORBS.forEach(o=>{
+    const a=1-o.age/o.life;
+    // trail
+    o.trail.forEach((tr,i)=>{
+      const ta=i/o.trail.length*a*.5;
+      g.fillStyle=y(ta);g.fillRect(tr.x-1,tr.y-1,2,2);
+    });
+    // orb
+    g.save();g.globalAlpha=a;
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.fillStyle=YLW;g.beginPath();g.arc(o.x,o.y,5,0,Math.PI*2);g.fill();
+    g.shadowBlur=0;g.restore();
+  });
+}
+
+function drawPool(p){
+  if(p<=0)return;
+  const R=Math.max(0,PR2*p);
+  g.save();g.globalAlpha=p;
+  // glow layers
+  [240,185,120].forEach((r2,i)=>{
+    const gf=g.createRadialGradient(PCX,PCY,0,PCX,PCY,r2*p);
+    gf.addColorStop(0,y(.09-.02*i));gf.addColorStop(1,y(0));
+    g.fillStyle=gf;g.beginPath();g.arc(PCX,PCY,r2*p,0,Math.PI*2);g.fill();
+  });
+  // rings
+  [[R,2.5,.95],[R*.83,1,.35],[R*.66,1,.18]].forEach(([r2,lw,op])=>{
+    g.shadowColor=YLW;g.shadowBlur=lw===2.5?20:0;
+    g.strokeStyle=y(op);g.lineWidth=lw;g.beginPath();g.arc(PCX,PCY,r2,0,Math.PI*2);g.stroke();
+    g.shadowBlur=0;
+  });
+  // rotating dashes
+  g.save();g.translate(PCX,PCY);g.rotate(T*.28);
+  g.setLineDash([10,10]);g.strokeStyle=y(.22);g.lineWidth=1;
+  g.beginPath();g.arc(0,0,R+24,0,Math.PI*2);g.stroke();g.setLineDash([]);g.restore();
+  // 6 inner spokes
+  if(p>.65){
+    const sp=(p-.65)/.35;g.save();g.translate(PCX,PCY);g.rotate(T*.1);g.globalAlpha=sp*.3;
+    g.strokeStyle=YLW;g.lineWidth=.8;
+    for(let i=0;i<6;i++){const a=i*Math.PI/3;g.beginPath();g.moveTo(Math.cos(a)*42,Math.sin(a)*42);g.lineTo(Math.cos(a)*R*.78,Math.sin(a)*R*.78);g.stroke();}
+    g.restore();
+  }
+  // centre text
+  if(p>.55){
+    const cp=(p-.55)/.45;g.globalAlpha=p*cp;
+    g.shadowColor=YLW;g.shadowBlur=4;
+    g.fillStyle=YLW;g.font="900 52px 'Bebas Neue'";g.textAlign='center';
+    g.fillText('PATENT POOL',PCX,PCY+8);
+    g.shadowBlur=0;
+    g.fillStyle=y(.45);g.font="11px 'Share Tech Mono'";
+    g.fillStyle=y(.9);g.shadowColor=YLW;g.shadowBlur=2;g.fillText('ОБЩИЙ РЕЗЕРВ',PCX,PCY+34);g.shadowBlur=0;
+  }
+  g.restore();
+}
+
+function drawPoolNode(co,np,lp3){
+  if(np<=0)return;
+  const rad=co.angle*Math.PI/180;
+  const nx=PCX+Math.cos(rad)*co.dist,ny=PCY+Math.sin(rad)*co.dist;
+  const nw=170,nh=56;
+  g.save();g.globalAlpha=np;
+  fillC(nx-nw/2,ny-nh/2,nw,nh,'rgba(14,4,4,.97)',8);
+  strkC(nx-nw/2,ny-nh/2,nw,nh,RED,1.2,8);
+  g.fillStyle=r(.75);g.font="10px 'Share Tech Mono'";g.textAlign='center';g.fillText(co.abbr,nx,ny-9);
+  g.fillStyle=WHT;g.font="600 17px 'Rajdhani'";g.fillText(co.name,nx,ny+9);
+  g.shadowColor=RED;g.shadowBlur=2;
+  g.fillStyle=RED;g.font="700 13px 'Share Tech Mono'";g.fillText(co.pat+' PAT',nx,ny+25);
+  g.shadowBlur=0;
+  // dashed line
+  if(lp3>0){
+    const tx=PCX+Math.cos(rad+Math.PI)*PR2,ty=PCY+Math.sin(rad+Math.PI)*PR2;
+    g.globalAlpha=np*lp3*.65;g.shadowColor=YLW;g.shadowBlur=2;
+    g.strokeStyle=y(.9);g.lineWidth=1.2;g.setLineDash([5,5]);g.lineDashOffset=-T*18;
+    g.beginPath();g.moveTo(nx,ny);g.lineTo(lp(nx,tx,lp3),lp(ny,ty,lp3));g.stroke();
+    g.setLineDash([]);g.shadowBlur=0;
+  }
+  g.restore();
+}
+
+// Pool mechanic explainer — cauldron analogy
+function drawPoolMechanic(st){
+  const mp=eo(pr(4.2,.6,st));
+  if(mp<=0)return;
+  // 1.1x scale, moved down by 60px
+  const bx=1060,by=140,bw=869,bh=990;
+  g.save();
+  // clip to canvas so scroll doesn't overflow
+  g.beginPath();g.rect(0,0,W,H);g.clip();
+  g.globalAlpha=mp;
+  fillC(bx,by,bw,bh,'rgba(7,5,12,.97)',18);
+  strkC(bx,by,bw,bh,YLW,1.5,18);
+  const pg=g.createLinearGradient(bx,by,bx+bw,by);
+  pg.addColorStop(0,YLW);pg.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=pg;g.fillRect(bx+18,by,bw-18,2);
+
+  // HEADER
+  g.shadowColor=YLW;g.shadowBlur=4;
+  g.fillStyle=YLW;g.font="900 64px 'Bebas Neue'";g.textAlign='left';
+  g.fillText('ЧТО ТАКОЕ PATENT POOL?',bx+28,by+82);
+  g.shadowBlur=0;
+
+  // Analogy text
+  const ana1=eo(pr(4.5,.4,st));
+  if(ana1>0){
+    g.globalAlpha=mp*ana1;
+    g.fillStyle=CW(.97);g.font="400 22px 'Rajdhani'";
+    const lines=[
+      'Представьте: несколько изобретателей создали стандарт вместе.',
+      'Каждый вложил одну идею. Теперь кто-то хочет использовать стандарт.',
+      'Платить отдельно каждому неудобно — 61 человек, 61 договор.',
+    ];
+    lines.forEach((l,i)=>g.fillText(l,bx+28,by+130+i*32));
+  }
+
+  // DIAGRAM — cauldron layout
+  const diagP=eo(pr(5.0,.5,st));
+  if(diagP<=0){g.restore();return;}
+  g.globalAlpha=mp*diagP;
+
+  const dy=by+295;
+  const bh2=72;
+
+  // [ТЫ] box
+  const b1x=bx+28,b1w=160;
+  fillC(b1x,dy,b1w,bh2,'rgba(255,40,40,.12)',8);
+  strkC(b1x,dy,b1w,bh2,RED,1.8,8);
+  g.shadowColor=RED;g.shadowBlur=2;
+  g.fillStyle=WHT;g.font="900 34px 'Bebas Neue'";g.textAlign='center';
+  g.fillText('ТЫ',b1x+b1w/2,dy+30);g.shadowBlur=0;
+  g.fillStyle=CR(.9);g.font="400 16px 'Rajdhani'";
+  g.fillText('делаешь плеер',b1x+b1w/2,dy+54);
+
+  // arrow 1 + animated coins
+  const a1x=b1x+b1w+6,a1y=dy+bh2/2;
+  g.shadowColor=YLW;g.shadowBlur=2;g.strokeStyle=YLW;g.lineWidth=2;
+  g.beginPath();g.moveTo(a1x,a1y);g.lineTo(a1x+56,a1y);g.stroke();
+  g.fillStyle=YLW;g.beginPath();g.moveTo(a1x+68,a1y);g.lineTo(a1x+56,a1y-7);g.lineTo(a1x+56,a1y+7);g.fill();
+  g.shadowBlur=0;
+  // animated coin dots
+  [0,.33,.66].forEach(offset=>{
+    const cp=(T*.7+offset)%1;
+    const cx2=lp(a1x,a1x+56,cp);
+    const coinA=cp<.15?(cp/.15):cp>.8?((1-cp)/.2):1;
+    g.globalAlpha=mp*diagP*coinA;
+    g.shadowColor=YLW;g.shadowBlur=2;
+    g.fillStyle=YLW;g.beginPath();g.arc(cx2,a1y-10,5,0,Math.PI*2);g.fill();
+    g.fillStyle=WHT;g.font="700 7px 'Share Tech Mono'";g.textAlign='center';
+    g.fillText('$',cx2,a1y-7);
+    g.shadowBlur=0;
+  });
+  g.globalAlpha=mp*diagP;
+  g.fillStyle=CY(.85);g.font="700 14px 'Share Tech Mono'";g.textAlign='center';
+  g.fillText('ОДИН',a1x+34,a1y-22);g.fillText('ПЛАТЁЖ',a1x+34,a1y-6);
+
+  // CAULDRON
+  const potX=a1x+72,potY=dy-14,potW=140,potH=100;
+  const cx3=potX+potW/2,cy3=potY+potH/2;
+  g.shadowColor=YLW;g.shadowBlur=4;
+  g.strokeStyle=YLW;g.lineWidth=2.5;
+  g.beginPath();
+  g.moveTo(potX+14,potY+16);
+  g.lineTo(potX+potW-14,potY+16);
+  g.quadraticCurveTo(potX+potW,potY+16,potX+potW,potY+34);
+  g.lineTo(potX+potW-10,potY+potH-10);
+  g.quadraticCurveTo(potX+potW-10,potY+potH,potX+potW-22,potY+potH);
+  g.lineTo(potX+22,potY+potH);
+  g.quadraticCurveTo(potX+10,potY+potH,potX+10,potY+potH-10);
+  g.lineTo(potX,potY+34);
+  g.quadraticCurveTo(potX,potY+16,potX+14,potY+16);
+  g.closePath();
+  const potFill=g.createLinearGradient(potX,potY,potX,potY+potH);
+  potFill.addColorStop(0,'rgba(255,230,0,.22)');potFill.addColorStop(1,'rgba(255,180,0,.08)');
+  g.fillStyle=potFill;g.fill();g.stroke();g.shadowBlur=0;
+  // rim
+  g.strokeStyle=y(.7);g.lineWidth=3;
+  g.beginPath();g.moveTo(potX-4,potY+16);g.lineTo(potX+potW+4,potY+16);g.stroke();
+  // legs
+  g.strokeStyle=y(.45);g.lineWidth=2;
+  [[potX+20,potY+potH],[cx3,potY+potH],[potX+potW-20,potY+potH]].forEach(([lx,ly])=>{
+    g.beginPath();g.moveTo(lx,ly);g.lineTo(lx+(lx-cx3)*.15,ly+12);g.stroke();
+  });
+  // stacked coins inside
+  const stackH=eo(pr(5.3,.8,st));
+  for(let s=0;s<Math.floor(stackH*5);s++){
+    const sy2=potY+potH-18-s*10;
+    if(sy2<potY+22)break;
+    g.save();g.beginPath();g.ellipse(cx3,sy2,22,6,0,0,Math.PI*2);
+    g.fillStyle=`rgba(255,210,0,${.6-s*.08})`;g.fill();
+    g.strokeStyle='rgba(255,180,0,.7)';g.lineWidth=1;g.stroke();g.restore();
+  }
+  // cauldron label
+  g.shadowColor=YLW;g.shadowBlur=2;
+  g.fillStyle=YLW;g.font="700 18px 'Bebas Neue'";g.textAlign='center';
+  g.fillText('ОБЩИЙ КОТЁЛ',cx3,potY+potH+22);g.shadowBlur=0;
+  g.fillStyle=CY(.85);g.font="400 13px 'Rajdhani'";
+  g.fillText('Patent Pool',cx3,potY+potH+40);
+
+  // arrow 2: pot → holders
+  const a2x=potX+potW+4,a2y=dy+bh2/2;
+  g.shadowColor=YLW;g.shadowBlur=2;g.strokeStyle=YLW;g.lineWidth=2;
+  g.beginPath();g.moveTo(a2x,a2y);g.lineTo(a2x+52,a2y);g.stroke();
+  g.fillStyle=YLW;g.beginPath();g.moveTo(a2x+64,a2y);g.lineTo(a2x+52,a2y-7);g.lineTo(a2x+52,a2y+7);g.fill();
+  g.shadowBlur=0;
+  g.fillStyle=CY(.85);g.font="700 14px 'Share Tech Mono'";g.textAlign='center';
+  g.fillText('ДОЛЯ',a2x+32,a2y-22);g.fillText('КАЖДОМУ',a2x+32,a2y-6);
+
+  // [61 ДЕРЖАТЕЛЬ] box
+  const b3x=a2x+66,b3w=220;
+  fillC(b3x,dy,b3w,bh2,'rgba(0,240,255,.07)',8);
+  strkC(b3x,dy,b3w,bh2,CYN,1.5,8);
+  g.shadowColor=CYN;g.shadowBlur=2;
+  g.fillStyle=CYN;g.font="700 22px 'Bebas Neue'";g.textAlign='center';
+  g.fillText('61 ДЕРЖАТЕЛЬ',b3x+b3w/2,dy+28);g.shadowBlur=0;
+  g.fillStyle=CC(.92);g.font="600 14px 'Rajdhani'";
+  g.fillText('PHILIPS · SONY · IBM',b3x+b3w/2,dy+50);
+  g.fillText('DOLBY · TOSHIBA...',b3x+b3w/2,dy+68);
+
+  // key phrase
+  const kp=eo(pr(5.7,.4,st));
+  if(kp>0){
+    g.globalAlpha=mp*kp;
+    g.strokeStyle=CW(.12);g.lineWidth=1;g.setLineDash([4,6]);
+    g.beginPath();g.moveTo(bx+28,dy+bh2+52);g.lineTo(bx+bw-28,dy+bh2+52);g.stroke();
+    g.setLineDash([]);
+    g.fillStyle=CW(.94);g.font="400 21px 'Rajdhani'";g.textAlign='left';
+    g.fillText('Вместо 61 договора — один. Деньги делятся автоматически.',bx+28,dy+bh2+82);
+  }
+
+  // stats
+  const sp2=eo(pr(6.1,.5,st));
+  if(sp2>0){
+    g.globalAlpha=mp*sp2;
+    const stats=[
+      {val:'$2–20',lbl:'с каждого плеера'},
+      {val:'$0.30',lbl:'с каждого диска'},
+      {val:'61',lbl:'держатель патентов'},
+    ];
+    stats.forEach((s,i)=>{
+      const sx=bx+28+i*248,sy2=dy+bh2+160;
+      g.shadowColor=YLW;g.shadowBlur=4;
+      g.fillStyle=YLW;g.font="900 52px 'Bebas Neue'";g.textAlign='left';g.fillText(s.val,sx,sy2);
+      g.shadowBlur=0;
+      g.fillStyle=CW(.9);g.font="400 20px 'Rajdhani'";g.fillText(s.lbl,sx,sy2+26);
+    });
+  }
+
+  // ── TYPEWRITER — бесконечно вниз одна фраза за другой
+  const np=eo(pr(6.6,.4,st));
+  if(np>0){
+    g.globalAlpha=mp*np;
+    g.strokeStyle=CW(.15);g.lineWidth=1;
+    g.beginPath();g.moveTo(bx+28,dy+bh2+230);g.lineTo(bx+bw-28,dy+bh2+230);g.stroke();
+    g.shadowColor=RED;g.shadowBlur=2;
+    g.fillStyle=r(.7);g.font="11px 'Share Tech Mono'";g.textAlign='left';
+    g.fillText('// ПОНАЧАЛУ ЭТО КАЗАЛОСЬ СПРАВЕДЛИВЫМ',bx+28,dy+bh2+258);
+
+    const phrase='Маленький разработчик защищён, крупная корпорация не может просто украсть его решение.';
+    const lineH=28;
+    const startY=dy+bh2+292;
+    const endY=by+bh-14;
+    const charsPerSec=32;
+    const typeT=Math.max(0,st-6.6);
+    const totalTyped=Math.floor(typeT*charsPerSec);
+    // каждая строка — одно повторение фразы
+    const fullLen=phrase.length+1;
+    const currentLine=Math.floor(totalTyped/fullLen);
+    const charInLine=totalTyped%fullLen;
+
+    g.fillStyle=CW(.96);g.font="400 19px 'Rajdhani'";g.textAlign='left';
+    for(let li=0;li<=currentLine;li++){
+      const yy=startY+li*lineH;
+      if(yy>endY)break;
+      const isActive=(li===currentLine);
+      const text=isActive?phrase.slice(0,Math.min(charInLine,phrase.length)):phrase;
+      g.globalAlpha=mp*np;
+      g.fillText(text,bx+28,yy);
+      if(isActive&&charInLine<phrase.length){
+        const tw=g.measureText(text).width;
+        if(Math.floor(T*2.5)%2===0){
+          g.fillStyle=YLW;
+          g.fillRect(bx+30+tw,yy-16,2,18);
+          g.fillStyle=CW(.96);
+        }
+      }
+    }
+  }
+
+  g.restore();
+}
+
+function scene3(st){
+  // grid bg
+  g.save();g.globalAlpha=.03+Math.sin(T*1.1)*.012;g.strokeStyle=YLW;g.lineWidth=.5;
+  for(let x=0;x<W;x+=80){g.beginPath();g.moveTo(x,0);g.lineTo(x,H);g.stroke();}
+  for(let yl=0;yl<H;yl+=80){g.beginPath();g.moveTo(0,yl);g.lineTo(W,yl);g.stroke();}
+  g.restore();
+
+  drawPool(eEl(pr(.2,.7,st)));
+
+  const NS=[.8,1.1,1.4,1.7,2.0,2.3];
+  PC.forEach((co,i)=>{
+    drawPoolNode(co,eo(pr(NS[i],.4,st)),eo(pr(NS[i]+.3,.5,st)));
+  });
+
+  tickOrbs();drawOrbs();
+  if(st>2&&Math.random()<.0025)glitch(.5,.09);
+  drawPoolMechanic(st);
+
+  if(st<.4)scanLine(H*(st/.4),y(.8));
+}
+
+// ── TRANSITION ─────────────────────────────────────
+let transiting=false;
+function doTrans(cb){
+  transiting=true;glitch(1.7,.2);
+  setTimeout(()=>glitch(1,.1),210);
+  setTimeout(()=>{cb();transiting=false;},400);
+}
+
+// ── LOOP ───────────────────────────────────────────
+let running=false;
+function restart(){
+  running=true;T=0;dT=0;scT=0;scN=0;PS.length=0;ORBS.length=0;orbTimer=0;
+  glitch(1.5,.22);
+}
+
+function loop(ts){
+  dT=Math.min((ts-prev)/1000,.05);prev=ts;
+  if(!running){requestAnimationFrame(loop);return;}
+  T+=dT;scT+=dT;
+  if(!transiting&&scT>=SC_DUR[scN]-.08&&scN<2)doTrans(()=>{scN++;scT=0;});
+  g.fillStyle='#040108';g.fillRect(0,0,W,H);
+  drawRain();
+  if(scN===0)scene1(scT);
+  else if(scN===1)scene2(scT);
+  else scene3(scT);
+  drawPS();tickPS();
+  drawHUD();drawGlitch();
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener('keydown',e=>{
+  if('rRкК'.includes(e.key))restart();
+});
+prev=performance.now();
+requestAnimationFrame(loop);
+setTimeout(restart,200);
+</script>

@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>OGG VORBIS</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Bebas+Neue&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;height:100%;overflow:hidden;background:#FFE000;color:#0d0d0d;font-family:'JetBrains Mono',monospace;}
+#stage{width:100vw;height:100vh;position:relative;overflow:hidden;}
+
+/* CRT scanlines overlay */
+#crt{position:absolute;inset:0;pointer-events:none;z-index:800;
+  background:repeating-linear-gradient(to bottom,
+    transparent 0px,transparent 5px,
+    rgba(0,0,0,0.06) 5px,rgba(0,0,0,0.06) 6px);}
+
+/* WARP: the real deal.
+   We overlay a <canvas> on top of everything, draw a copy of a horizontal
+   slice of the page, then shift those rows horizontally.
+   The trick: we use drawImage(document body) – that doesn't work cross-origin
+   but works perfectly on local/same-origin pages.
+   Fallback: if drawImage fails, we draw a visible luminance band + skew lines
+   that still sell the effect without pixel-perfect accuracy. */
+#warp-canvas{
+  position:absolute;inset:0;pointer-events:none;
+  z-index:700;
+  /* intentionally above screens, below crt */
+}
+
+#noise{position:absolute;inset:0;pointer-events:none;z-index:790;opacity:0.02;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:200px 200px;animation:na 0.14s steps(1) infinite;}
+@keyframes na{0%{background-position:0 0}25%{background-position:-60px 35px}50%{background-position:45px -45px}75%{background-position:-35px 55px}}
+
+/* screens */
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:flex-start;justify-content:center;
+  opacity:0;pointer-events:none;padding:65px 88px;}
+.screen.on{opacity:1;pointer-events:all;}
+
+@keyframes wipeIn{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes wipeOut{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 0 0 100%)}}
+.wipe-in{animation:wipeIn 0.22s cubic-bezier(0.4,0,0.2,1) forwards;}
+.wipe-out{animation:wipeOut 0.22s cubic-bezier(0.4,0,0.2,1) forwards;}
+
+@keyframes glitch{
+  0%  {transform:none;clip-path:none;filter:none;}
+  7%  {transform:translate(-18px,4px) skewX(7deg);clip-path:inset(3% 0 80% 0);filter:hue-rotate(150deg) contrast(1.6);}
+  14% {transform:translate(18px,-6px);clip-path:inset(72% 0 4% 0);filter:saturate(4);}
+  21% {transform:translate(-12px,2px) skewX(-4deg);clip-path:inset(30% 0 55% 0);filter:invert(0.3);}
+  28% {transform:none;clip-path:none;filter:none;}
+  35% {transform:translate(14px,0);clip-path:inset(12% 0 68% 0);}
+  42% {transform:none;clip-path:none;filter:none;}
+  100%{transform:none;clip-path:none;filter:none;}
+}
+.glitching{animation:glitch 0.4s steps(2) forwards;}
+
+/* ─────────── S-1 PRE QUOTE ─────────── */
+#s_pre{background:#FFE000;justify-content:center;align-items:flex-start;}
+.pre-line{
+  font-family:'JetBrains Mono',monospace;
+  font-weight:700;
+  font-size:clamp(18px,2.2vw,30px);
+  letter-spacing:0.18em;
+  line-height:1.7;
+  color:#0d0d0d;
+  max-width:820px;
+  border-left:6px solid #0d0d0d;
+  padding-left:28px;
+}
+
+/* ─────────── S0 INTRO ─────────── */
+#s0{background:#FFE000;padding:0;align-items:stretch;}
+canvas#intro-canvas{width:100%;height:100%;display:block;}
+
+/* ─────────── S1 ─────────── */
+#s1{background:#FFE000;flex-direction:row;gap:52px;align-items:stretch;}
+
+.s1-left{display:flex;flex-direction:column;justify-content:space-between;flex:1;min-width:0;}
+.eyebrow{font-size:22px;letter-spacing:0.3em;margin-bottom:12px;opacity:0;}
+.big-name{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(220px,26vw,340px);
+  letter-spacing:0.03em;line-height:0.85;opacity:0;}
+.name-tag{font-size:24px;letter-spacing:0.14em;margin-top:16px;
+  opacity:0;border-left:7px solid #0d0d0d;padding-left:20px;
+  transition:opacity .5s,transform .5s;transform:translateY(8px);}
+.name-tag.on{opacity:1;transform:none;}
+.s1-facts{margin-top:22px;opacity:0;transform:translateY(10px);
+  transition:opacity .5s,transform .5s;}
+.s1-facts.on{opacity:1;transform:none;}
+.s1-fact{font-size:19px;letter-spacing:0.08em;line-height:1;
+  opacity:0.7;border-bottom:2px solid rgba(13,13,13,0.15);padding:11px 0;}
+
+.s1-right{width:440px;flex-shrink:0;display:flex;flex-direction:column;
+  justify-content:space-between;border-left:5px solid #0d0d0d;padding-left:44px;}
+.stamp-s1{font-size:23px;letter-spacing:0.2em;border:5px solid #0d0d0d;
+  padding:12px 22px;transform:rotate(4deg);opacity:0;
+  transition:opacity .3s;align-self:flex-end;}
+.stamp-s1.on{opacity:1;}
+.s1-panel{opacity:0;transition:opacity .5s,transform .5s;transform:translateX(18px);flex:1;padding-top:24px;}
+.s1-panel.on{opacity:1;transform:none;}
+.s1-panel-title{font-size:15px;letter-spacing:0.3em;opacity:0.4;margin-bottom:16px;}
+.s1-panel-item{display:flex;justify-content:space-between;
+  border-top:2px solid rgba(13,13,13,0.18);padding:13px 0;
+  font-size:19px;letter-spacing:0.06em;}
+.s1-panel-item span{opacity:0.5;font-size:17px;}
+.s1-badge{border:5px solid #0d0d0d;padding:18px 22px;
+  font-size:18px;letter-spacing:0.12em;line-height:1.7;
+  opacity:0;transition:opacity .5s;}
+.s1-badge.on{opacity:1;}
+.s1-timeline{opacity:0;transition:opacity .5s,transform .5s;transform:translateX(18px);margin-top:2px;}
+.s1-timeline.on{opacity:1;transform:none;}
+.s1-trow{display:flex;gap:16px;align-items:baseline;
+  border-top:2px solid rgba(13,13,13,0.14);padding:10px 0;}
+.s1-trow-dead .s1-tyear{color:#0d0d0d;opacity:0.35;text-decoration:line-through;}
+.s1-trow-dead .s1-tdesc{opacity:0.35;}
+.s1-tyear{font-family:'Bebas Neue',sans-serif;font-size:30px;
+  letter-spacing:0.06em;flex-shrink:0;width:66px;line-height:1;}
+.s1-tdesc{font-size:16px;letter-spacing:0.06em;line-height:1.4;opacity:0.65;}
+.cursor{display:inline-block;width:3px;height:1em;background:#0d0d0d;
+  vertical-align:text-bottom;animation:cur .65s steps(1) infinite;}
+@keyframes cur{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+/* ─────────── S2 ─────────── */
+#s2{background:#FFE000;}
+.s2-head{width:100%;display:flex;align-items:baseline;
+  justify-content:space-between;margin-bottom:24px;
+  opacity:0;transition:opacity .4s;}
+.s2-head.on{opacity:1;}
+.s2-title{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(72px,9vw,110px);letter-spacing:0.04em;line-height:1;}
+.s2-sub{font-size:18px;letter-spacing:0.22em;opacity:0.4;}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);
+  gap:22px;width:100%;margin-bottom:22px;}
+.sc{border:6px solid #0d0d0d;padding:30px 28px;
+  opacity:0;transform:translateY(22px);transition:opacity .4s,transform .4s;}
+.sc.on{opacity:1;transform:none;}
+.sc-l{font-size:18px;letter-spacing:0.22em;margin-bottom:12px;opacity:0.5;}
+.sc-v{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(80px,10vw,118px);line-height:1;}
+.sc-u{font-size:18px;margin-top:8px;letter-spacing:0.08em;opacity:0.45;}
+.s2-extra{width:100%;opacity:0;transform:translateY(10px);
+  transition:opacity .5s,transform .5s;}
+.s2-extra.on{opacity:1;transform:none;}
+.s2-row{display:flex;justify-content:space-between;align-items:baseline;
+  border-top:3px solid #0d0d0d;padding:13px 0;
+  font-size:20px;letter-spacing:0.07em;}
+.s2-row span{opacity:0.5;font-size:17px;}
+.s2-bottom{width:100%;display:grid;grid-template-columns:1fr 1fr;
+  gap:18px;margin-top:18px;opacity:0;transition:opacity .5s;}
+.s2-bottom.on{opacity:1;}
+.s2-b-box{border:4px solid rgba(13,13,13,0.22);padding:20px 24px;}
+.s2-b-label{font-size:15px;letter-spacing:0.28em;opacity:0.4;margin-bottom:10px;}
+.s2-b-val{font-size:22px;letter-spacing:0.06em;line-height:1.55;}
+
+/* ─────────── S3 ─────────── */
+#s3{background:#FFE000;}
+.ct{font-size:19px;letter-spacing:0.22em;margin-bottom:20px;
+  width:100%;opacity:0;transition:opacity .4s;}
+.ct.on{opacity:0.55;}
+.br{display:flex;align-items:center;gap:22px;width:100%;
+  margin-bottom:16px;opacity:0;transform:translateX(-20px);
+  transition:opacity .4s,transform .4s;}
+.br.on{opacity:1;transform:none;}
+.bl{font-size:26px;letter-spacing:0.07em;width:220px;flex-shrink:0;}
+.bt{flex:1;height:38px;border:4px solid #0d0d0d;position:relative;}
+.bf{position:absolute;inset:0;width:0;background:#0d0d0d;
+  transition:width 1.1s cubic-bezier(0.4,0,0.2,1);}
+.bn{font-size:22px;width:130px;text-align:right;flex-shrink:0;}
+.si{position:absolute;inset:0;display:flex;align-items:center;
+  padding:0 14px;font-size:17px;letter-spacing:0.07em;
+  opacity:0;transition:opacity .7s;}
+.si.on{opacity:1;}
+.vl{border-top:6px solid #0d0d0d;padding-top:20px;margin-top:16px;
+  width:100%;opacity:0;transform:translateY(14px);
+  transition:opacity .5s,transform .5s;}
+.vl.on{opacity:1;transform:none;}
+.vt{font-size:clamp(26px,3.2vw,40px);letter-spacing:0.05em;line-height:1.5;}
+.s3-grid{display:grid;grid-template-columns:1fr 1fr 1fr;
+  gap:18px;margin-top:20px;width:100%;
+  opacity:0;transition:opacity .5s;}
+.s3-grid.on{opacity:1;}
+.s3-gbox{border:4px solid rgba(13,13,13,0.2);padding:20px 22px;}
+.s3-gl{font-size:15px;letter-spacing:0.28em;opacity:0.4;margin-bottom:10px;}
+.s3-gv{font-size:20px;letter-spacing:0.06em;line-height:1.55;}
+
+/* ─────────── S4–7 ACCUSATIONS ─────────── */
+.accuse{background:#0d0d0d;flex-direction:column;
+  gap:8px;align-items:center;justify-content:center;}
+.acc-co-lat{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(130px,20vw,220px);
+  letter-spacing:0.04em;line-height:0.9;color:#FFE000;
+  opacity:0;transform:scale(1.12);
+  transition:opacity .08s,transform .08s;}
+.acc-co-cyr{font-family:'JetBrains Mono',monospace;font-weight:700;
+  font-size:clamp(90px,13vw,160px);
+  letter-spacing:0.02em;line-height:0.9;color:#FFE000;
+  opacity:0;transform:scale(1.12);
+  transition:opacity .08s,transform .08s;}
+.acc-co-lat.on,.acc-co-cyr.on{opacity:1;transform:none;}
+.acc-vb{font-family:'JetBrains Mono',monospace;font-weight:700;
+  font-size:clamp(30px,4vw,52px);letter-spacing:0.14em;
+  color:#FFE000;opacity:0;transition:opacity .2s;}
+.acc-vb.on{opacity:0.7;}
+.acc-x{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(80px,13vw,150px);color:#FFE000;
+  opacity:0;transition:opacity .08s;margin-top:4px;}
+.acc-x.on{opacity:1;}
+.acc-fact{font-size:19px;letter-spacing:0.09em;color:#FFE000;
+  opacity:0;transition:opacity .4s;margin-top:8px;text-align:center;}
+.acc-fact.on{opacity:0.45;}
+.acc-divider{width:0;height:3px;background:#FFE000;opacity:0.15;
+  margin:14px 0;transition:width .6s ease;}
+.acc-divider.on{width:64%;}
+.acc-sub-grid{display:grid;grid-template-columns:1fr 1fr 1fr;
+  gap:0;width:64%;opacity:0;transition:opacity .5s;margin-top:8px;}
+.acc-sub-grid.on{opacity:1;}
+.acc-sg-item{border-top:2px solid rgba(255,224,0,0.15);
+  padding:12px 0;text-align:center;
+  font-size:17px;letter-spacing:0.1em;color:#FFE000;opacity:0.4;}
+.acc-sg-item strong{display:block;font-family:'Bebas Neue',sans-serif;
+  font-size:38px;color:#FFE000;opacity:0.85;letter-spacing:0.05em;}
+
+/* ─────────── S8 LIST ─────────── */
+#s8{background:#0d0d0d;}
+.lt{font-size:19px;letter-spacing:0.28em;color:#FFE000;
+  margin-bottom:24px;opacity:0;transition:opacity .4s;}
+.lt.on{opacity:0.4;}
+.li{display:flex;align-items:center;gap:24px;margin-bottom:16px;
+  opacity:0;transform:translateX(-18px);
+  transition:opacity .3s,transform .3s;width:100%;}
+.li.on{opacity:1;transform:none;}
+.li-co-lat{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(62px,7.5vw,90px);
+  letter-spacing:0.04em;color:#FFE000;flex-shrink:0;width:360px;}
+.li-co-cyr{font-family:'JetBrains Mono',monospace;font-weight:700;
+  font-size:clamp(48px,6vw,72px);
+  letter-spacing:0.02em;color:#FFE000;flex-shrink:0;width:360px;}
+.li-sep{width:6px;background:#FFE000;height:56px;flex-shrink:0;opacity:0.22;}
+.li-txt{font-family:'JetBrains Mono',monospace;font-weight:700;
+  font-size:clamp(22px,2.8vw,32px);
+  letter-spacing:0.1em;color:#FFE000;opacity:0.55;flex:1;}
+.li-extra{font-size:17px;letter-spacing:0.06em;color:#FFE000;
+  opacity:0.28;text-align:right;flex-shrink:0;width:300px;}
+.s8-footer{width:100%;border-top:3px solid rgba(255,224,0,0.18);
+  padding-top:22px;margin-top:10px;opacity:0;transition:opacity .5s;}
+.s8-footer.on{opacity:1;}
+.s8-ft{font-size:19px;letter-spacing:0.1em;color:#FFE000;
+  opacity:0.32;line-height:1.9;}
+
+/* ─────────── S9 LOST ─────────── */
+#s9{background:#0d0d0d;flex-direction:row;gap:72px;align-items:center;}
+.s9-left{flex:1;display:flex;flex-direction:column;justify-content:center;}
+.s9-right{width:400px;flex-shrink:0;display:flex;flex-direction:column;}
+.lost{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(135px,20vw,243px);
+  letter-spacing:0.04em;line-height:0.82;color:#FFE000;opacity:0;}
+.lost-sub{font-family:'JetBrains Mono',monospace;font-weight:700;
+  font-size:clamp(22px,3.2vw,40px);
+  letter-spacing:0.14em;color:#FFE000;opacity:0;
+  margin-top:20px;transition:opacity .5s;}
+.lost-sub.on{opacity:0.5;}
+.s9-stat-box{border-top:3px solid rgba(255,224,0,0.18);
+  padding:18px 0;opacity:0;transition:opacity .5s;}
+.s9-stat-box.on{opacity:1;}
+.s9-stat-num{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(56px,7.5vw,90px);color:#FFE000;line-height:1;}
+.s9-stat-label{font-size:16px;letter-spacing:0.16em;
+  color:#FFE000;opacity:0.32;margin-top:4px;}
+.s9-quote{border-left:5px solid rgba(255,224,0,0.28);
+  padding:16px 20px;margin-top:24px;opacity:0;transition:opacity .5s;}
+.s9-quote.on{opacity:1;}
+.s9-quote-text{font-size:20px;letter-spacing:0.06em;
+  color:#FFE000;opacity:0.52;line-height:1.65;}
+
+/* ─────────── S10 BUT ─────────── */
+#s10{background:#FFE000;align-items:center;justify-content:center;}
+.but{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(180px,28vw,330px);
+  color:#0d0d0d;opacity:0;letter-spacing:0.03em;}
+.but-sub{font-size:clamp(22px,2.8vw,36px);letter-spacing:0.2em;
+  color:#0d0d0d;opacity:0;margin-top:18px;transition:opacity .5s;}
+.but-sub.on{opacity:0.4;}
+
+/* ─────────── S11 SPOTIFY ─────────── */
+#s11{background:#FFE000;flex-direction:row;gap:64px;align-items:stretch;}
+.s11-left{flex:1;display:flex;flex-direction:column;justify-content:center;min-width:0;}
+.s11-right{width:400px;flex-shrink:0;display:flex;flex-direction:column;
+  justify-content:center;border-left:5px solid #0d0d0d;padding-left:48px;}
+.fey{font-size:18px;letter-spacing:0.28em;margin-bottom:20px;
+  opacity:0;transition:opacity .4s;}
+.fey.on{opacity:0.4;}
+.fl{font-size:clamp(26px,3.5vw,46px);letter-spacing:0.04em;
+  line-height:1.4;margin-bottom:10px;
+  opacity:0;transform:translateY(14px);transition:opacity .5s,transform .5s;}
+.fl.on{opacity:1;transform:none;}
+.fl strong{font-family:'Bebas Neue',sans-serif;
+  font-size:clamp(56px,8vw,94px);vertical-align:baseline;letter-spacing:0.04em;}
+.fdiv{width:0;height:6px;background:#0d0d0d;margin:20px 0;
+  transition:width .7s cubic-bezier(0.4,0,0.2,1);}
+.fbadge{display:inline-flex;align-items:center;gap:16px;
+  border:6px solid #0d0d0d;padding:16px 28px;
+  font-size:22px;letter-spacing:0.14em;
+  opacity:0;transform:scale(0.94);
+  transition:opacity .5s,transform .5s;margin-top:10px;}
+.fbadge.on{opacity:1;transform:none;}
+.ldot{width:16px;height:16px;border-radius:50%;background:#0d0d0d;
+  animation:pulse 1s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+.disc{font-size:17px;letter-spacing:0.09em;
+  opacity:0;margin-top:18px;transition:opacity .5s;line-height:1.6;}
+.disc.on{opacity:0.35;}
+.s11-extra{margin-top:18px;opacity:0;transition:opacity .5s;width:100%;}
+.s11-extra.on{opacity:1;}
+.s1-ascii{opacity:0;transition:opacity .5s,transform .5s;transform:translateX(18px);flex:1;display:flex;align-items:center;}
+.s1-ascii.on{opacity:1;transform:none;}
+.s1-ascii pre{
+  font-family:'JetBrains Mono',monospace;
+  font-size:clamp(11px,1.1vw,15px);
+  line-height:1.55;
+  letter-spacing:0.05em;
+  color:#0d0d0d;
+  opacity:0.7;
+  border:3px solid rgba(13,13,13,0.2);
+  padding:16px 18px;
+  white-space:pre;
+}
+.s11-panel{opacity:0;transition:opacity .5s,transform .5s;transform:translateX(18px);}
+.s11-panel.on{opacity:1;transform:none;}
+.s11-panel-title{font-size:15px;letter-spacing:0.3em;opacity:0.35;margin-bottom:18px;}
+.s11-prow{border-top:2px solid rgba(13,13,13,0.18);padding:15px 0;
+  font-size:19px;letter-spacing:0.07em;line-height:1.5;}
+.s11-prow span{display:block;font-size:15px;opacity:0.4;margin-top:4px;letter-spacing:0.12em;}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- SVG filter for warp — inline, reused by JS -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <filter id="warp-filter" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+      <feTurbulence id="warp-turb" type="fractalNoise"
+        baseFrequency="0.0 0.0" numOctaves="2"
+        seed="1" result="noise"/>
+      <feDisplacementMap id="warp-disp"
+        in="SourceGraphic" in2="noise"
+        scale="0" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
+
+<!-- Warp band overlay canvas (draws glow + dark edge on the band) -->
+<canvas id="warp-canvas"></canvas>
+
+<div id="crt"></div>
+<div id="noise"></div>
+
+<!-- S-1: TYPEWRITER QUOTE (новый первый сегмент) -->
+<div class="screen" id="s_pre">
+  <div class="pre-line" id="pre-line"></div>
+</div>
+
+<!-- S0: INTRO CANVAS -->
+<div class="screen" id="s0"><canvas id="intro-canvas"></canvas></div>
+
+<!-- S1 -->
+<div class="screen" id="s1">
+  <div class="s1-left">
+    <div>
+      <div class="eyebrow" id="ey1">ДОСЬЕ // АУДИОФОРМАТ #0041</div>
+      <div class="big-name" id="bn">OGG<br>VORBIS</div>
+      <div class="name-tag" id="ntag">XIPH.ORG FOUNDATION · 2000 · СТАТУС: МЁРТВ</div>
+    </div>
+    <div class="s1-facts" id="s1facts">
+      <div class="s1-fact">→ Создан в ответ на патентные угрозы Fraunhofer для MP3</div>
+      <div class="s1-fact">→ Разработан командой Xiph.Org с нуля за 2 года</div>
+      <div class="s1-fact">→ Первый стабильный релиз: 19 июля 2002 года</div>
+      <div class="s1-fact">→ Лицензия BSD — никаких ограничений на использование</div>
+      <div class="s1-fact">→ Открытый исходный код, ноль патентных претензий</div>
+    </div>
+  </div>
+  <div class="s1-right">
+    <div class="stamp-s1" id="stamp">БЕЗ ПАТЕНТОВ</div>
+    <div class="s1-panel" id="s1panel">
+      <div class="s1-panel-title">ТЕХНИЧЕСКИЕ ХАРАКТЕРИСТИКИ</div>
+      <div class="s1-panel-item">Диапазон битрейта<span>45–500 kbps</span></div>
+      <div class="s1-panel-item">Макс. каналов<span>255</span></div>
+      <div class="s1-panel-item">Частота до<span>192 kHz</span></div>
+      <div class="s1-panel-item">Контейнер<span>OGG</span></div>
+      <div class="s1-panel-item">Тип сжатия<span>VBR / ABR / CBR</span></div>
+      <div class="s1-panel-item">Задержка кодека<span>26 мс</span></div>
+    </div>
+    <div class="s1-ascii" id="s1ascii">
+<pre>
+ ░▒▓  OGG  ▓▒░
+┌─────────────┐
+│ [=========] │
+│  ОТКРЫТЫЙ   │
+│  КОД        │
+│             │
+│ ▓▓▓▓▓▓▓░░░ │ качество
+│ ▓▓▓▓▓░░░░░ │ MP3
+│             │
+│  ПАТЕНТЫ: 0 │
+│  СВОБОДА: ∞ │
+└─────────────┘
+ ░░░ МЁРТВ ░░░</pre>
+    </div>
+    <div class="s1-badge" id="s1badge">XIPH.ORG:<br>«МЫ НЕ СТРОИМ<br>ЭКОСИСТЕМУ.<br>МЫ СТРОИМ СВОБОДУ.»</div>
+  </div>
+</div>
+
+<!-- S2 -->
+<div class="screen" id="s2">
+  <div class="s2-head" id="s2top"><div class="s2-title">ЦИФРЫ</div><div class="s2-sub">OGG VORBIS VS МИР</div></div>
+  <div class="stat-grid">
+    <div class="sc" id="sc1"><div class="sc-l">ВЫПУЩЕН</div><div class="sc-v">2000</div><div class="sc-u">первый бета</div></div>
+    <div class="sc" id="sc2"><div class="sc-l">ЛИЦЕНЗИЯ</div><div class="sc-v">BSD</div><div class="sc-u">делай что хочешь</div></div>
+    <div class="sc" id="sc3"><div class="sc-l">ПАТЕНТОВ</div><div class="sc-v">0</div><div class="sc-u">против 100+ у MP3</div></div>
+  </div>
+  <div class="s2-extra" id="s2extra">
+    <div class="s2-row">При 128 kbps звучит как MP3 при 256 kbps<span>вдвое эффективнее</span></div>
+    <div class="s2-row">Поддержка до 255 аудиоканалов<span>MP3 — только стерео</span></div>
+    <div class="s2-row">Переменный битрейт по умолчанию<span>MP3 использует фиксированный</span></div>
+  </div>
+  <div class="s2-bottom" id="s2bottom">
+    <div class="s2-b-box"><div class="s2-b-label">РАЗРАБОТЧИКИ</div><div class="s2-b-val">Xiph.Org — некоммерческая<br>организация, чистые руки</div></div>
+    <div class="s2-b-box"><div class="s2-b-label">MP3 — КТО СТОИТ ЗА НИМ</div><div class="s2-b-val">Fraunhofer Institute +<br>Thomson Multimedia — патентный картель</div></div>
+  </div>
+</div>
+
+<!-- S3 -->
+<div class="screen" id="s3">
+  <div class="ct" id="ct">КАЧЕСТВО ПРИ ОДИНАКОВОМ БИТРЕЙТЕ (128 KBPS):</div>
+  <div class="br" id="br1"><div class="bl">OGG VORBIS</div><div class="bt"><div class="bf" id="bogg"></div></div><div class="bn">≈ 256 kbps</div></div>
+  <div class="br" id="br2"><div class="bl">MP3</div><div class="bt"><div class="bf" id="bmp3"></div></div><div class="bn">128 kbps</div></div>
+  <div class="br" id="br3"><div class="bl">ПОДДЕРЖКА</div><div class="bt"><div class="si" id="si">MP3: Windows · macOS · iPod · везде&nbsp;&nbsp;/&nbsp;&nbsp;OGG: только Linux</div></div><div class="bn"></div></div>
+  <div class="vl" id="vl"><div class="vt">Технически лучше. Юридически чище.<br>Корпорации его похоронили.</div></div>
+  <div class="s3-grid" id="s3grid">
+    <div class="s3-gbox"><div class="s3-gl">ПРИЧИНА ПРОВАЛА №1</div><div class="s3-gv">Нет поддержки в Apple iPod — 500 млн устройств</div></div>
+    <div class="s3-gbox"><div class="s3-gl">ПРИЧИНА ПРОВАЛА №2</div><div class="s3-gv">Microsoft продвигает собственный WMA</div></div>
+    <div class="s3-gbox"><div class="s3-gl">ПРИЧИНА ПРОВАЛА №3</div><div class="s3-gv">Рынок уже захвачен — MP3 повсюду</div></div>
+  </div>
+</div>
+
+<!-- S4–7 -->
+<div class="screen accuse" id="s4">
+  <div class="acc-co-lat" id="a4">APPLE</div>
+  <div class="acc-vb" id="v4">НЕ ПОДДЕРЖАЛА</div>
+  <div class="acc-x" id="x4">✕</div>
+  <div class="acc-fact" id="f4">QuickTime · iTunes · iPod · iPhone — ни один продукт никогда</div>
+  <div class="acc-divider" id="ad4"></div>
+  <div class="acc-sub-grid" id="asg4">
+    <div class="acc-sg-item"><strong>0</strong>устройств</div>
+    <div class="acc-sg-item"><strong>500М</strong>iPod продано</div>
+    <div class="acc-sg-item"><strong>∞</strong>игнорирования</div>
+  </div>
+</div>
+<div class="screen accuse" id="s5">
+  <div class="acc-co-lat" id="a5">MICROSOFT</div>
+  <div class="acc-vb" id="v5">НЕ ПОДДЕРЖАЛА</div>
+  <div class="acc-x" id="x5">✕</div>
+  <div class="acc-fact" id="f5">Windows Media Player продвигал WMA — собственный закрытый формат</div>
+  <div class="acc-divider" id="ad5"></div>
+  <div class="acc-sub-grid" id="asg5">
+    <div class="acc-sg-item"><strong>95%</strong>ПК на Windows</div>
+    <div class="acc-sg-item"><strong>WMA</strong>вместо Ogg</div>
+    <div class="acc-sg-item"><strong>0</strong>шансов у Ogg</div>
+  </div>
+</div>
+<div class="screen accuse" id="s6">
+  <div class="acc-co-lat" id="a6">iPod</div>
+  <div class="acc-vb" id="v6">НЕ ПОДДЕРЖАЛ</div>
+  <div class="acc-x" id="x6">✕</div>
+  <div class="acc-fact" id="f6">500 млн проданных устройств — ни одно не умело читать Ogg</div>
+  <div class="acc-divider" id="ad6"></div>
+  <div class="acc-sub-grid" id="asg6">
+    <div class="acc-sg-item"><strong>2001</strong>первый iPod</div>
+    <div class="acc-sg-item"><strong>2014</strong>последний iPod</div>
+    <div class="acc-sg-item"><strong>13 лет</strong>без Ogg</div>
+  </div>
+</div>
+<div class="screen accuse" id="s7">
+  <div class="acc-co-cyr" id="a7">РЫНОК</div>
+  <div class="acc-vb" id="v7">НЕ ЗАМЕТИЛ</div>
+  <div class="acc-x" id="x7">✕</div>
+  <div class="acc-fact" id="f7">MP3 к 2005 году — 95%+ рынка цифровой музыки</div>
+  <div class="acc-divider" id="ad7"></div>
+  <div class="acc-sub-grid" id="asg7">
+    <div class="acc-sg-item"><strong>95%</strong>доля MP3</div>
+    <div class="acc-sg-item"><strong>&lt;1%</strong>доля Ogg</div>
+    <div class="acc-sg-item"><strong>2005</strong>год поражения</div>
+  </div>
+</div>
+
+<!-- S8 -->
+<div class="screen" id="s8">
+  <div class="lt" id="lt">ИТОГО — ОБВИНИТЕЛЬНЫЙ СПИСОК</div>
+  <div class="li" id="li1"><div class="li-co-lat">APPLE</div><div class="li-sep"></div><div class="li-txt">НЕ ПОДДЕРЖАЛА</div><div class="li-extra">QuickTime / iTunes / iPod</div></div>
+  <div class="li" id="li2"><div class="li-co-lat">MICROSOFT</div><div class="li-sep"></div><div class="li-txt">НЕ ПОДДЕРЖАЛА</div><div class="li-extra">WMP продвигал WMA</div></div>
+  <div class="li" id="li3"><div class="li-co-lat">iPod</div><div class="li-sep"></div><div class="li-txt">НЕ ПОДДЕРЖАЛ</div><div class="li-extra">500М устройств</div></div>
+  <div class="li" id="li4"><div class="li-co-cyr">РЫНОК</div><div class="li-sep"></div><div class="li-txt">НЕ ЗАМЕТИЛ</div><div class="li-extra">MP3 = 95%+</div></div>
+  <div class="s8-footer" id="s8footer">
+    <div class="s8-ft">→ Лучшее техническое решение не побеждало.<br>→ Побеждало то, за чем стояли деньги и контроль.<br>→ Ogg Vorbis был слишком свободным, чтобы выжить.</div>
+  </div>
+</div>
+
+<!-- S9 -->
+<div class="screen" id="s9">
+  <div class="s9-left">
+    <div class="lost" id="lt9">ОН<br>ПРОИГРАЛ.</div>
+    <div class="lost-sub" id="ls9">ЛУЧШИЙ ФОРМАТ ЭПОХИ</div>
+    <div class="s9-quote" id="s9quote">
+      <div class="s9-quote-text">«Система вознаграждала закрытость. Ogg был слишком честным для этого мира.»</div>
+    </div>
+  </div>
+  <div class="s9-right">
+    <div class="s9-stat-box" id="ss1"><div class="s9-stat-num">95%</div><div class="s9-stat-label">ДОЛЯ MP3 В 2010</div></div>
+    <div class="s9-stat-box" id="ss2"><div class="s9-stat-num">&lt;1%</div><div class="s9-stat-label">ДОЛЯ OGG В УСТРОЙСТВАХ</div></div>
+    <div class="s9-stat-box" id="ss3"><div class="s9-stat-num">$0</div><div class="s9-stat-label">ЗАРАБОТАНО НА ПАТЕНТАХ</div></div>
+    <div class="s9-stat-box" id="ss4"><div class="s9-stat-num">2003</div><div class="s9-stat-label">ГОД ФАКТИЧЕСКОЙ СМЕРТИ</div></div>
+  </div>
+</div>
+
+<!-- S10 -->
+<div class="screen" id="s10">
+  <div class="but" id="bw">НО...</div>
+  <div class="but-sub" id="bwsub">ИСТОРИЯ НА ЭТОМ НЕ ЗАКАНЧИВАЕТСЯ</div>
+</div>
+
+<!-- S11 -->
+<div class="screen" id="s11">
+  <div class="s11-left">
+    <div class="fey" id="fey">ОФИЦИАЛЬНАЯ СТАТИСТИКА // ТИХАЯ ЖИЗНЬ</div>
+    <div class="fl" id="ff1">Spotify использует Ogg Vorbis с <strong>2008</strong> года.</div>
+    <div class="fdiv" id="fdiv"></div>
+    <div class="fl" id="ff2"><strong>100+</strong> млн треков — в этом формате.</div>
+    <div class="fl" id="ff3">Прямо сейчас. Пока ты читаешь это.</div>
+    <div class="s11-extra" id="s11extra">
+      <div class="s11-row">→ Unity, Godot, Unreal — все игровые движки используют Ogg по умолчанию</div>
+      <div class="s11-row">→ Wikipedia, Firefox, Android — нативная поддержка</div>
+      <div class="s11-row">→ Opus (преемник Ogg) — стандарт для всех веб-звонков в браузере</div>
+    </div>
+    <div class="fbadge" id="fb"><div class="ldot"></div>SPOTIFY — OGG VORBIS 96–320 KBPS</div>
+    <div class="disc" id="disc">* это не реклама Spotify, мне к сожалению за неё никто не заплатил.</div>
+  </div>
+  <div class="s11-right">
+    <div class="s11-panel" id="s11panel">
+      <div class="s11-panel-title">OGG ЖИВЁТ ТАМ, ГДЕ ДЕНЬГИ НЕ РЕШАЮТ</div>
+      <div class="s11-prow">Spotify<span>600М пользователей слушают Ogg</span></div>
+      <div class="s11-prow">Игровые движки<span>Unity / Godot / Unreal — по умолчанию</span></div>
+      <div class="s11-prow">Браузеры<span>Firefox, Chrome — нативно</span></div>
+      <div class="s11-prow">Android<span>встроенная поддержка с версии 1.0</span></div>
+      <div class="s11-prow">Opus<span>наследник Ogg — RFC 6716, стандарт WebRTC</span></div>
+    </div>
+  </div>
+</div>
+<!-- S12: BLACK END -->
+<div class="screen" id="s12" style="background:#0d0d0d;"></div>
+
+</div><!-- #stage -->
+
+<script>
+const $=id=>document.getElementById(id);
+let TT=[];
+function t(ms,fn){TT.push(setTimeout(fn,ms));}
+function on(id){const el=$(id);if(el)el.classList.add('on');}
+
+/* ════════════════════════════════════════════════════
+   WARP — proper DOM pixel warp via SVG feDisplacementMap
+   + luminance band drawn on overlay canvas
+   ════════════════════════════════════════════════════ */
+const warpCanvas=$('warp-canvas');
+const wctx=warpCanvas.getContext('2d');
+let W,H;
+
+function resizeAll(){
+  W=warpCanvas.width=window.innerWidth;
+  H=warpCanvas.height=window.innerHeight;
+  const ic=$('intro-canvas');
+  ic.width=window.innerWidth;ic.height=window.innerHeight;
+}
+resizeAll();window.addEventListener('resize',resizeAll);
+
+// SVG filter nodes
+const turbEl=document.getElementById('warp-turb');
+const dispEl=document.getElementById('warp-disp');
+const stage =$('stage');
+
+let warpActive=false;
+let warpRAF=null;
+
+/*
+  Strategy:
+  - The SVG feDisplacementMap is applied to #stage via CSS filter
+  - We animate baseFrequency.baseVal so only a horizontal BAND of frequencies
+    is active → achieved by animating a JS-driven CSS clip on a duplicate element.
+
+  Since SVG filters apply globally (we can't clip a filter to a band),
+  the best DOM-native warp for a scanline is:
+    1. Clone #stage into an absolutely-positioned copy, restricted by clip-path to the band
+    2. Apply feDisplacementMap ONLY to the clone
+    3. Cover the original band with the clone
+
+  BUT cloneNode of a complex live DOM is expensive and produces z-fighting.
+
+  REAL solution used here:
+    - Wrap all screens in #stage (already done)
+    - Create a <div id="warp-clone"> that is a real-time window into #stage
+      via CSS `element()` — supported in Firefox (non-standard).
+    - For Chromium (no element()), use a canvas + html2canvas polyfill — no.
+
+  CORRECT cross-browser solution:
+    Apply the SVG filter to a thin clip-masked copy of #stage that travels
+    with the scanline. We do this with a CSS animation that changes
+    clip-path + filter scale together on #stage itself — the key trick:
+    we DON'T filter the whole stage, we do it for ONE frame at a time,
+    masked to the band.
+
+  FINAL approach (no external libs, works everywhere):
+    - JS RAF loop
+    - Each tick: set clip-path on #stage to the band rect → apply filter → 
+      next tick: remove clip-path
+    This flickers badly.
+
+  ── ACTUAL WORKING APPROACH ──
+  The ONLY reliable way to warp DOM pixels in a band without flicker, in plain
+  browser JS, is:
+    a) html2canvas (external dep) — no
+    b) OffscreenCanvas + drawImage(video of the page) — no
+    c) CSS hacks
+
+  CSS hack that WORKS:
+    - Create a <div class="warp-band"> with overflow:hidden, positioned absolutely
+      at the band's Y.
+    - Inside it, place a <div class="warp-inner"> that is a CSS transform copy of
+      #stage, shifted so only the band shows, with feDisplacementMap applied.
+    - The "copy" is done with position:fixed + negative margin trick — the inner
+      div has position:absolute, top: -(bandY), left:0, width:100%, height:100vh,
+      pointer-events:none, and filter:url(#warp-filter).
+    - This div DOES show the actual live DOM content because it IS part of the DOM,
+      just clipped and translated.
+
+  This is the approach. Let's implement it.
+*/
+
+// Create the warp band DOM structure once
+const warpBand=document.createElement('div');
+warpBand.id='warp-band-el';
+Object.assign(warpBand.style,{
+  position:'absolute',left:'0',width:'100%',
+  overflow:'hidden',pointerEvents:'none',
+  zIndex:'650',opacity:'0',
+  // band height set dynamically
+});
+
+const warpInner=document.createElement('div');
+warpInner.id='warp-inner-el';
+Object.assign(warpInner.style,{
+  position:'absolute',left:'0',width:'100%',height:'100vh',
+  // top will be set to -bandY so the inner content aligns with screen
+  filter:'url(#warp-filter)',
+});
+
+// The inner needs to replicate the screen content.
+// We can't truly clone live DOM easily, but we can use:
+//   position:fixed on a pseudo-copy — doesn't work because fixed is relative to viewport.
+// 
+// The trick: warpInner IS the real content, but filtered + clipped.
+// We achieve this by making warpInner a sibling of all screens,
+// with the SAME content, but that's a maintenance nightmare.
+//
+// ── SIMPLEST CORRECT APPROACH ──
+// Apply filter to #stage only during the band pass, masked via clip-path.
+// Use two sequential rAF calls: one to set, one to capture composited frame.
+// Since filter+clip animate together, the result is: only the band is warped,
+// the rest is unaffected. The clip-path limits where the filter is VISIBLE,
+// but the filter still renders the whole element — that's fine, clip hides it.
+
+// So: each frame, set #stage style.clipPath to the band + filter.
+// But we need the un-warped content outside the band to still show.
+// Solution: 
+//   - #stage has NO filter normally
+//   - A second "warp-overlay" div sits on top with pointer-events:none
+//     It has clip-path to the band, contains a COPY of #stage via 
+//     backdropFilter trick.
+//
+// After much analysis: the only clean approach available is:
+// Use CSS backdrop-filter on the overlay div clipped to the band.
+// backdrop-filter applies to whatever is BEHIND it.
+// backdrop-filter: url(#warp-filter) — THIS works! It warps the backdrop pixels.
+
+warpBand.innerHTML=''; // clean
+warpBand.appendChild(warpInner);
+// Don't use this structure — use backdrop-filter approach instead (see below)
+
+// ── BACKDROP-FILTER WARP ──
+// Create a single overlay div, clipped to the band, with backdrop-filter.
+const warpOverlay=document.createElement('div');
+warpOverlay.id='warp-overlay-el';
+Object.assign(warpOverlay.style,{
+  position:'absolute',left:'0',width:'100%',
+  pointerEvents:'none',zIndex:'650',
+  // backdrop-filter applies SVG warp to pixels behind this element
+  backdropFilter:'url(#warp-filter)',
+  WebkitBackdropFilter:'url(#warp-filter)',
+  opacity:'0',
+});
+stage.appendChild(warpOverlay);
+
+// Set filter scale = 0 initially (no displacement)
+function setWarpScale(s){
+  dispEl.setAttribute('scale', s.toFixed(1));
+}
+function setWarpFreq(fx,fy){
+  turbEl.setAttribute('baseFrequency',`${fx} ${fy}`);
+}
+setWarpScale(0);
+setWarpFreq(0,0.04);
+
+let warpRunning=false, warpAnimRAF=null;
+
+function runWarpPass(){
+  if(!warpActive)return;
+  const bandH=40;
+  const speed=320;
+  const peakScale=22;
+  const startT=performance.now();
+  let seed=Math.floor(Math.random()*99)+1;
+  turbEl.setAttribute('seed',seed);
+
+  function step(now){
+    if(!warpActive){
+      warpOverlay.style.opacity='0';
+      setWarpScale(0);
+      return;
+    }
+    const elapsed=(now-startT)/1000;
+    const y=-bandH + elapsed*speed;
+
+    if(y>H+bandH){
+      // pass done
+      warpOverlay.style.opacity='0';
+      setWarpScale(0);
+      warpAnimRAF=null;
+      if(warpActive){
+        const delay=3500+Math.random()*2500;
+        TT.push(setTimeout(runWarpPass,delay));
+      }
+      return;
+    }
+
+    // Position the overlay to the band
+    const top=Math.max(0,y);
+    const bot=Math.min(H,y+bandH);
+    const h=bot-top;
+    const frac=Math.max(0,y<0?(y+bandH)/bandH:y>H-bandH?(H-y)/bandH:1);
+
+    if(h>0){
+      warpOverlay.style.top=top+'px';
+      warpOverlay.style.height=h+'px';
+      warpOverlay.style.opacity='1';
+      setWarpScale(peakScale*frac);
+      setWarpFreq(0.0,0.035+Math.sin(elapsed*3.1)*0.012);
+    }
+
+    wctx.clearRect(0,0,W,H);
+    // No colour overlay — warp is pure geometry, no brightness change
+
+    warpAnimRAF=requestAnimationFrame(step);
+  }
+  warpAnimRAF=requestAnimationFrame(step);
+}
+
+function startWarp(){
+  warpActive=true;
+  // small initial delay before first pass
+  TT.push(setTimeout(runWarpPass, 800));
+}
+function stopWarp(){
+  warpActive=false;
+  if(warpAnimRAF)cancelAnimationFrame(warpAnimRAF);
+  warpAnimRAF=null;
+  warpOverlay.style.opacity='0';
+  wctx.clearRect(0,0,W,H);
+  setWarpScale(0);
+}
+
+/* ════════════════════════════════════════════════════
+   INTRO CANVAS  — РЫНОК appears exactly ONCE
+   ════════════════════════════════════════════════════ */
+const ic=$('intro-canvas');
+const ictx=ic.getContext('2d');
+let introRAF=null, introRunning=false;
+
+function stopIntro(){
+  introRunning=false;
+  if(introRAF)cancelAnimationFrame(introRAF);
+  introRAF=null;
+  ictx.clearRect(0,0,ic.width,ic.height);
+}
+
+async function runIntro(){
+  await document.fonts.load("900 130px 'Bebas Neue'");
+  await document.fonts.load("700 130px 'JetBrains Mono'");
+  introRunning=true;
+
+  const cW=ic.width, cH=ic.height;
+  const openFS=Math.min(cW*0.11,100);
+
+  ictx.font=`900 ${openFS}px 'Bebas Neue',sans-serif`;
+  const charData=[];
+  let totalW=0;
+  const word='ОТКРЫТОСТЬ';
+  for(const ch of word){
+    const mw=ictx.measureText(ch).width;
+    charData.push({ch,w:mw,x:0,y:0,vx:0,vy:0,rot:0,vrot:0,alpha:1,launched:false});
+    totalW+=mw;
+  }
+  let cx=(cW-totalW)/2;
+  const openY=cH*0.40;
+  charData.forEach(cd=>{cd.x=cx+cd.w/2;cd.y=openY;cx+=cd.w;});
+
+  // РЫНОК — single state machine, one rendering path
+  const MKT={
+    minFS:Math.min(cW*0.13,110),
+    maxFS:Math.min(cW*0.40,380),
+    fs:0,        // starts at 0, not rendered until phase>=1
+    alpha:0,
+    y:cH*0.58,
+    targetY:cH*0.50,
+  };
+
+  let phase=0,phaseT=0;
+  let builtN=0,lastBuild=0;
+  let builtDoneT=0; // timestamp when last char was built — used for phase0 wait
+  let crushDone=false;
+  let labelAlpha=0;
+
+  function frame(now){
+    if(!introRunning)return;
+    ictx.clearRect(0,0,cW,cH);
+
+    // phase 0: build ОТКРЫТОСТЬ chars; after all built, wait 700ms before РЫНОК
+    if(phase===0){
+      if(now-lastBuild>55&&builtN<charData.length){lastBuild=now;builtN++;}
+      if(builtN>=charData.length){
+        if(builtDoneT===0) builtDoneT=now;
+        if(now-builtDoneT>700){phase=1;phaseT=now;MKT.fs=MKT.minFS;}
+      }
+    }
+
+    // phase 1: РЫНОК rises in, alpha 0→1 over 700ms
+    if(phase===1){
+      const p=Math.min(1,(now-phaseT)/700);
+      MKT.alpha=p;
+      MKT.y=cH*0.58-(cH*0.58-MKT.targetY)*p;
+      MKT.fs=MKT.minFS; // stays small while rising
+      if(p>=1){phase=2;phaseT=now;}
+    }
+
+    // phase 2: РЫНОК crushes to full size (400ms), scatter chars
+    if(phase===2){
+      const p=Math.min(1,(now-phaseT)/400);
+      const ep=1-(1-p)*(1-p)*(1-p);
+      MKT.fs=MKT.minFS+(MKT.maxFS-MKT.minFS)*ep;
+      MKT.alpha=1;
+      if(!crushDone){
+        crushDone=true;
+        charData.forEach(cd=>{
+          const side=cd.x<cW/2?-1:1;
+          cd.vx=side*(Math.random()*30+20);
+          cd.vy=-(Math.random()*25+15);
+          cd.vrot=(Math.random()-0.5)*0.5;
+          cd.launched=true;
+        });
+      }
+      if(p>=1){phase=3;phaseT=now;}
+    }
+
+    // phase 3: label fades in
+    if(phase===3){
+      labelAlpha=Math.min(1,(now-phaseT)/400);
+    }
+
+    // physics — scatter chars
+    charData.forEach(cd=>{
+      if(!cd.launched)return;
+      cd.vy+=0.8; cd.x+=cd.vx; cd.y+=cd.vy;
+      cd.rot+=cd.vrot; cd.vx*=0.97;
+      cd.alpha=Math.max(0,cd.alpha-0.022);
+    });
+
+    // draw background — darkens as РЫНОК grows
+    if(phase>=1&&MKT.alpha>0){
+      // bg darkens from 0→0.85 as font grows from min to max
+      const growP=(MKT.fs-MKT.minFS)/Math.max(1,MKT.maxFS-MKT.minFS);
+      const bgAlpha=MKT.alpha*growP*0.88;
+      ictx.fillStyle=`rgba(13,13,13,${bgAlpha})`;
+      ictx.fillRect(0,0,cW,cH);
+    }
+
+    // draw ОТКРЫТОСТЬ — colour inverts as bg darkens
+    charData.slice(0,builtN).forEach(cd=>{
+      if(cd.alpha<=0)return;
+      ictx.save();
+      ictx.globalAlpha=cd.alpha;
+      ictx.font=`900 ${openFS}px 'Bebas Neue',sans-serif`;
+      // chars turn yellow as РЫНОК grows
+      const growP2=phase>=2?(MKT.fs-MKT.minFS)/Math.max(1,MKT.maxFS-MKT.minFS):0;
+      ictx.fillStyle=growP2>0.1?`#FFE000`:'#0d0d0d';
+      ictx.translate(cd.x,cd.y);ictx.rotate(cd.rot);
+      ictx.textAlign='center';ictx.textBaseline='middle';
+      ictx.fillText(cd.ch,0,0);
+      ictx.restore();
+    });
+
+    // draw РЫНОК — single call, yellow on dark bg
+    if(phase>=1&&MKT.alpha>0&&MKT.fs>0){
+      // shake in phase 2
+      let sx=0,sy=0;
+      if(phase===2){
+        const shakeAmt=(MKT.fs/MKT.maxFS)*6;
+        sx=(Math.random()-0.5)*shakeAmt;
+        sy=(Math.random()-0.5)*shakeAmt;
+      }
+      ictx.save();
+      ictx.globalAlpha=MKT.alpha;
+      ictx.font=`700 ${MKT.fs}px 'JetBrains Mono',monospace`;
+      // colour: dark when small (appears on yellow bg), yellow when large (on dark bg)
+      const growP3=(MKT.fs-MKT.minFS)/Math.max(1,MKT.maxFS-MKT.minFS);
+      ictx.fillStyle=growP3>0.3?'#FFE000':'#0d0d0d';
+      ictx.textAlign='center';ictx.textBaseline='middle';
+      ictx.fillText('РЫНОК',cW/2+sx,MKT.y+sy);
+      ictx.restore();
+    }
+
+    // label
+    if(labelAlpha>0){
+      ictx.save();
+      ictx.globalAlpha=labelAlpha*0.65;
+      const lfs=Math.min(cW*0.02,18);
+      ictx.font=`700 ${lfs}px 'JetBrains Mono',monospace`;
+      ictx.fillStyle='#FFE000';
+      ictx.textAlign='center';ictx.textBaseline='middle';
+      ictx.fillText('СИСТЕМА ВОЗНАГРАЖДАЛА ЗАКРЫТОСТЬ',cW/2,cH*0.82);
+      ictx.restore();
+    }
+
+    const keepGoing=phase<3||(phase===3&&now-phaseT<2400);
+    if(keepGoing&&introRunning) introRAF=requestAnimationFrame(frame);
+    else introRunning=false;
+  }
+  introRAF=requestAnimationFrame(frame);
+}
+
+/* ════════════ TRANSITIONS ════════════ */
+let cur='';
+function go(id){
+  if(cur){
+    const old=$(cur);
+    old.classList.add('wipe-out');
+    old.addEventListener('animationend',()=>old.classList.remove('on','wipe-out'),{once:true});
+  }else{
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
+  }
+  const nxt=$(id);
+  nxt.style.opacity='1';
+  nxt.classList.add('on','wipe-in');
+  nxt.addEventListener('animationend',()=>nxt.classList.remove('wipe-in'),{once:true});
+  cur=id;
+}
+function glitch(id){
+  const el=$(id);if(!el)return;
+  el.classList.remove('glitching');void el.offsetWidth;
+  el.classList.add('glitching');
+  el.addEventListener('animationend',()=>el.classList.remove('glitching'),{once:true});
+}
+function hardIn(id,delay){
+  t(delay||0,()=>{const el=$(id);if(el){el.style.opacity='1';glitch(id);}});
+}
+function typeIt(el,text,speed){
+  el.innerHTML='<span class="cursor"></span>';let i=0;
+  function step(){
+    if(i<=text.length){el.innerHTML=text.slice(0,i)+'<span class="cursor"></span>';i++;TT.push(setTimeout(step,speed));}
+    else el.innerHTML=text;
+  }
+  step();
+}
+
+/* ════════════ RESET ════════════ */
+function reset(){
+  TT.forEach(clearTimeout);TT=[];
+  stopWarp();stopIntro();
+  cur='';
+  document.querySelectorAll('.screen').forEach(s=>{
+    s.classList.remove('on','wipe-in','wipe-out');s.style.opacity='';
+  });
+  const ids=[
+    'ey1','bn','ntag','stamp','s1facts','s1panel','s1ascii','s1badge',
+    'sc1','sc2','sc3','s2top','s2extra','s2bottom',
+    'ct','br1','br2','br3','si','vl','s3grid',
+    'v4','x4','f4','ad4','asg4',
+    'v5','x5','f5','ad5','asg5',
+    'v6','x6','f6','ad6','asg6',
+    'v7','x7','f7','ad7','asg7',
+    'lt','li1','li2','li3','li4','s8footer',
+    'ls9','s9quote','ss1','ss2','ss3','ss4',
+    'bwsub',
+    'fey','ff1','ff2','ff3','fb','disc','s11extra','s11panel',
+  ];
+  ids.forEach(id=>{const el=$(id);if(el)el.classList.remove('on');});
+  ['ey1','bn','ntag','stamp','s1panel','s1badge'].forEach(id=>{
+    const el=$(id);if(el){el.style.opacity='0';el.style.transform='';}
+  });
+  ['a4','a5','a6','a7'].forEach(id=>{
+    const el=$(id);if(el){el.classList.remove('on');el.style.opacity='0';el.style.transform='';}
+  });
+  ['lt9','bw'].forEach(id=>{const el=$(id);if(el)el.style.opacity='0';});
+  $('bogg').style.width='0';$('bmp3').style.width='0';
+  $('fdiv').style.width='0';
+  const pl2=$('pre-line');if(pl2)pl2.innerHTML='';
+  wctx.clearRect(0,0,W,H);
+}
+
+/* ════════════ RUN ════════════ */
+function run(){
+  reset();startWarp();
+
+  // S-1: TYPEWRITER QUOTE (0–4.2s)
+  go('s_pre');
+  const pl=$('pre-line');
+  pl.innerHTML='';
+  const quoteText='и дело было не в жадности\nотдельных людей или компаний.';
+  let qi=0;
+  function typeQuote(){
+    if(qi<=quoteText.length){
+      pl.innerHTML=quoteText.slice(0,qi).replace(/\n/g,'<br>')+'<span class="cursor"></span>';
+      qi++;
+      TT.push(setTimeout(typeQuote,28));
+    } else {
+      pl.innerHTML=quoteText.replace(/\n/g,'<br>');
+    }
+  }
+  t(200,()=>typeQuote());
+
+  // S0 intro (4.2–8.7s)
+  t(4200,()=>{go('s0');runIntro();});
+  t(8500,()=>glitch('s0'));
+
+  // S1 ДОСЬЕ (8.7–14.5s)
+  t(8700,()=>{
+    go('s1');
+    const ey=$('ey1');
+    ey.style.opacity='1';ey.style.transition='none';
+    typeIt(ey,'ДОСЬЕ // АУДИОФОРМАТ #0041',20);
+    hardIn('bn',600);
+    t(1300,()=>on('ntag'));
+    t(1700,()=>on('stamp'));
+    t(2000,()=>on('s1facts'));
+    t(2600,()=>on('s1panel'));
+    t(3000,()=>on('s1ascii'));
+    t(3400,()=>on('s1badge'));
+    t(4200,()=>glitch('bn'));
+  });
+
+  // S2 (14.5–19s)
+  t(14500,()=>{
+    go('s2');
+    t(50,()=>on('s2top'));
+    t(200,()=>on('sc1'));t(500,()=>on('sc2'));t(800,()=>on('sc3'));
+    t(1300,()=>on('s2extra'));
+    t(2400,()=>on('s2bottom'));
+    t(3200,()=>glitch('s2'));
+  });
+
+  // S3 (19–25s)
+  t(19000,()=>{
+    go('s3');
+    t(100,()=>on('ct'));
+    t(500,()=>{on('br1');t(100,()=>$('bogg').style.width='100%');});
+    t(1300,()=>{on('br2');t(100,()=>$('bmp3').style.width='50%');});
+    t(2200,()=>{on('br3');t(350,()=>on('si'));});
+    t(3200,()=>on('vl'));
+    t(4200,()=>on('s3grid'));
+  });
+
+  t(25000,()=>{go('s4');hardIn('a4');t(280,()=>on('v4'));t(560,()=>on('x4'));t(800,()=>on('f4'));t(850,()=>{on('ad4');t(200,()=>on('asg4'));});t(1200,()=>glitch('a4'));});
+  t(27000,()=>{go('s5');hardIn('a5');t(280,()=>on('v5'));t(560,()=>on('x5'));t(800,()=>on('f5'));t(850,()=>{on('ad5');t(200,()=>on('asg5'));});t(1200,()=>glitch('a5'));});
+  t(29000,()=>{go('s6');hardIn('a6');t(280,()=>on('v6'));t(560,()=>on('x6'));t(800,()=>on('f6'));t(850,()=>{on('ad6');t(200,()=>on('asg6'));});t(1200,()=>glitch('a6'));});
+  t(31000,()=>{go('s7');hardIn('a7');t(280,()=>on('v7'));t(560,()=>on('x7'));t(800,()=>on('f7'));t(850,()=>{on('ad7');t(200,()=>on('asg7'));});t(1200,()=>glitch('a7'));});
+
+  // S8 LIST (33–36.5s)
+  t(33000,()=>{
+    go('s8');
+    t(100,()=>on('lt'));
+    t(340,()=>on('li1'));t(620,()=>on('li2'));t(900,()=>on('li3'));t(1180,()=>on('li4'));
+    t(2000,()=>on('s8footer'));
+    t(2800,()=>glitch('s8'));
+  });
+
+  // S9 (36.5–40.5s)
+  t(36500,()=>{
+    go('s9');hardIn('lt9');
+    t(500,()=>on('ls9'));
+    t(900,()=>on('ss1'));t(1300,()=>on('ss2'));t(1700,()=>on('ss3'));t(2100,()=>on('ss4'));
+    t(2600,()=>on('s9quote'));
+    t(3800,()=>glitch('lt9'));
+  });
+
+  // S10 НО (40.5–41.5s)
+  t(40500,()=>{go('s10');hardIn('bw');t(400,()=>on('bwsub'));t(600,()=>glitch('bw'));});
+
+  // S11 SPOTIFY (41.5–49.5s)
+  t(41500,()=>{
+    go('s11');
+    t(100,()=>on('fey'));
+    t(400,()=>on('ff1'));
+    t(1000,()=>$('fdiv').style.width='100%');
+    t(1500,()=>on('ff2'));
+    t(2200,()=>on('ff3'));
+    t(2800,()=>on('s11extra'));
+    t(3500,()=>on('s11panel'));
+    t(4400,()=>on('fb'));
+    t(5200,()=>on('disc'));
+  });
+
+  // S12 BLACK
+  t(49000,()=>glitch('s11'));
+  t(49500,()=>go('s12'));
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='r'||e.key==='R'||e.key==='к'||e.key==='К') run();
+});
+</script>
+</body>
+</html>

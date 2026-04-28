@@ -1,0 +1,204 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>*{margin:0;padding:0}body{background:#000;overflow:hidden;width:100vw;height:100vh}canvas{position:absolute;top:0;left:0}</style>
+</head><body>
+<canvas id="c"></canvas>
+<script>
+const W=window.innerWidth,H=window.innerHeight;
+const cv=document.getElementById('c');
+cv.width=W;
+cv.height=H;
+const cx=cv.getContext('2d');
+let T0=null,RAF=null;
+
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+const fi=(t,s,d)=>cl((t-s)/d,0,1);
+const eo=(t)=>1-(1-t)**3;
+const rnd=(a,b)=>a+(b-a)*Math.random();
+
+const PAT_IDS=[
+  'US 5,825,830','US 6,185,539','US 4,920,570','US 7,158,532',
+  'US 5,563,990','US 6,493,815','US 7,630,497','US 5,376,968',
+  'US 6,014,694','US 7,949,775','US 5,819,215','US 6,728,317',
+  'US 7,003,035','US 5,933,500','US 6,418,548','US 7,266,148',
+];
+
+let docs=[];
+
+function initDocs(){
+  docs=[];
+  for(let i=0;i<120;i++){
+    docs.push({
+      x:     rnd(80, W-80),
+      baseY: -rnd(40, H*1.2),
+      w:     rnd(170,310),
+      h:     rnd(220,360),
+      rot:   rnd(-.28,.28),
+      speed: rnd(1.8, 5.5),
+      id:    PAT_IDS[i % PAT_IDS.length],
+      delay: rnd(0, 3.8),
+      lines: Math.floor(rnd(5,9)),
+      seed:  Math.random(),
+    });
+  }
+}
+
+function frame(ts){
+  if(!T0) T0=ts;
+  const t=(ts-T0)/1000;
+
+  // Black bg
+  cx.fillStyle='#000';
+  cx.fillRect(0,0,W,H);
+
+  if(t>5.4){
+    cx.fillStyle='rgba(0,0,0,.96)';cx.fillRect(0,0,W,H);
+    cx.font='bold 48px Courier New';cx.fillStyle='rgba(60,0,0,.5)';
+    cx.textAlign='center';cx.fillText('R / К',W/2,H/2);
+    return;
+  }
+
+  const crush = cl(t/5, 0, 1); // программист сжимается к концу
+
+  // ── Программист ─────────────────────────────────────
+  const pcx=W/2, pcy=H*.64 + crush*90;
+  const sq=100 - crush*30; // уменьшается под давлением
+
+  cx.save();
+  cx.globalAlpha = cl(1 - crush*0.5, 0.3, 1);
+  cx.strokeStyle=`rgba(200,0,0,${.55+Math.sin(t*3.5)*.15})`;
+
+  // голова
+  cx.lineWidth=4;
+  cx.beginPath();cx.arc(pcx, pcy-sq*.42, sq*.17,0,Math.PI*2);cx.stroke();
+  // глаза — паника нарастает
+  const eyeOpen = 1 - crush*.7;
+  if(eyeOpen>.05){
+    cx.fillStyle=`rgba(220,0,0,${eyeOpen})`;
+    cx.beginPath();cx.arc(pcx-sq*.06, pcy-sq*.44, sq*.035*eyeOpen,0,Math.PI*2);cx.fill();
+    cx.beginPath();cx.arc(pcx+sq*.06, pcy-sq*.44, sq*.035*eyeOpen,0,Math.PI*2);cx.fill();
+  }
+  // тело
+  cx.strokeStyle=`rgba(170,0,0,${.6+Math.sin(t*3)*.1})`;
+  cx.lineWidth=5;
+  cx.beginPath();cx.moveTo(pcx, pcy-sq*.25);cx.lineTo(pcx, pcy+sq*.18);cx.stroke();
+  // руки — поднимаются с нарастанием давления
+  const armAngle = crush * Math.PI * .35;
+  cx.lineWidth=4;
+  cx.beginPath();
+  cx.moveTo(pcx - Math.cos(armAngle)*sq*.3, pcy - Math.sin(armAngle)*sq*.1);
+  cx.lineTo(pcx, pcy);cx.stroke();
+  cx.beginPath();
+  cx.moveTo(pcx + Math.cos(armAngle)*sq*.3, pcy - Math.sin(armAngle)*sq*.1);
+  cx.lineTo(pcx, pcy);cx.stroke();
+  // ноги
+  cx.lineWidth=4;
+  cx.beginPath();cx.moveTo(pcx,pcy+sq*.18);cx.lineTo(pcx-sq*.15,pcy+sq*.45);cx.stroke();
+  cx.beginPath();cx.moveTo(pcx,pcy+sq*.18);cx.lineTo(pcx+sq*.15,pcy+sq*.45);cx.stroke();
+  cx.restore();
+
+  // ── Падающие документы ──────────────────────────────
+  docs.forEach(doc=>{
+    const dt=t - doc.delay;
+    if(dt<0) return;
+    const y = doc.baseY + dt*doc.speed*60;
+    if(y > H+doc.h) return;
+
+    cx.save();
+    cx.translate(doc.x, y);
+    cx.rotate(doc.rot + Math.sin(t*1.2+doc.seed*6)*.015);
+
+    // Тень
+    cx.fillStyle='rgba(0,0,0,.5)';
+    cx.fillRect(-doc.w/2+8, -doc.h/2+8, doc.w, doc.h);
+
+    // Бумага
+    cx.fillStyle='rgba(6,0,0,.96)';
+    cx.fillRect(-doc.w/2,-doc.h/2, doc.w, doc.h);
+    cx.strokeStyle=`rgba(${90+doc.seed*40|0},0,0,.75)`;
+    cx.lineWidth=1.5;
+    cx.strokeRect(-doc.w/2,-doc.h/2, doc.w, doc.h);
+
+    // Шапка — патентный номер
+    cx.fillStyle=`rgba(${140+doc.seed*60|0},0,0,.9)`;
+    cx.fillRect(-doc.w/2,-doc.h/2, doc.w, 36);
+    cx.font='bold 17px Courier New';
+    cx.fillStyle='rgba(220,20,0,.95)';
+    cx.textAlign='center';
+    cx.fillText(doc.id, 0, -doc.h/2+24);
+
+    // Строчки текста
+    cx.fillStyle='rgba(60,0,0,.5)';
+    for(let l=0;l<doc.lines;l++){
+      const lw = doc.w*(0.35 + (doc.seed*7+l*3.1)%1 * 0.5);
+      const lx = -doc.w/2 + doc.w*0.12;
+      const ly = -doc.h/2 + 50 + l*((doc.h-68)/doc.lines);
+      cx.fillRect(lx, ly, lw, 7);
+    }
+
+    // Подвал
+    cx.font='bold 13px Courier New';
+    cx.fillStyle='rgba(90,0,0,.55)';
+    cx.textAlign='center';
+    cx.fillText('35 U.S.C. § 154', 0, doc.h/2-13);
+
+    cx.restore();
+  });
+
+  // ── Сканлайны ────────────────────────────────────────
+  cx.save();cx.globalAlpha=.07;cx.fillStyle='#000';
+  for(let y=0;y<H;y+=3) cx.fillRect(0,y,W,1);
+  cx.restore();
+
+  // ── Текст ─────────────────────────────────────────────
+  const t1=fi(t,.1,.5);
+  const t2=fi(t,1.6,.5);
+  const t3=fi(t,3.0,.5);
+
+  if(t1>0){
+    cx.save();cx.globalAlpha=t1;
+    cx.font='bold 68px Courier New';
+    cx.fillStyle='rgba(170,0,0,.88)';
+    cx.textAlign='center';
+    cx.fillText('Его нужно собирать самому,',W/2,H*.86);
+    cx.restore();
+  }
+  if(t2>0){
+    cx.save();cx.globalAlpha=t2;
+    cx.font=`bold ${76+t2*6|0}px Courier New`;
+    cx.fillStyle=`rgb(${170+t2*50|0},0,0)`;
+    cx.textAlign='center';
+    cx.fillText('по крупицам,',W/2,H*.86+90);
+    cx.restore();
+  }
+  if(t3>0){
+    cx.save();cx.globalAlpha=t3;
+    cx.font=`bold ${84+t3*8|0}px Courier New`;
+    cx.fillStyle=`rgb(${180+t3*55|0},0,0)`;
+    cx.textAlign='center';
+    // лёгкий глитч при появлении
+    if(t3<.3){
+      cx.save();cx.globalAlpha=t3*.35;cx.fillStyle='#ff0000';
+      cx.fillText('через юристов.',W/2+rnd(-12,12),H*.86+188+rnd(-6,6));
+      cx.restore();
+    }
+    cx.fillText('через юристов.',W/2,H*.86+188);
+    cx.restore();
+  }
+
+  RAF=requestAnimationFrame(frame);
+}
+
+function start(){
+  if(RAF) cancelAnimationFrame(RAF);
+  T0=null;
+  initDocs();
+  RAF=requestAnimationFrame(frame);
+}
+
+document.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='r'||k==='\u043a'||k==='\u041a') start();
+});
+start();
+</script>
+</body></html>

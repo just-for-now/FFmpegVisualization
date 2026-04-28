@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Patent Trap</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; width: 2560px; height: 1440px; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 2560, H = 1440;
+
+// ─── FONTS ───────────────────────────────────────────────────────
+const link1 = document.createElement('link');
+link1.rel = 'stylesheet';
+link1.href = 'https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap';
+document.head.appendChild(link1);
+
+// ─── STATE ───────────────────────────────────────────────────────
+let t = 0;
+let phase = 0; // 0=idle
+let startTime = null;
+let animating = false;
+
+// ─── CONFIG ──────────────────────────────────────────────────────
+const BG = '#05080f';
+const GRID_COLOR = 'rgba(20,50,90,0.35)';
+const DIM_LINE = 'rgba(40,80,130,0.15)';
+
+// Map center
+const CX = W * 0.5, CY = H * 0.5;
+
+// Developer "you" position
+const DEV = { x: CX, y: CY };
+
+// Patent territories — invisible polygons that slowly reveal
+const PATENTS = [
+  {
+    id: 'US5,231,484',
+    name: 'MPEG Video\nCompression',
+    owner: 'Compression Labs Inc.',
+    year: 1993,
+    color: '#8B0000',
+    pts: [ // relative to W,H
+      [0.22, 0.15], [0.58, 0.12], [0.62, 0.44], [0.48, 0.52], [0.18, 0.48]
+    ],
+    revealDelay: 0.0,
+    revealDuration: 3.5,
+  },
+  {
+    id: 'US4,558,302',
+    name: 'LZW Compression\n(GIF)',
+    owner: 'Unisys Corp.',
+    year: 1985,
+    color: '#7a3a00',
+    pts: [
+      [0.48, 0.52], [0.72, 0.38], [0.85, 0.55], [0.78, 0.72], [0.55, 0.68]
+    ],
+    revealDelay: 1.2,
+    revealDuration: 3.8,
+  },
+  {
+    id: 'US6,195,695',
+    name: 'JPEG Baseline\nEncoding',
+    owner: 'Forgent Networks',
+    year: 2002,
+    color: '#004a6e',
+    pts: [
+      [0.18, 0.48], [0.48, 0.52], [0.55, 0.68], [0.42, 0.82], [0.15, 0.75]
+    ],
+    revealDelay: 2.1,
+    revealDuration: 4.0,
+  },
+  {
+    id: 'US5,579,430',
+    name: 'MP3 / MPEG-1\nAudio Layer III',
+    owner: 'Fraunhofer IIS',
+    year: 1995,
+    color: '#3b006e',
+    pts: [
+      [0.12, 0.18], [0.22, 0.15], [0.18, 0.48], [0.15, 0.75], [0.08, 0.72], [0.06, 0.38]
+    ],
+    revealDelay: 3.0,
+    revealDuration: 3.2,
+  },
+  {
+    id: 'US5,966,167',
+    name: 'H.264 / AVC\nVideo Codec',
+    owner: 'MPEG LA Pool',
+    year: 1998,
+    color: '#006040',
+    pts: [
+      [0.58, 0.12], [0.88, 0.10], [0.92, 0.42], [0.85, 0.55], [0.72, 0.38], [0.62, 0.44]
+    ],
+    revealDelay: 4.2,
+    revealDuration: 4.5,
+  },
+  {
+    id: 'US4,853,775',
+    name: 'Digital Video\nTransmission',
+    owner: 'Columbia Univ.',
+    year: 1989,
+    color: '#5a1a00',
+    pts: [
+      [0.42, 0.82], [0.55, 0.68], [0.78, 0.72], [0.82, 0.90], [0.50, 0.95], [0.20, 0.92]
+    ],
+    revealDelay: 5.0,
+    revealDuration: 3.8,
+  },
+];
+
+// Absolute coords
+PATENTS.forEach(p => {
+  p.abs = p.pts.map(([px, py]) => [px * W, py * H]);
+});
+
+// ─── GRID DATA ────────────────────────────────────────────────────
+const GRID_STEP = 80;
+const COORD_LINES = [];
+for (let x = 0; x <= W; x += GRID_STEP) COORD_LINES.push({ vertical: true, pos: x });
+for (let y = 0; y <= H; y += GRID_STEP) COORD_LINES.push({ vertical: false, pos: y });
+
+// ─── PARTICLES ────────────────────────────────────────────────────
+// Faint drifting data particles in background
+const PARTICLES = Array.from({ length: 200 }, () => ({
+  x: Math.random() * W,
+  y: Math.random() * H,
+  vx: (Math.random() - 0.5) * 0.3,
+  vy: (Math.random() - 0.5) * 0.3,
+  size: Math.random() * 1.5 + 0.3,
+  alpha: Math.random() * 0.4 + 0.05,
+}));
+
+// ─── CODE STRINGS drifting across map ─────────────────────────────
+const CODE_STRS = [
+  'int decode_frame(AVCodecContext *avctx',
+  'static int mp3_decode_init(',
+  'av_parser_parse2(',
+  'avcodec_open2(codec_ctx,',
+  'uint8_t *buf, int buf_size)',
+  'AVPacket pkt; av_init_packet',
+  'sws_scale(sws_ctx, src',
+  'ff_mjpeg_decode_dht(',
+  'mpeg4_decode_mb(',
+  'h264_decode_slice(',
+];
+const DRIFTERS = Array.from({ length: 18 }, (_, i) => ({
+  str: CODE_STRS[i % CODE_STRS.length] + (i > CODE_STRS.length ? ' *' : ''),
+  x: Math.random() * W,
+  y: Math.random() * H,
+  vy: -0.18 - Math.random() * 0.12,
+  alpha: Math.random() * 0.12 + 0.04,
+  size: 13 + Math.floor(Math.random() * 5),
+}));
+
+// ─── FLAG (developer position marker) ─────────────────────────────
+// Pulse rings around developer
+const FLAG_RINGS = [0.0, 0.33, 0.66];
+
+// ─── WARNING FLASHES ──────────────────────────────────────────────
+let warningFlash = 0;
+let warningText = '';
+
+// ─── TITLE LINES ──────────────────────────────────────────────────
+const TITLE_LINES = [
+  { text: 'Но была и вторая проблема.', delay: 0.5, duration: 2.0 },
+  { text: 'Даже если ты не зависел ни от одной корпорации.', delay: 3.0, duration: 2.5 },
+  { text: 'Даже если ты написал что-то своё, с нуля.', delay: 6.2, duration: 2.5 },
+  { text: 'Ты всё равно был в ловушке —', delay: 9.5, duration: 2.5 },
+  { text: 'просто ещё не знал об этом.', delay: 12.2, duration: 4.0 },
+];
+
+// ─── TOTAL DURATION ───────────────────────────────────────────────
+const TOTAL = 22;
+
+// ─── HELPERS ──────────────────────────────────────────────────────
+function ease(t, power = 3) {
+  return t < 0.5 ? Math.pow(2 * t, power) / 2 : 1 - Math.pow(2 * (1 - t), power) / 2;
+}
+function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+function easeIn(t) { return Math.pow(t, 2); }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function hexAlpha(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ─── DRAW GRID ─────────────────────────────────────────────────────
+function drawGrid(globalAlpha) {
+  ctx.save();
+  ctx.globalAlpha = globalAlpha;
+  ctx.strokeStyle = GRID_COLOR;
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= W; x += GRID_STEP) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += GRID_STEP) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  // Axis labels (coordinate numbers)
+  ctx.fillStyle = 'rgba(40,80,140,0.25)';
+  ctx.font = '10px monospace';
+  for (let x = 0; x <= W; x += GRID_STEP * 4) {
+    ctx.fillText(x, x + 2, 12);
+  }
+  for (let y = GRID_STEP * 4; y <= H; y += GRID_STEP * 4) {
+    ctx.fillText(y, 2, y - 2);
+  }
+  ctx.restore();
+}
+
+// ─── DRAW PATENT TERRITORY ─────────────────────────────────────────
+function drawPatent(p, progress) {
+  if (progress <= 0) return;
+  const pts = p.abs;
+  const n = pts.length;
+
+  // Animated reveal — draw border progressively
+  const totalLen = pts.reduce((acc, pt, i) => {
+    const next = pts[(i + 1) % n];
+    return acc + Math.hypot(next[0] - pt[0], next[1] - pt[1]);
+  }, 0);
+
+  // ── Fill (fade in after border is half drawn) ──
+  const fillP = clamp((progress - 0.4) / 0.6, 0, 1);
+  if (fillP > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = hexAlpha(p.color, 0.10 * fillP);
+    ctx.fill();
+
+    // Crosshatch pattern
+    ctx.save();
+    ctx.clip();
+    ctx.globalAlpha = 0.07 * fillP;
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 0.8;
+    for (let d = -H; d < W + H; d += 22) {
+      ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d + H, H); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // ── Border (animated) ──
+  ctx.save();
+  ctx.strokeStyle = hexAlpha(p.color, 0.8 * Math.min(progress * 2, 1));
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 5]);
+
+  // Draw partial border based on progress
+  let drawn = 0;
+  const target = totalLen * Math.min(progress / 0.5, 1.0);
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 0; i < n; i++) {
+    const from = pts[i];
+    const to = pts[(i + 1) % n];
+    const seg = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (drawn + seg < target) {
+      ctx.lineTo(to[0], to[1]);
+      drawn += seg;
+    } else {
+      const rem = target - drawn;
+      const frac = rem / seg;
+      ctx.lineTo(from[0] + (to[0] - from[0]) * frac, from[1] + (to[1] - from[1]) * frac);
+      break;
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // ── Label ──
+  if (fillP > 0.3) {
+    // Centroid
+    const cx = pts.reduce((s, pt) => s + pt[0], 0) / n;
+    const cy = pts.reduce((s, pt) => s + pt[1], 0) / n;
+    const la = (fillP - 0.3) / 0.7;
+
+    ctx.save();
+    ctx.globalAlpha = la;
+
+    // Patent ID
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = hexAlpha(p.color, 1.0);
+    ctx.textAlign = 'center';
+    ctx.fillText(p.id, cx, cy - 28);
+
+    // Name (multiline)
+    ctx.font = '600 22px Rajdhani, monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    const lines = p.name.split('\n');
+    lines.forEach((l, i) => ctx.fillText(l, cx, cy + i * 26));
+
+    // Owner
+    ctx.font = '13px monospace';
+    ctx.fillStyle = 'rgba(180,180,180,0.5)';
+    ctx.fillText(p.owner, cx, cy + lines.length * 26 + 16);
+
+    // Year
+    ctx.font = 'bold 16px monospace';
+    ctx.fillStyle = hexAlpha(p.color, 0.8);
+    ctx.fillText('© ' + p.year, cx, cy + lines.length * 26 + 34);
+
+    ctx.restore();
+  }
+}
+
+// ─── DRAW DEVELOPER ────────────────────────────────────────────────
+function drawDeveloper(elapsed) {
+  const x = DEV.x, y = DEV.y;
+
+  // Outer warning rings — pulse faster as more patents reveal
+  const revealed = PATENTS.filter(p => elapsed > p.revealDelay + 1).length;
+  const danger = revealed / PATENTS.length;
+
+  FLAG_RINGS.forEach((offset, i) => {
+    const phase = (elapsed * (0.6 + danger * 0.8) + offset) % 1;
+    const r = 30 + phase * (140 + danger * 80);
+    const a = (1 - phase) * (0.5 + danger * 0.3);
+    const col = danger > 0.6
+      ? `rgba(220,30,30,${a})`
+      : danger > 0.3
+        ? `rgba(200,120,30,${a})`
+        : `rgba(60,180,255,${a})`;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(0.5, r), 0, Math.PI * 2);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  // Cross-marker
+  const sz = 14;
+  ctx.strokeStyle = danger > 0.5 ? '#ff4444' : '#66ccff';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x - sz, y); ctx.lineTo(x + sz, y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y - sz); ctx.lineTo(x, y + sz); ctx.stroke();
+
+  // Center dot
+  ctx.fillStyle = danger > 0.5 ? '#ff4444' : '#99eeff';
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+
+  // Label
+  ctx.save();
+  ctx.font = '600 20px Rajdhani, monospace';
+  ctx.fillStyle = danger > 0.5 ? '#ff8888' : '#99eeff';
+  ctx.textAlign = 'left';
+  ctx.fillText('ВЫ', x + 22, y - 10);
+  ctx.font = '12px monospace';
+  ctx.fillStyle = 'rgba(150,200,255,0.5)';
+  ctx.fillText(`${DEV.x.toFixed(0)}, ${DEV.y.toFixed(0)}`, x + 22, y + 8);
+  ctx.restore();
+}
+
+// ─── DRAW TITLE TEXT ──────────────────────────────────────────────
+function drawTitles(elapsed) {
+  TITLE_LINES.forEach(line => {
+    const age = elapsed - line.delay;
+    if (age < 0) return;
+    const fadeIn = clamp(age / 0.6, 0, 1);
+    const fadeOut = line.delay + line.duration < elapsed
+      ? clamp((elapsed - line.delay - line.duration) / 0.5, 0, 1)
+      : 0;
+    const alpha = easeOut(fadeIn) * (1 - easeIn(fadeOut));
+    if (alpha <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Determine if this is the "trap" line
+    const isTrap = line.text.includes('ловушке');
+    const isLast = line.text.includes('ещё не знал');
+
+    const fontSize = isLast ? 72 : isTrap ? 64 : 44;
+    const yBase = H - 200;
+
+    // Glitch offset on trap line
+    if (isTrap && alpha > 0.5) {
+      const glitch = Math.sin(elapsed * 47) > 0.92 ? 4 : 0;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.font = `italic ${fontSize}px 'Cormorant Garamond', serif`;
+      ctx.fillStyle = '#ff2020';
+      ctx.textAlign = 'center';
+      ctx.fillText(line.text, W / 2 + glitch, yBase + glitch);
+      ctx.restore();
+    }
+
+    ctx.font = `${isLast ? 'bold' : isTrap ? 'italic' : ''} ${fontSize}px 'Cormorant Garamond', serif`;
+    ctx.fillStyle = isLast ? '#ffffff' : isTrap ? '#ffcccc' : 'rgba(255,255,255,0.75)';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = isLast ? 'rgba(255,60,60,0.6)' : 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = isLast ? 40 : 10;
+    ctx.fillText(line.text, W / 2, yBase);
+    ctx.restore();
+  });
+}
+
+// ─── DRAW PATENT LINES to developer ───────────────────────────────
+function drawThreatLines(elapsed) {
+  PATENTS.forEach(p => {
+    const age = elapsed - (p.revealDelay + p.revealDuration * 0.5);
+    if (age <= 0) return;
+    const a = clamp(age / 1.5, 0, 1) * 0.25;
+    const cx = p.abs.reduce((s, pt) => s + pt[0], 0) / p.abs.length;
+    const cy = p.abs.reduce((s, pt) => s + pt[1], 0) / p.abs.length;
+
+    const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.5 + p.revealDelay);
+    ctx.save();
+    ctx.globalAlpha = a * (0.4 + 0.6 * pulse);
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 8]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(DEV.x, DEV.y);
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+// ─── VIGNETTE ─────────────────────────────────────────────────────
+function drawVignette(elapsed) {
+  const revealed = PATENTS.filter(p => elapsed > p.revealDelay + p.revealDuration).length;
+  const danger = revealed / PATENTS.length;
+
+  const grad = ctx.createRadialGradient(CX, CY, H * 0.2, CX, CY, H * 0.9);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, `rgba(${Math.floor(danger * 30)},0,0,${0.4 + danger * 0.3})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ─── COMPASS ROSE ─────────────────────────────────────────────────
+function drawCompass() {
+  const x = W - 100, y = 100;
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = '#3366aa';
+  ctx.lineWidth = 1;
+  ['N','E','S','W'].forEach((dir, i) => {
+    const angle = i * Math.PI / 2 - Math.PI / 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle) * 30, y + Math.sin(angle) * 30);
+    ctx.stroke();
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#5588cc';
+    ctx.textAlign = 'center';
+    ctx.fillText(dir, x + Math.cos(angle) * 42, y + Math.sin(angle) * 42 + 5);
+  });
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = '#3366aa'; ctx.fill();
+  ctx.restore();
+}
+
+// ─── SCALE BAR ────────────────────────────────────────────────────
+function drawScaleBar() {
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  ctx.strokeStyle = '#3366aa';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(80, H - 60); ctx.lineTo(280, H - 60); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(80, H - 55); ctx.lineTo(80, H - 65); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(280, H - 55); ctx.lineTo(280, H - 65); ctx.stroke();
+  ctx.font = '13px monospace';
+  ctx.fillStyle = '#5588cc';
+  ctx.textAlign = 'center';
+  ctx.fillText('200 px', 180, H - 40);
+  ctx.fillText('PATENT MAP v2.1', 180, H - 22);
+  ctx.restore();
+}
+
+// ─── SIDEBAR INFO ─────────────────────────────────────────────────
+function drawSidebar(elapsed) {
+  const revealed = PATENTS.filter(p => elapsed > p.revealDelay + 0.5);
+  if (revealed.length === 0) return;
+
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.font = 'bold 14px monospace';
+  ctx.fillStyle = 'rgba(255,40,40,0.9)';
+  ctx.textAlign = 'left';
+  ctx.fillText('АКТИВНЫЕ ПАТЕНТНЫЕ ПРЕТЕНЗИИ', 60, 60);
+
+  revealed.forEach((p, i) => {
+    const age = elapsed - p.revealDelay;
+    const a = clamp(age / 0.8, 0, 1);
+    ctx.globalAlpha = 0.7 * a;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(60, 85 + i * 36, 8, 24);
+    ctx.fillStyle = 'rgba(220,220,220,0.8)';
+    ctx.font = '13px monospace';
+    ctx.fillText(`${p.id}  —  ${p.name.replace('\n', ' ')}`, 78, 102 + i * 36);
+  });
+  ctx.restore();
+}
+
+// ─── BOTTOM COORDINATES ───────────────────────────────────────────
+function drawCoords() {
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.font = '11px monospace';
+  ctx.fillStyle = '#4488bb';
+  ctx.textAlign = 'right';
+  ctx.fillText(`LAT 38°54'N  LON 77°02'W  —  PATENT JURISDICTION: ACTIVE`, W - 60, H - 30);
+  ctx.restore();
+}
+
+// ─── SCAN LINE ────────────────────────────────────────────────────
+function drawScanLines() {
+  ctx.save();
+  ctx.globalAlpha = 0.03;
+  for (let y = 0; y < H; y += 3) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, y, W, 1);
+  }
+  ctx.restore();
+}
+
+// ─── IDLE SCREEN ──────────────────────────────────────────────────
+function drawIdle() {
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+  drawGrid(0.4);
+
+  // Pulsing center
+  const p = 0.5 + 0.5 * Math.sin(Date.now() / 600);
+  ctx.save();
+  ctx.globalAlpha = 0.15 + 0.1 * p;
+  const g = ctx.createRadialGradient(CX, CY, 50, CX, CY, 400);
+  g.addColorStop(0, '#1a3a6a'); g.addColorStop(1, 'transparent');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = '600 32px Rajdhani, monospace';
+  ctx.fillStyle = 'rgba(80,140,200,0.5)';
+  ctx.textAlign = 'center';
+  ctx.fillText('[ R ] или [ К ] — ЗАПУСТИТЬ', CX, CY);
+  ctx.restore();
+
+  drawScanLines();
+}
+
+// ─── MAIN DRAW ────────────────────────────────────────────────────
+function draw() {
+  if (!animating) { drawIdle(); return; }
+
+  const elapsed = (Date.now() - startTime) / 1000;
+  t = elapsed;
+
+  // Background
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle fog center
+  const fog = ctx.createRadialGradient(CX, CY, 0, CX, CY, 700);
+  fog.addColorStop(0, 'rgba(10,25,50,0.6)');
+  fog.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  drawGrid(0.5);
+
+  // Drifting code
+  DRIFTERS.forEach(d => {
+    d.y += d.vy;
+    if (d.y < -20) { d.y = H + 20; d.x = Math.random() * W; }
+    ctx.save();
+    ctx.globalAlpha = d.alpha;
+    ctx.font = `${d.size}px monospace`;
+    ctx.fillStyle = 'rgba(60,140,200,0.8)';
+    ctx.fillText(d.str, d.x, d.y);
+    ctx.restore();
+  });
+
+  // Background particles
+  PARTICLES.forEach(p => {
+    p.x = (p.x + p.vx + W) % W;
+    p.y = (p.y + p.vy + H) % H;
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = '#4488aa';
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
+
+  // Patents reveal
+  PATENTS.forEach(p => {
+    const age = elapsed - p.revealDelay;
+    if (age <= 0) return;
+    const progress = clamp(age / p.revealDuration, 0, 1);
+    drawPatent(p, easeOut(progress));
+  });
+
+  // Threat lines
+  drawThreatLines(elapsed);
+
+  // Developer
+  drawDeveloper(elapsed);
+
+  // UI chrome
+  drawCompass();
+  drawScaleBar();
+  drawSidebar(elapsed);
+  drawCoords();
+
+  // Vignette
+  drawVignette(elapsed);
+
+  // Titles
+  drawTitles(elapsed);
+
+  // Scanlines
+  drawScanLines();
+
+  // Red flash on new patent reveal
+  PATENTS.forEach(p => {
+    const age = elapsed - p.revealDelay;
+    if (age > 0 && age < 0.3) {
+      const flashA = (0.3 - age) / 0.3 * 0.12;
+      ctx.fillStyle = `rgba(200,0,0,${flashA})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  });
+
+  // End state — full red wash
+  if (elapsed > 17) {
+    const a = clamp((elapsed - 17) / 3, 0, 1) * 0.15;
+    ctx.fillStyle = `rgba(180,0,0,${a})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  if (elapsed > TOTAL) {
+    animating = false;
+  }
+}
+
+// ─── LOOP ─────────────────────────────────────────────────────────
+function loop() {
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ─── INPUT ────────────────────────────────────────────────────────
+function restart() {
+  startTime = Date.now();
+  animating = true;
+  // Reset drifters
+  DRIFTERS.forEach(d => {
+    d.x = Math.random() * W;
+    d.y = Math.random() * H;
+  });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'к' || e.key === 'К' || e.key === 'R') {
+    restart();
+  }
+});
+
+loop();
+</script>
+</body>
+</html>

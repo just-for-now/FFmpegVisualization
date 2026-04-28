@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+<style>
+  #bpm-panel {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: rgba(0,0,0,0.82);
+    border: 1px solid rgba(255,230,0,0.3);
+    border-radius: 6px;
+    padding: 14px 20px;
+    color: #FFE600;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    display: none;        /* скрыта по умолчанию */
+    flex-direction: column;
+    gap: 10px;
+    z-index: 9999;
+    min-width: 220px;
+    backdrop-filter: blur(4px);
+  }
+  #bpm-panel.visible { display: flex; }
+  #bpm-panel label { color: #888; font-size: 11px; letter-spacing: 0.08em; }
+  #bpm-display { font-size: 28px; font-weight: 700; color: #FFE600; text-align: center; }
+  #bpm-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: #333;
+    border-radius: 2px;
+    outline: none;
+  }
+  #bpm-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #FFE600;
+    cursor: pointer;
+    box-shadow: 0 0 8px #FFE600;
+  }
+  #bpm-hint { color: #444; font-size: 10px; text-align: center; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;700&family=Josefin+Sans:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// SETUP — canvas at native 2560×1440, CSS-scaled to fit screen
+// ─────────────────────────────────────────────────────────────────────────────
+const W = 2560, H = 1440;
+const canvas = document.getElementById('c');
+canvas.width  = W;
+canvas.height = H;
+
+function fitCanvas() {
+  const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width  = (W * scale) + 'px';
+  canvas.style.height = (H * scale) + 'px';
+}
+fitCanvas();
+window.addEventListener('resize', fitCanvas);
+
+const ctx = canvas.getContext('2d');
+
+// Offscreen canvas для вспышки glow — рисуем сцену второй раз с огромным blur
+const glowCanvas = document.createElement('canvas');
+glowCanvas.width = W; glowCanvas.height = H;
+const glowCtx = glowCanvas.getContext('2d');
+
+// Текущая интенсивность вспышки (0..1) — читается в draw-функциях
+let flashIntensity = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TIMING
+// ─────────────────────────────────────────────────────────────────────────────
+let BPM  = 117;
+let BEAT = 60 / BPM; // ~0.5128s — обновляется из панели
+
+// Beat timeline:
+// 0–6   Scene 1: language names
+// 6–14  Scene 2: memory / registers
+// 14+   Scene 3: code typing
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GRAIN — offscreen canvas, regenerated every frame
+// ─────────────────────────────────────────────────────────────────────────────
+const gCanvas = document.createElement('canvas');
+gCanvas.width = W; gCanvas.height = H;
+const gCtx  = gCanvas.getContext('2d');
+const gData = gCtx.createImageData(W, H);
+
+function updateGrain(strength) {
+  // Grain: random per-pixel noise, semi-transparent
+  // Alpha is LOW so grain only shows on bright glow areas, invisible on black
+  // strength modulates how much grain varies frame to frame (the "organic" feel)
+  const d = gData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // Random brightness per pixel
+    // Full 0-255 range needed for 'overlay' blend to work:
+    // values < 128 darken bright areas, > 128 lighten — net result = grain texture
+    const v = Math.floor(Math.random() * 256);
+    d[i]   = v;   // R
+    d[i+1] = v;   // G
+    d[i+2] = v;   // B
+    d[i+3] = 255; // Full alpha — overlay blend controls the effect, not alpha
+  }
+  gCtx.putImageData(gData, 0, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOW PULSE — smooth sine on beat, grain mixed in as small additive noise
+// beatPhase 0..1: peaks at 0 (downbeat), dips at 0.5
+// The sine is smoothed so it never jumps — only shadowBlur changes, nothing else
+// ─────────────────────────────────────────────────────────────────────────────
+function glowPulse(beatPhase) {
+  // Cosine gives smooth 1→0→1 but we want 0→1→0 peak at phase 0.5
+  // Use sine shifted: peak at beatPhase=0 (downbeat)
+  const raw   = 0.5 - 0.5 * Math.cos(beatPhase * Math.PI * 2);
+  // Grain: tiny per-frame random jitter — makes the glow feel organic, like film
+  // Kept small (±0.08) so it's texture not flicker
+  const grain = (Math.random() - 0.5) * 0.16;
+  return Math.max(0.15, Math.min(1.0, raw + grain));
+}
+
+function glow(intensity, blur, color) {
+  ctx.shadowColor = color || '#FFE600';
+  ctx.shadowBlur  = blur * intensity;
+}
+function noGlow() { ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKGROUND
+// ─────────────────────────────────────────────────────────────────────────────
+function drawBG() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  // Dot grid — very subtle, static
+  ctx.fillStyle = 'rgba(255,230,0,0.055)';
+  const s = 120;
+  for (let x = 60; x < W; x += s)
+    for (let y = 60; y < H; y += s)
+      ctx.fillRect(x-1, y-1, 2, 2);
+  // No beat flash — only shadowBlur on glowing text pulses with the beat
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENE 1 — Language names
+// "C" on left half, "ASM" on right half
+// ─────────────────────────────────────────────────────────────────────────────
+function drawScene1(beat, beatPhase) {
+  const g = glowPulse(beatPhase);
+
+  // "C" — fades in over beats 0–2
+  const cAlpha = Math.min(1, beat / 3);
+  if (cAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = cAlpha;
+    ctx.textAlign    = 'left';
+
+    // Giant letter C — yellow
+    ctx.font         = '700 580px "Josefin Sans"';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle    = '#FFE600';
+    ctx.shadowColor  = '#FFE600';
+    ctx.shadowBlur   = 120 * g;
+    ctx.fillText('C', 160, 920);
+
+    // Subtitle
+    ctx.font      = '400 50px "Josefin Sans"';
+    ctx.fillStyle = '#FFE600';
+    ctx.shadowColor = '#FFE600'; ctx.shadowBlur = 20 * g;
+    ctx.fillText('язык низкого уровня', 160, 1020);
+
+    noGlow();
+    ctx.font      = '300 34px "IBM Plex Mono"';
+    ctx.fillStyle = '#665500';
+    ctx.fillText('ты решаешь что выделить и когда освободить', 160, 1080);
+
+    ctx.restore();
+  }
+
+  // "ASM" — fades in beats 3–5, cyan
+  const aAlpha = Math.min(1, Math.max(0, (beat - 4.5) / 3));
+  if (aAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = aAlpha;
+    ctx.textAlign    = 'left';
+
+    ctx.font         = '700 280px "Josefin Sans"';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle    = '#00D4FF';
+    ctx.shadowColor  = '#00D4FF';
+    ctx.shadowBlur   = 80 * g;
+    ctx.fillText('ASM', 1380, 760);
+
+    ctx.font      = '400 50px "Josefin Sans"';
+    ctx.fillStyle = '#00D4FF';
+    ctx.shadowColor = '#00D4FF'; ctx.shadowBlur = 20 * g;
+    ctx.fillText('ассемблер', 1380, 860);
+
+    noGlow();
+    ctx.font      = '300 34px "IBM Plex Mono"';
+    ctx.fillStyle = '#005566';
+    ctx.fillText('прямые команды процессору', 1380, 925);
+    ctx.fillText('сложно писать — зато максимальная скорость', 1380, 972);
+
+    // Divider
+    if (beat > 6.5) {
+      const dA = Math.min(1, (beat - 6.5) / 1.5);
+      ctx.globalAlpha = aAlpha * dA * 0.22;
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([28, 28]);
+      ctx.beginPath();
+      ctx.moveTo(1300, 180);
+      ctx.lineTo(1300, 1260);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENE 2 — Memory grid (left) + Registers (right)
+// ─────────────────────────────────────────────────────────────────────────────
+const MEM_COLS = 10, MEM_ROWS = 6;
+const CELLS = Array.from({length: MEM_COLS * MEM_ROWS}, (_, i) => ({
+  addr:  `0x${(0x1A00 + i).toString(16).toUpperCase().padStart(4,'0')}`,
+  val:   Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2,'0'),
+  owned: Math.random() < 0.16,
+}));
+
+const REGS = [
+  { n:'mm0', w:64, v:'FF2A 8B34 0011 CAFE', note:'4 числа за раз — MMX регистр'    },
+  { n:'mm1', w:64, v:'3C00 7FFF 0000 1234', note:'умножаем всё разом, 1 такт'       },
+  { n:'eax', w:32, v:'0000 03FF',           note:'счётчик / адрес результата'        },
+  { n:'ecx', w:32, v:'0000 0008',           note:'ширина блока = 8 пикселей'         },
+  { n:'esi', w:32, v:'0041 8A00',           note:'указатель: откуда читать'          },
+  { n:'edi', w:32, v:'0041 8B00',           note:'указатель: куда писать'            },
+];
+
+function drawScene2(beat, beatPhase, t) {
+  const g  = glowPulse(beatPhase);
+  const p  = Math.min(1, (beat - 11) / 3); // fade-in starts after S1 fully gone
+  if (p <= 0) return;
+
+  ctx.save();
+
+  // ── LEFT: C memory grid ──────────────────────────────────────────────────
+  // Title at y=120
+  ctx.globalAlpha = p;
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'top';
+
+  glow(g * 0.55, 22);
+  ctx.font      = '700 56px "IBM Plex Mono"';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('C — ты контролируешь память', 100, 110);
+
+  noGlow();
+  ctx.font      = '300 34px "IBM Plex Mono"';
+  ctx.fillStyle = '#555';
+  ctx.fillText('каждая ячейка принадлежит тебе — или никому', 100, 182);
+
+  // Grid starts at y=240
+  const CW = 108, CH = 76, GAP = 4;
+  const GX = 100, GY = 240;
+
+  for (let i = 0; i < CELLS.length; i++) {
+    const r = Math.floor(i / MEM_COLS);
+    const c = i % MEM_COLS;
+    const x = GX + c * (CW + GAP);
+    const y = GY + r * (CH + GAP);
+
+    const cp = Math.min(1, Math.max(0, (p * CELLS.length - i) / 5));
+    if (cp <= 0) continue;
+
+    ctx.globalAlpha = p * cp;
+
+    const own  = CELLS[i].owned;
+    const flk  = own ? 0.65 + 0.35 * Math.sin(t * 5 + i * 1.9) : 0;
+
+    // Border
+    ctx.strokeStyle = own ? '#FFE600' : '#252525';
+    ctx.lineWidth   = own ? 2 : 1;
+    if (own) { ctx.shadowColor = '#FFE600'; ctx.shadowBlur = 18 * g * flk; }
+    else noGlow();
+    ctx.strokeRect(x, y, CW, CH);
+
+    if (own) {
+      ctx.fillStyle = `rgba(255,230,0,${0.07 * flk})`;
+      ctx.fillRect(x+1, y+1, CW-2, CH-2);
+    }
+
+    // Address (tiny)
+    noGlow();
+    ctx.font      = '300 15px "IBM Plex Mono"';
+    ctx.fillStyle = '#333';
+    ctx.fillText(CELLS[i].addr, x+6, y+5);
+
+    // Value
+    ctx.font      = '500 26px "IBM Plex Mono"';
+    ctx.fillStyle = own ? '#FFE600' : '#3a3a3a';
+    if (own) { ctx.shadowColor = '#FFE600'; ctx.shadowBlur = 10 * g * flk; }
+    ctx.fillText(CELLS[i].val, x+6, y+40);
+  }
+
+  // Legend
+  ctx.globalAlpha = p;
+  noGlow();
+  const legendY = GY + MEM_ROWS * (CH + GAP) + 20;
+  ctx.font = '300 28px "IBM Plex Mono"';
+  ctx.fillStyle = '#FFE600'; ctx.fillText('█', 100, legendY);
+  ctx.fillStyle = '#555';    ctx.fillText(' выделено Беллaром', 130, legendY);
+  ctx.fillStyle = '#252525'; ctx.fillText('█', 560, legendY);
+  ctx.fillStyle = '#555';    ctx.fillText(' свободно', 590, legendY);
+
+  // ── RIGHT: Registers ─────────────────────────────────────────────────────
+  ctx.globalAlpha = p;
+  glow(g * 0.55, 22);
+  ctx.font      = '700 56px "IBM Plex Mono"';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('ASM — регистры процессора', 1360, 110);
+
+  noGlow();
+  ctx.font      = '300 34px "IBM Plex Mono"';
+  ctx.fillStyle = '#555';
+  ctx.fillText('хранят числа прямо внутри чипа — быстрее некуда', 1360, 182);
+
+  for (let i = 0; i < REGS.length; i++) {
+    const reg = REGS[i];
+    const ry  = 270 + i * 175;
+    const rp  = Math.min(1, Math.max(0, (p * REGS.length - i) / 2.5));
+    if (rp <= 0) continue;
+
+    ctx.globalAlpha = p * rp;
+    const pulse = 0.6 + 0.4 * Math.sin(beatPhase * Math.PI * 2 + i * 0.8);
+
+    // Name badge (yellow box)
+    glow(g * pulse, 18);
+    ctx.fillStyle = '#FFE600';
+    ctx.fillRect(1360, ry, 162, 62);
+
+    noGlow();
+    ctx.font         = '700 38px "IBM Plex Mono"';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle    = '#000';
+    ctx.fillText(reg.n, 1374, ry + 31);
+
+    // Bit width
+    ctx.font      = '300 22px "IBM Plex Mono"';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#444';
+    ctx.fillText(`${reg.w}b`, 1536, ry + 4);
+
+    // Value
+    glow(g * pulse * 0.5, 12);
+    ctx.font         = '500 38px "IBM Plex Mono"';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle    = '#FFF';
+    ctx.fillText(reg.v, 1536, ry + 31);
+
+    // Note
+    noGlow();
+    ctx.font         = '300 28px "IBM Plex Mono"';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle    = '#888888';
+    ctx.fillText('// ' + reg.note, 1536, ry + 70);
+  }
+
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENE 3 — Two independent scrolling columns
+// LEFT: real C code (FFmpeg libavcodec patterns by Bellard)
+// RIGHT: real ASM inline (__asm__ volatile blocks from early FFmpeg)
+// Font: 26px IBM Plex Mono, line height 42px
+// Viewport scrolls so cursor stays near bottom of screen
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── LEFT column: C code ──────────────────────────────────────────────────────
+const C_CODE = [
+  {k:'cmt', s:'/* libavcodec/simple_idct.c — Беллар, 2001                  */'},
+  {k:'cmt', s:'/* Написано чтобы смотреть ТВ. Работает на Марсе. Нормально */'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'/* W1–W7: cos(kπ/16)×√2×2¹⁴ — Беллар посчитал вручную     */'},
+  {k:'cmt', s:'/* Калькулятором. В 2001. Проверять не будем, доверяем       */'},
+  {k:'cod', s:'#define W1  22725'},
+  {k:'cod', s:'#define W2  21407'},
+  {k:'cod', s:'#define W3  19266'},
+  {k:'cod', s:'#define W4  16383  /* это почти 2^14, почти — но не совсем  */'},
+  {k:'cod', s:'#define W5  12873'},
+  {k:'cod', s:'#define W6   8867'},
+  {k:'cod', s:'#define W7   4520'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'/* Float? Нет. Float — это для слабых. Только целые числа    */'},
+  {k:'cmt', s:'/* >> 14 вместо деления. Процессор сказал спасибо            */'},
+  {k:'cod', s:'#define MUL(a,b)  ((int)((a) * (unsigned)(b)) >> 14)'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'/* ИДКП — сердце каждого JPEG и MPEG кадра на планете        */'},
+  {k:'cmt', s:'/* Вы смотрели видео сегодня? Этот код работал               */'},
+  {k:'cod', s:'static void idctRowCondDC(int16_t *row, int extra_shift) {'},
+  {k:'cod', s:'    int a0, a1, a2, a3, b0, b1, b2, b3;'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'    /* Большинство блоков в видео — почти однородные          */'},
+  {k:'cmt', s:'    /* Проверяем: если все нули — возвращаем сразу. Быстро    */'},
+  {k:'cod', s:'    if (!(row[1]|row[2]|row[3]|row[4]|row[5]|row[6]|row[7])) {'},
+  {k:'cod', s:'        row[0]=row[1]=row[2]=row[3]='},
+  {k:'cod', s:'        row[4]=row[5]=row[6]=row[7]=row[0]<<(3+extra_shift);'},
+  {k:'cod', s:'        return;  /* выходим. незачем считать очевидное         */'},
+  {k:'cod', s:'    }'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'    /* Butterfly: звучит красиво, работает ещё красивее       */'},
+  {k:'cmt', s:'    /* Скрещиваем пары — основа всего быстрого Фурье          */'},
+  {k:'cod', s:'    a0 = MUL(W4, row[0]) + MUL(W2, row[2]);'},
+  {k:'cod', s:'    a1 = MUL(W4, row[0]) - MUL(W2, row[2]);'},
+  {k:'cod', s:'    a2 = MUL(W6, row[2]) + MUL(W4, row[0]);'},
+  {k:'cod', s:'    a3 = MUL(W4, row[0]) - MUL(W6, row[2]);'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'    /* Нечётные члены. Тут уже просто надо доверять математике*/'},
+  {k:'cod', s:'    b0 = MUL(W1, row[1]) + MUL(W7, row[7]);'},
+  {k:'cod', s:'    b1 = MUL(W3, row[3]) + MUL(W5, row[5]);'},
+  {k:'cod', s:'    b2 = MUL(W5, row[3]) - MUL(W3, row[5]);'},
+  {k:'cod', s:'    b3 = MUL(W7, row[1]) - MUL(W1, row[7]);'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'    /* Финал. 8 строк. 8 пикселей. Математика завершена        */'},
+  {k:'cod', s:'    row[0] = (a0+b0+b1) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[1] = (a1+b2+b3) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[2] = (a2-b2+b3) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[3] = (a3+b0-b1) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[4] = (a3-b0+b1) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[5] = (a2+b2-b3) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[6] = (a1-b2-b3) >> (3-extra_shift);'},
+  {k:'cod', s:'    row[7] = (a0-b0-b1) >> (3-extra_shift);'},
+  {k:'cod', s:'}'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'/* Теперь то же самое, но вертикально. Да, два раза           */'},
+  {k:'cmt', s:'/* ИДКП = сначала по строкам, потом по столбцам. Такова жизнь*/'},
+  {k:'cod', s:'static void idctSparseColPut(uint8_t *dest, int line_size,'},
+  {k:'cod', s:'                             int16_t *col) {'},
+  {k:'cod', s:'    uint8_t *cm = ff_crop_tab + MAX_NEG_CROP;'},
+  {k:'cmt', s:'    /* ff_crop_tab — таблица обрезки. 0..255 и ни пикселем   */'},
+  {k:'cmt', s:'    /* больше. Иначе будут весёлые артефакты                  */'},
+  {k:'cod', s:'    a0 = MUL(W4,col[0]) + MUL(W2,col[16]);'},
+  {k:'cod', s:'    a1 = MUL(W4,col[0]) - MUL(W2,col[16]);'},
+  {k:'cod', s:'    b0 = MUL(W1,col[8]) + MUL(W7,col[56]);'},
+  {k:'cod', s:'    b1 = MUL(W3,col[24]) + MUL(W5,col[40]);'},
+  {k:'cod', s:'    dest[0*line_size] = cm[(a0+b0+b1+0x8000)>>16];'},
+  {k:'cod', s:'    dest[7*line_size] = cm[(a0-b0-b1+0x8000)>>16];'},
+  {k:'cod', s:'}'},
+  {k:'cod', s:''},
+  {k:'cmt', s:'/* Оценка движения: где этот блок был в предыдущем кадре?    */'},
+  {k:'cmt', s:'/* Видео — это иллюзия. Кадры почти одинаковые. Мы жульничаем*/'},
+  {k:'cod', s:'int ff_sad_c(MpegEncContext *s, uint8_t *blk1,'},
+  {k:'cod', s:'             uint8_t *blk2, int stride, int h) {'},
+  {k:'cod', s:'    int score = 0, x, y;'},
+  {k:'cmt', s:'    /* SAD: сумма разностей. Чем меньше — тем похожее блоки  */'},
+  {k:'cod', s:'    for (y = 0; y < h; y++) {'},
+  {k:'cod', s:'        for (x = 0; x < 16; x++)'},
+  {k:'cod', s:'            score += abs(blk1[x] - blk2[x]);'},
+  {k:'cod', s:'        blk1 += stride; blk2 += stride;'},
+  {k:'cod', s:'    }'},
+  {k:'cmt', s:'    /* Обычный программист: написал за день. Работает.        */'},
+  {k:'cmt', s:'    /* Беллар: переписал за неделю в ASM. Работает в 10× быстрее*/'},
+  {k:'cod', s:'    return score;'},
+  {k:'cod', s:'}'},
+];
+
+// ── RIGHT column: ASM code ───────────────────────────────────────────────────
+const ASM_CODE = [
+  {k:'cmt', s:'/* i386/idct_mmx.c — когда C уже не справляется             */'},
+  {k:'cmt', s:'/* Добро пожаловать в ассемблер. Выхода нет                  */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* Грузим 8 коэффициентов. Да, вот так сразу 8.             */'},
+  {k:'asm', s:'__asm__ volatile ('},
+  {k:'asm', s:'    "movq    (%0),  %%mm0  \n\t"  /* строка[0..3] в mm0       */'},
+  {k:'asm', s:'    "movq    8(%0), %%mm1  \n\t"  /* строка[4..7] в mm1       */'},
+  {k:'asm', s:'    "movq    %%mm0, %%mm2  \n\t"  /* копия для butterfly       */'},
+  {k:'asm', s:'    "movq    %%mm1, %%mm3  \n\t"  /* ещё одна копия            */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'    /* pmullw: 4 умножения одной командой за 1 такт           */'},
+  {k:'cmt', s:'    /* на C это был бы цикл из 4 строк. Здесь — одна          */'},
+  {k:'asm', s:'    "pmullw  (%1),   %%mm0  \n\t"  /* mm0 × W[0..3]           */'},
+  {k:'asm', s:'    "pmullw  8(%1),  %%mm1  \n\t"  /* mm1 × W[4..7]           */'},
+  {k:'asm', s:'    "pmulhw  16(%1), %%mm2  \n\t"  /* старшие 16 бит          */'},
+  {k:'asm', s:'    "pmulhw  24(%1), %%mm3  \n\t"'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'    /* paddw: складываем 4 пары. Тоже одной командой          */'},
+  {k:'asm', s:'    "paddw   %%mm2,  %%mm0  \n\t"  /* чётный butterfly        */'},
+  {k:'asm', s:'    "paddw   %%mm3,  %%mm1  \n\t"  /* нечётный butterfly      */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'    /* psraw: сдвиг вправо параллельно. >> но для 4 чисел     */'},
+  {k:'asm', s:'    "psraw   $4,     %%mm0  \n\t"'},
+  {k:'asm', s:'    "psraw   $4,     %%mm1  \n\t"'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'    /* packuswb: int16 → uint8, обрезает в 0..255 сам        */'},
+  {k:'cmt', s:'    /* если написать это на C — пришлось бы делать if         */'},
+  {k:'asm', s:'    "packuswb %%mm1, %%mm0  \n\t"  /* 8 готовых пикселей     */'},
+  {k:'asm', s:'    "movq    %%mm0,  (%2)   \n\t"  /* пишем в память          */'},
+  {k:'asm', s:'    :: "r"(row), "r"(cos_tab), "r"(dest)'},
+  {k:'asm', s:'     : "memory","mm0","mm1","mm2","mm3"'},
+  {k:'asm', s:');'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* ════════════════════════════════════════════════════════  */'},
+  {k:'cmt', s:'/* СТОП. Если вы это читаете — напишите в комментах «emms»   */'},
+  {k:'cmt', s:'/* Я серьёзно. Это пасхалка. Она работает. Проверьте         */'},
+  {k:'cmt', s:'/* ════════════════════════════════════════════════════════  */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* psadbw: SAD за 1 такт. На C — двойной цикл и 50 строк    */'},
+  {k:'asm', s:'__asm__ volatile ('},
+  {k:'asm', s:'    "movq    (%0),  %%mm0  \n\t"  /* 8 пикселей блок 1       */'},
+  {k:'asm', s:'    "movq    (%1),  %%mm1  \n\t"  /* 8 пикселей блок 2       */'},
+  {k:'asm', s:'    "psadbw  %%mm1, %%mm0  \n\t"  /* SAD — за один такт      */'},
+  {k:'asm', s:'    "paddw   %%mm0, %%mm7  \n\t"  /* накапливаем сумму       */'},
+  {k:'asm', s:'    :: "r"(blk1), "r"(blk2) : "mm0","mm1","mm7"'},
+  {k:'asm', s:');'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* Кстати эту анимацию написал Claude AI                     */'},
+  {k:'cmt', s:'/* Я сказал «сделай красиво» — он сделал. Раз пятнадцать     */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* Декарт заходит в бар. Бармен: «Вам как обычно?»          */'},
+  {k:'cmt', s:'/* Декарт: «Думаю, нет» — и испаряется.                      */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* TODO: выспаться                                           */'},
+  {k:'cmt', s:'/* TODO: поесть нормально                                    */'},
+  {k:'cmt', s:'/* TODO: выпустить ролик уже наконец                         */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* Функция на C: 30+ строк. Этот asm: 6. Быстрее в 8 раз    */'},
+  {k:'cmt', s:'/* Беллар потратил неделю на оптимизацию. Мы — 30 секунд    */'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* И не забудьте emms. Все забывают emms                     */'},
+  {k:'cmt', s:'/* Потом удивляются почему FPU ведёт себя странно            */'},
+  {k:'asm', s:'__asm__ volatile ("emms" ::: "memory");'},
+  {k:'asm', s:''},
+  {k:'cmt', s:'/* На этом коде стоит всё видео с 2001 по наши дни           */'},
+  {k:'cmt', s:'/* DivX, DVD, YouTube — этот asm был внутри                  */'},
+  {k:'cmt', s:'/* А Беллар уже писал QEMU. Не останавливался ни на секунду  */'},
+];
+
+// Precompute char offsets
+function buildOffsets(lines) {
+  let acc = 0;
+  const offs = lines.map(l => { const o = acc; acc += l.s.length + 1; return o; });
+  return { offs, total: acc };
+}
+const { offs: C_OFF, total: C_TOTAL } = buildOffsets(C_CODE);
+const { offs: A_OFF, total: A_TOTAL } = buildOffsets(ASM_CODE);
+
+// Typing speeds
+const C_SPEED   = 220;  // chars/sec
+const ASM_SPEED = 190;
+const ASM_DELAY = 1.2;  // seconds ASM waits before starting
+
+// Layout
+const FSZ = 26;    // font size px
+const LH  = 41;   // line height px
+const LX  = 80;   // left col x
+const RX  = 1350; // right col x
+
+// Visible area: code scrolls so cursor stays at 85% of screen height
+const VISIBLE_TOP    = 72;
+const VISIBLE_BOTTOM = H - 60;
+const CURSOR_Y_TARGET = VISIBLE_BOTTOM - LH * 3; // cursor rests here
+
+function drawColDivider(g) {
+  ctx.save();
+
+  // Column labels — bold, clear, colored
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'top';
+
+  // Left: C — yellow
+  ctx.font      = '700 32px "IBM Plex Mono"';
+  ctx.fillStyle = '#FFE600';
+  ctx.shadowColor = '#FFE600'; ctx.shadowBlur = 40 * g;
+  ctx.fillText('C', LX, 16);
+  ctx.font      = '300 28px "IBM Plex Mono"';
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#665500';
+  ctx.fillText('язык низкого уровня', LX + 40, 20);
+
+  // Right: ASM — cyan
+  ctx.font      = '700 32px "IBM Plex Mono"';
+  ctx.fillStyle = '#00D4FF';
+  ctx.shadowColor = '#00D4FF'; ctx.shadowBlur = 40 * g;
+  ctx.fillText('ASM', RX, 16);
+  ctx.font      = '300 28px "IBM Plex Mono"';
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#005566';
+  ctx.fillText('ассемблер', RX + 80, 20);
+
+  // Divider line
+  noGlow();
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([18, 18]);
+  ctx.beginPath();
+  ctx.moveTo(1300, 10); ctx.lineTo(1300, H - 40);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Separator line below labels
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(LX, 58); ctx.lineTo(1280, 58);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(RX, 58); ctx.lineTo(W - 40, 58);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function getScrollOffset(lines, offs, shownChars, startX) {
+  // Find cursor line
+  let cursorLi = lines.length - 1;
+  { let rem = shownChars;
+    for (let i = 0; i < lines.length; i++) {
+      const ll = lines[i].s.length + 1;
+      if (rem < ll) { cursorLi = i; break; }
+      rem -= ll;
+    }
+  }
+  // Y position cursor would be without scroll
+  const rawCursorY = VISIBLE_TOP + cursorLi * LH;
+  // How much to scroll up
+  const scrollY = Math.max(0, rawCursorY - CURSOR_Y_TARGET);
+  return scrollY;
+}
+
+function drawColumn(lines, offs, shownChars, startX, colorFn, g, t, cursorCol) {
+  // Find cursor line
+  let cursorLi = lines.length - 1;
+  { let rem = shownChars;
+    for (let i = 0; i < lines.length; i++) {
+      const ll = lines[i].s.length + 1;
+      if (rem < ll) { cursorLi = i; break; }
+      rem -= ll;
+    }
+  }
+
+  // Scroll offset — smooth follow
+  const rawCursorY = VISIBLE_TOP + cursorLi * LH;
+  const scrollY    = Math.max(0, rawCursorY - CURSOR_Y_TARGET);
+
+  ctx.save();
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'top';
+  ctx.font = `400 ${FSZ}px "IBM Plex Mono"`;
+
+  // ── Проход 1: текст БЕЗ shadowBlur — дёшево, не нагружает GPU ────────────
+  // shadowBlur на каждой строке убивает производительность (GPU перезапуск)
+  // Рисуем весь текст одним цветом без тени, потом добавляем glow отдельно
+  noGlow();
+  for (let li = 0; li < lines.length; li++) {
+    const line  = lines[li];
+    const off   = offs[li];
+    const chars = Math.max(0, Math.min(line.s.length, shownChars - off));
+    if (chars <= 0 && line.s.length > 0) continue;
+
+    const text = line.s.slice(0, chars);
+    const y    = VISIBLE_TOP + li * LH - scrollY;
+    if (y < VISIBLE_TOP - LH || y > VISIBLE_BOTTOM) continue;
+
+    const fadeTop = Math.min(1, Math.max(0, (y - VISIBLE_TOP) / (LH * 2)));
+    ctx.globalAlpha = fadeTop;
+    ctx.fillStyle   = colorFn(line.k);
+    ctx.fillText(text, startX, y);
+  }
+
+  // ── Проход 2: glow — все строки кода (cod, asm, hdr) ────────────────────────
+  // Один blur на всю колонку — GPU не перезапускается между строками
+  ctx.shadowColor = cursorCol;
+  ctx.shadowBlur  = 36 * g;
+  for (let li = 0; li < lines.length; li++) {
+    const line  = lines[li];
+    // Комментарии (cmt) без glow — только код
+    if (line.k === 'cmt' || line.k === 'blank') continue;
+    const off   = offs[li];
+    const chars = Math.max(0, Math.min(line.s.length, shownChars - off));
+    if (chars <= 0 && line.s.length > 0) continue;
+
+    const y = VISIBLE_TOP + li * LH - scrollY;
+    if (y < VISIBLE_TOP - LH || y > VISIBLE_BOTTOM) continue;
+
+    const fadeTop = Math.min(1, Math.max(0, (y - VISIBLE_TOP) / (LH * 2)));
+    ctx.globalAlpha = fadeTop;
+    ctx.fillStyle   = colorFn(line.k);
+    ctx.fillText(line.s.slice(0, chars), startX, y);
+  }
+
+  // ── Проход 3: cursor ───────────────────────────────────────────────────────
+  {
+    const line  = lines[cursorLi];
+    const off   = offs[cursorLi];
+    const chars = Math.max(0, Math.min(line.s.length, shownChars - off));
+    if (chars < line.s.length) {
+      const y  = VISIBLE_TOP + cursorLi * LH - scrollY;
+      const tw = ctx.measureText(line.s.slice(0, chars)).width;
+      if (Math.floor(t * 7) % 2 === 0) {
+        ctx.shadowColor = cursorCol; ctx.shadowBlur = 40 * g;
+        ctx.fillStyle   = cursorCol; ctx.globalAlpha = 1;
+        ctx.fillRect(startX + tw + 2, y + 3, 2, FSZ - 5);
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+// C = yellow, ASM = cyan
+function cColor(k) {
+  switch(k) {
+    case 'cmt':   return '#B8940A';  // приглушённый жёлтый для комментов
+    case 'hdr':   return '#AAAAAA';
+    default:      return '#FFE600';  // яркий жёлтый для кода
+  }
+}
+function aColor(k) {
+  switch(k) {
+    case 'cmt':   return '#008EAA';  // dim cyan for comments
+    case 'hdr':   return '#AAAAAA';
+    case 'asm':   return '#00D4FF';  // bright cyan for asm
+    default:      return '#00D4FF';
+  }
+}
+
+function drawScene3(beat, beatPhase, t, t0) {
+  const g       = glowPulse(beatPhase);
+  const elapsed = Math.max(0, t - t0);
+
+  const cShown = Math.min(C_TOTAL, elapsed * C_SPEED);
+  const aShown = Math.min(A_TOTAL, Math.max(0, elapsed - ASM_DELAY) * ASM_SPEED);
+
+  drawColDivider(g);
+  drawColumn(C_CODE,   C_OFF, cShown, LX, cColor, g, t, '#FFE600');
+  drawColumn(ASM_CODE, A_OFF, aShown, RX, aColor, g, t, '#00D4FF');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VIGNETTE
+// ─────────────────────────────────────────────────────────────────────────────
+function vignette() {
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.28, W/2, H/2, H*0.82);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOW FLASH — только shadow, текст невидим
+// fillStyle = 'rgba(0,0,0,0)' → текст прозрачный, но shadow рисуется
+// Несколько слоёв с нарастающим blur складываются через 'lighter'
+// ─────────────────────────────────────────────────────────────────────────────
+function drawGlowFlash(intensity, bt, bp, t) {
+  // Слои blur: мелкий даёт яркость у текста, крупный — широкий ореол
+  const layers = [
+    [40,  0.7 ],
+    [100, 0.5 ],
+    [180, 0.3 ],
+    [280, 0.15],
+  ];
+
+  // Вспомогательная функция: рисует текст с НУЛЕВЫМ fill, только shadow
+  function shadowOnly(drawFn, color, blur, alpha) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha  = alpha;
+    ctx.shadowColor  = color;
+    ctx.shadowBlur   = blur;
+    ctx.fillStyle    = 'rgba(0,0,0,0)'; // текст невидим — только его тень
+    drawFn();
+    ctx.restore();
+  }
+
+  if (bt < 7.5) {
+    const cA = Math.min(1, bt / 3);
+    const aA = Math.min(1, Math.max(0, (bt - 4.5) / 3));
+
+    for (const [blur, la] of layers) {
+      if (cA > 0) {
+        shadowOnly(() => {
+          ctx.font = '700 580px "Josefin Sans"';
+          ctx.textBaseline = 'alphabetic';
+          ctx.fillText('C', 160, 920);
+        }, '#FFE600', blur * intensity, cA * la * intensity);
+      }
+      if (aA > 0) {
+        shadowOnly(() => {
+          ctx.font = '700 280px "Josefin Sans"';
+          ctx.textBaseline = 'alphabetic';
+          ctx.fillText('ASM', 1380, 760);
+        }, '#00D4FF', blur * intensity, aA * la * intensity);
+      }
+    }
+
+  } else {
+    if (!s3t0) return;
+    const elapsed = Math.max(0, t - s3t0);
+    const cShown  = Math.min(C_TOTAL, elapsed * C_SPEED);
+    const aShown  = Math.min(A_TOTAL, Math.max(0, elapsed - ASM_DELAY) * ASM_SPEED);
+
+    // Scroll offsets
+    let cCursorLi = C_CODE.length - 1;
+    { let r = cShown; for (let i = 0; i < C_CODE.length; i++) {
+      if (r < C_CODE[i].s.length + 1) { cCursorLi = i; break; }
+      r -= C_CODE[i].s.length + 1; } }
+    const cScrollY = Math.max(0, (VISIBLE_TOP + cCursorLi * LH) - CURSOR_Y_TARGET);
+
+    let aCursorLi = ASM_CODE.length - 1;
+    { let r = aShown; for (let i = 0; i < ASM_CODE.length; i++) {
+      if (r < ASM_CODE[i].s.length + 1) { aCursorLi = i; break; }
+      r -= ASM_CODE[i].s.length + 1; } }
+    const aScrollY = Math.max(0, (VISIBLE_TOP + aCursorLi * LH) - CURSOR_Y_TARGET);
+
+    for (const [blur, la] of layers) {
+      const blurVal = blur * intensity;
+      const alphaVal = la * intensity;
+
+      // Жёлтый — C колонка
+      shadowOnly(() => {
+        ctx.font = `400 ${FSZ}px "IBM Plex Mono"`;
+        ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        let rem = cShown;
+        for (let li = 0; li < C_CODE.length; li++) {
+          const line = C_CODE[li];
+          const chars = Math.max(0, Math.min(line.s.length, rem));
+          rem -= line.s.length + 1;
+          if (chars <= 0 || !line.s.length) continue;
+          const y = VISIBLE_TOP + li * LH - cScrollY;
+          if (y < VISIBLE_TOP - LH || y > VISIBLE_BOTTOM) continue;
+          ctx.fillText(line.s.slice(0, chars), LX, y);
+        }
+      }, '#FFE600', blurVal, alphaVal);
+
+      // Голубой — ASM колонка
+      shadowOnly(() => {
+        ctx.font = `400 ${FSZ}px "IBM Plex Mono"`;
+        ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        let rem = aShown;
+        for (let li = 0; li < ASM_CODE.length; li++) {
+          const line = ASM_CODE[li];
+          const chars = Math.max(0, Math.min(line.s.length, rem));
+          rem -= line.s.length + 1;
+          if (chars <= 0 || !line.s.length) continue;
+          const y = VISIBLE_TOP + li * LH - aScrollY;
+          if (y < VISIBLE_TOP - LH || y > VISIBLE_BOTTOM) continue;
+          ctx.fillText(line.s.slice(0, chars), RX, y);
+        }
+      }, '#00D4FF', blurVal, alphaVal);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOOP
+// ─────────────────────────────────────────────────────────────────────────────
+let t0 = null, s3t0 = null, running = false, raf = null;
+
+function render(ts) {
+  if (!running) return;
+  if (!t0) t0 = ts;
+  BEAT = 60 / BPM; // пересчитываем на случай если BPM изменился
+  const t  = (ts - t0) / 1000;
+  const bt = t / BEAT;         // total beats
+  const bp = bt % 1;           // beat phase 0..1
+
+  // Grain strength pulses with beat
+  const gs = 0.35 + 0.35 * Math.sin(bp * Math.PI * 2 - Math.PI * 0.5);
+  updateGrain(Math.max(0, gs));
+
+  drawBG();
+
+  if (bt < 9) {
+    drawScene1(bt, bp);
+  } else if (bt < 11) {
+    // Scene 1 fades OUT (beats 9→11), scene 2 not yet visible
+    const fo = Math.max(0, 1 - (bt - 9) / 2);
+    ctx.save(); ctx.globalAlpha = fo; drawScene1(9, bp); ctx.restore();
+  } else if (bt < 24) {
+    // Scene 2 fades IN starting beat 11, scene 1 fully gone
+    drawScene2(bt, bp, t);
+  } else {
+    if (!s3t0) s3t0 = t;
+    drawScene3(bt, bp, t, s3t0);
+  }
+
+  // Grain on glow halos only: 'overlay' blend mode
+  // Overlay formula: if grain < 0.5 → darkens; if > 0.5 → lightens
+  // On black background (0,0,0): overlay always gives 0 → no effect on dark areas
+  // On bright glow halos: grain adds visible texture
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.35;
+  ctx.drawImage(gCanvas, 0, 0);
+  ctx.restore();
+
+  vignette();
+
+  // Glow-вспышка каждые 8 тактов
+  // На downbeat рисуем поверх весь текущий кадр ещё раз с огромным blur
+  // через screen blend — пик мгновенный, спад экспоненциальный за 4 такта
+  {
+    const beatInCycle = bt % 8;
+    if (beatInCycle < 0.05) {
+      flashIntensity = 1.0;
+    } else if (beatInCycle < 4) {
+      flashIntensity = Math.pow(1 - beatInCycle / 4, 2.0);
+    } else {
+      flashIntensity = 0;
+    }
+
+    if (flashIntensity > 0.008 && bt < 24) {
+      // Flash только на сценах 1 и 2 — на коде слишком дорого (лагает)
+      drawGlowFlash(flashIntensity, bt, bp, t);
+    }
+  }
+
+  raf = requestAnimationFrame(render);
+}
+
+function restart() {
+  if (raf) cancelAnimationFrame(raf);
+  t0 = null; s3t0 = null; running = true;
+  raf = requestAnimationFrame(render);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'r' || e.key === 'к' || e.key === 'К') restart();
+});
+
+// Idle
+ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
+ctx.font = '300 52px "IBM Plex Mono"';
+ctx.fillStyle = '#FFE600';
+ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+ctx.fillText('R / К — запустить', W/2, H/2);
+</script>
+<div id="bpm-panel">
+  <label>TEMPO</label>
+  <div id="bpm-display">117 BPM</div>
+  <input id="bpm-slider" type="range" min="60" max="200" value="117" step="1">
+  <div id="bpm-hint">Tab — скрыть</div>
+</div>
+<script>
+  // BPM panel — скрытый, вызывается Tab
+  const panel   = document.getElementById('bpm-panel');
+  const slider  = document.getElementById('bpm-slider');
+  const display = document.getElementById('bpm-display');
+
+  slider.addEventListener('input', () => {
+    BPM = parseInt(slider.value);
+    display.textContent = BPM + ' BPM';
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      panel.classList.toggle('visible');
+    }
+  });
+</script>
+</body>
+</html>
