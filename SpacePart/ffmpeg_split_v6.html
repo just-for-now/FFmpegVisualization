@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{width:2560px;height:1440px;overflow:hidden;background:#000;cursor:none;font-family:'DejaVu Sans',Arial,sans-serif;}
+html{width:100%;height:100%;overflow:hidden;background:#000;}
+body{width:2560px;height:1440px;overflow:hidden;background:#000;cursor:none;font-family:'DejaVu Sans',Arial,sans-serif;position:absolute;transform-origin:0 0;}
 #stage{width:2560px;height:1440px;position:relative;overflow:hidden;}
 
 /* ── TITLE CARDS ── */
@@ -920,6 +921,13 @@ function buildLibav(){
 
 document.addEventListener('keydown',e=>{'rRкК'.includes(e.key)&&run();});
 run();
+function fit(){
+  var s=Math.min(window.innerWidth/2560,window.innerHeight/1440);
+  var x=(window.innerWidth-2560*s)/2;
+  var y=(window.innerHeight-1440*s)/2;
+  document.body.style.transform='translate('+x+'px,'+y+'px) scale('+s+')';
+}
+fit();window.addEventListener('resize',fit);
 </script>
 </body>
 </html>

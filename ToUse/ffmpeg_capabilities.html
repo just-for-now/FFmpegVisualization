@@ -8,6 +8,12 @@
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+  }
   body {
     background: #000;
     color: #fff;
@@ -15,7 +21,8 @@
     overflow: hidden;
     width: 2560px;
     height: 1440px;
-    position: relative;
+    position: absolute;
+    transform-origin: 0 0;
   }
 
   canvas#bg-noise {
@@ -993,6 +1000,13 @@ function initStreamBars() {
 // ================================================================
 scheduleAmbientGlitch();
 restart();
+function fit(){
+  var s=Math.min(window.innerWidth/2560,window.innerHeight/1440);
+  var x=(window.innerWidth-2560*s)/2;
+  var y=(window.innerHeight-1440*s)/2;
+  document.body.style.transform='translate('+x+'px,'+y+'px) scale('+s+')';
+}
+fit();window.addEventListener('resize',fit);
 </script>
 </body>
 </html>

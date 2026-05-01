@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Barlow+Condensed:wght@300;400;700;900&display=swap" rel="stylesheet">
-<style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;overflow:hidden;width:2560px;height:1440px;}canvas{display:block;}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box;}html{width:100%;height:100%;overflow:hidden;}body{background:#000;overflow:hidden;}canvas{position:absolute;top:0;left:0;}</style>
 </head>
 <body>
 <canvas id="c" width="2560" height="1440"></canvas>
@@ -12,6 +12,12 @@
 const CV = document.getElementById('c');
 const X  = CV.getContext('2d');
 const W = 2560, H = 1440;
+function fit(){
+  var s=Math.min(innerWidth/W,innerHeight/H);
+  CV.style.width=W*s+'px';CV.style.height=H*s+'px';
+  CV.style.left=(innerWidth-W*s)/2+'px';CV.style.top=(innerHeight-H*s)/2+'px';
+}
+fit();window.addEventListener('resize',fit);
 const MONO    = '"JetBrains Mono", monospace';
 const DISPLAY = '"Barlow Condensed", sans-serif';
 

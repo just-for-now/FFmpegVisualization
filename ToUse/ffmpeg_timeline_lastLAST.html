@@ -6,7 +6,8 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#08080a;width:2560px;height:1440px;overflow:hidden;user-select:none}
+html{width:100%;height:100%;overflow:hidden;background:#08080a;}
+body{background:#08080a;width:2560px;height:1440px;overflow:hidden;user-select:none;position:absolute;transform-origin:0 0;}
 canvas{position:absolute;top:0;left:0;width:2560px;height:1440px}
 #ui{position:absolute;top:0;left:0;width:100%;height:100%;z-index:20;pointer-events:none;opacity:0;transition:opacity .45s}
 #ui.visible{opacity:1}
@@ -513,6 +514,13 @@ function draw(now){
 }
 
 mkG();requestAnimationFrame(draw);
+function fit(){
+  var s=Math.min(window.innerWidth/2560,window.innerHeight/1440);
+  var x=(window.innerWidth-2560*s)/2;
+  var y=(window.innerHeight-1440*s)/2;
+  document.body.style.transform='translate('+x+'px,'+y+'px) scale('+s+')';
+}
+fit();window.addEventListener('resize',fit);
 </script>
 </body>
 </html>
