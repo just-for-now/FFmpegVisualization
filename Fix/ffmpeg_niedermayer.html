@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Barlow+Condensed:wght@300;400;700;900&display=swap" rel="stylesheet">
+<style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;overflow:hidden;width:2560px;height:1440px;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const CV = document.getElementById('c');
+const X = CV.getContext('2d');
+const W = 2560, H = 1440;
+const MONO    = '"JetBrains Mono", monospace';
+const DISPLAY = '"Barlow Condensed", sans-serif';
+
+const K = {
+  bg:    '#000000',
+  blue:  '#00D4FF',
+  bDim:  '#005566',
+  bMid:  '#007a99',
+  bGlow: 'rgba(0,212,255,0.10)',
+  white: '#F2F2F2',
+  add:   '#00D4FF',
+  del:   '#ff4455',
+  addBg: 'rgba(0,212,255,0.055)',
+  delBg: 'rgba(255,68,85,0.055)',
+  ctx:   '#b8b8b8',
+  hdr:   '#4a7a8a',
+  kw:    '#00D4FF',
+  type_: '#f0f0f0',
+  fn_:   '#d8d8d8',
+  str_:  '#888888',
+  cmt:   '#484848',
+  num_:  '#00D4FF',
+  plain: '#b8b8b8',
+  lnum:  '#303030',
+  cur:   '#060e10',
+};
+
+// ─── PATCHES ─────────────────────────────────────────────────────────────────
+// Long realistic FFmpeg diffs, Niedermayer era 2004-2011
+
+const CHUNKS = [
+{
+  file: 'libavcodec/h264.c',
+  date: new Date(2004, 2, 8),
+  desc: 'H.264: CABAC decode refactor',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/h264.c b/libavcodec/h264.c'},
+    {t:'ctx', s:'index 3fa21b9..8de04c1 100644'},
+    {t:'ctx', s:'--- a/libavcodec/h264.c'},
+    {t:'ctx', s:'+++ b/libavcodec/h264.c'},
+    {t:'ctx', s:'@@ -2187,42 +2187,89 @@ static int decode_cabac_mb_type(H264Context *h){'},
+    {t:'ctx', s:'     MpegEncContext * const s = &h->s;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if( h->slice_type == FF_I_TYPE ) {'},
+    {t:'del', s:'-        const int mb_type_ctx_offset = 3;'},
+    {t:'del', s:'-        const int ctx = 0;'},
+    {t:'del', s:'-        if( get_cabac( CC, &h->cabac_state[85 + ctx] ) == 0 )'},
+    {t:'del', s:'-            return 0;   /* SI4x4 */'},
+    {t:'del', s:'-        if( get_cabac( CC, &h->cabac_state[85 + ctx] ) == 0 )'},
+    {t:'del', s:'-            return 1;   /* SI16x16 */'},
+    {t:'del', s:'-        return 2;'},
+    {t:'add', s:'+        static const int mb_type_ctx[4] = {85,85,85,85};'},
+    {t:'add', s:'+        int ctx = 0;'},
+    {t:'add', s:'+        int mb_type = 0;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+        if( !get_cabac( CC, &h->cabac_state[mb_type_ctx[ctx]] ) )'},
+    {t:'add', s:'+            return 0; /* I_NxN */'},
+    {t:'add', s:'+        mb_type++;'},
+    {t:'add', s:'+        ctx = 1;'},
+    {t:'add', s:'+        if( !get_cabac( CC, &h->cabac_state[mb_type_ctx[ctx]] ) )'},
+    {t:'add', s:'+            return mb_type; /* I_16x16_0_0_0 */'},
+    {t:'add', s:'+        mb_type += 12;'},
+    {t:'add', s:'+        if( get_cabac( CC, &h->cabac_state[mb_type_ctx[2]] ) )'},
+    {t:'add', s:'+            mb_type += 4;'},
+    {t:'add', s:'+        if( get_cabac( CC, &h->cabac_state[mb_type_ctx[2]] ) )'},
+    {t:'add', s:'+            mb_type += 8;'},
+    {t:'add', s:'+        /* cbp: luma */'},
+    {t:'add', s:'+        if( get_cabac( CC, &h->cabac_state[mb_type_ctx[3]] ) )'},
+    {t:'add', s:'+            mb_type += 16;'},
+    {t:'add', s:'+        if( get_cabac( CC, &h->cabac_state[mb_type_ctx[3]] ) ) {'},
+    {t:'add', s:'+            if( get_cabac( CC, &h->cabac_state[mb_type_ctx[3]] ) )'},
+    {t:'add', s:'+                mb_type += 32;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        /* cbp: chroma */'},
+    {t:'add', s:'+        if( get_cabac( CC, &h->cabac_state[mb_type_ctx[3]] ) ) {'},
+    {t:'add', s:'+            mb_type += 1;'},
+    {t:'add', s:'+            if( get_cabac( CC, &h->cabac_state[mb_type_ctx[3]] ) )'},
+    {t:'add', s:'+                mb_type += 1;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        /* Intra prediction mode */'},
+    {t:'add', s:'+        mb_type += 3 * get_cabac( CC, &h->cabac_state[mb_type_ctx[3]] );'},
+    {t:'add', s:'+        return mb_type;'},
+    {t:'ctx', s:'     } else if( h->slice_type == FF_P_TYPE ) {'},
+    {t:'ctx', s:'         if( get_cabac( CC, &h->cabac_state[14] ) == 0 ) {'},
+    {t:'ctx', s:'             /* P_L0_16x16 or P8x8 */'},
+    {t:'del', s:'-            if( get_cabac( CC, &h->cabac_state[15] ) == 0 )'},
+    {t:'del', s:'-                return 0;  /* P_L0_16x16 */'},
+    {t:'del', s:'-            return 3;      /* P_8x8 */'},
+    {t:'add', s:'+            if( get_cabac( CC, &h->cabac_state[15] ) == 0 ) {'},
+    {t:'add', s:'+                /* P_L0_16x16 */'},
+    {t:'add', s:'+                return 0;'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+            if( get_cabac( CC, &h->cabac_state[15] ) == 0 ) {'},
+    {t:'add', s:'+                /* P_8x8 */'},
+    {t:'add', s:'+                return 3;'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+            /* P_L0_L0_16x8 or P_L0_L0_8x16 */'},
+    {t:'add', s:'+            return 4 + get_cabac( CC, &h->cabac_state[15] );'},
+    {t:'ctx', s:'         } else {'},
+    {t:'ctx', s:'             /* P_L0_16x8 or P_L0_8x16 */'},
+    {t:'ctx', s:'             int val = get_cabac( CC, &h->cabac_state[17] );'},
+    {t:'ctx', s:'             return 1 + val;'},
+    {t:'ctx', s:'         }'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:'     return -1;'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' static int decode_cabac_mb_skip( H264Context *h, int mb_x, int mb_y ) {'},
+    {t:'ctx', s:'     MpegEncContext * const s = &h->s;'},
+    {t:'ctx', s:'     int mba_xy, mbb_xy;'},
+    {t:'del', s:'-    int ctx = 0;'},
+    {t:'add', s:'+    int ctx = 0 + (h->slice_type == FF_B_TYPE ? 13 : 0);'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     mba_xy = h->mb_xy - 1;'},
+    {t:'ctx', s:'     mbb_xy = h->mb_xy - h->mb_stride;'},
+    {t:'del', s:'-    if( mb_x > 0 && !IS_SKIP( s->current_picture.mb_type[mba_xy] ) )'},
+    {t:'del', s:'-        ctx++;'},
+    {t:'del', s:'-    if( mb_y > 0 && !IS_SKIP( s->current_picture.mb_type[mbb_xy] ) )'},
+    {t:'del', s:'-        ctx++;'},
+    {t:'add', s:'+    if( mb_x > 0 && !IS_SKIP( s->current_picture.mb_type[mba_xy] ) )'},
+    {t:'add', s:'+        ctx += 1;'},
+    {t:'add', s:'+    if( mb_y > 0 && !IS_SKIP( s->current_picture.mb_type[mbb_xy] ) )'},
+    {t:'add', s:'+        ctx += 1;'},
+    {t:'ctx', s:'     return get_cabac( CC, &h->cabac_state[11 + ctx] );'},
+    {t:'ctx', s:' }'},
+  ]
+},
+{
+  file: 'libavcodec/mpegvideo_enc.c',
+  date: new Date(2004, 8, 21),
+  desc: 'ratecontrol: rewrite VBV model',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/ratecontrol.c b/libavcodec/ratecontrol.c'},
+    {t:'ctx', s:'--- a/libavcodec/ratecontrol.c'},
+    {t:'ctx', s:'+++ b/libavcodec/ratecontrol.c'},
+    {t:'ctx', s:'@@ -311,55 +311,108 @@ static double get_qscale(MpegEncContext *s,'},
+    {t:'ctx', s:'                          RateControlEntry *rce,'},
+    {t:'ctx', s:'                          double rate_factor, int frame_num)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     RateControlContext *rcc= &s->rc_context;'},
+    {t:'ctx', s:'     AVCodecContext *a= s->avctx;'},
+    {t:'ctx', s:'     double q, bits;'},
+    {t:'add', s:'+    double qmin, qmax;'},
+    {t:'add', s:'+    double fps = (double)a->time_base.den / a->time_base.num;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     bits = qp2bits(rce, rate_factor);'},
+    {t:'del', s:'-    if(bits<0.0) bits=0.0;'},
+    {t:'del', s:'-    if(bits>(double)a->bit_rate * a->time_base.num / a->time_base.den)'},
+    {t:'del', s:'-        bits=(double)a->bit_rate * a->time_base.num / a->time_base.den;'},
+    {t:'add', s:'+    if(bits < 0.0) bits = 0.0;'},
+    {t:'add', s:'+    if(bits > a->bit_rate / fps)'},
+    {t:'add', s:'+        bits = a->bit_rate / fps;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     q = bits2qp(rce, bits);'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    if(q<a->qmin) q= a->qmin;'},
+    {t:'del', s:'-    if(q>a->qmax) q= a->qmax;'},
+    {t:'add', s:'+    /* VBV constraint: ensure buffer does not overflow */'},
+    {t:'add', s:'+    if(rcc->buffer_index + bits > a->rc_buffer_size) {'},
+    {t:'add', s:'+        /* buffer would overflow: raise qscale to reduce bits */'},
+    {t:'add', s:'+        double overflow = rcc->buffer_index + bits - a->rc_buffer_size;'},
+    {t:'add', s:'+        bits -= overflow;'},
+    {t:'add', s:'+        if(bits < 0.0) bits = 0.0;'},
+    {t:'add', s:'+        q = bits2qp(rce, bits);'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /* VBV constraint: buffer must not underflow below minimum */'},
+    {t:'add', s:'+    if(rcc->buffer_index + bits < a->rc_buffer_size * a->rc_initial_buffer_occupancy / 10000.0) {'},
+    {t:'add', s:'+        double underflow = a->rc_buffer_size * a->rc_initial_buffer_occupancy / 10000.0'},
+    {t:'add', s:'+                        - rcc->buffer_index - bits;'},
+    {t:'add', s:'+        bits += underflow;'},
+    {t:'add', s:'+        q = bits2qp(rce, bits);'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    qmin = a->qmin;'},
+    {t:'add', s:'+    qmax = a->qmax;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /* scene-cut detection: allow lower qscale after cut */'},
+    {t:'add', s:'+    if(rce->new_pict_type == FF_I_TYPE && rcc->i_cplx_sum[0] > 0.0) {'},
+    {t:'add', s:'+        double i_boost = FFMIN(rcc->i_cplx_sum[0]'},
+    {t:'add', s:'+                               / (rcc->i_cplx_sum[0] + rcc->p_cplx_sum[0]),'},
+    {t:'add', s:'+                               0.15);'},
+    {t:'add', s:'+        qmin = FFMAX(qmin - i_boost * (qmax - qmin), 1);'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    if(q < qmin) q = qmin;'},
+    {t:'add', s:'+    if(q > qmax) q = qmax;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     return q;'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' static double get_diff_limited_q(MpegEncContext *s, RateControlEntry *rce, double q)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     RateControlContext *rcc= &s->rc_context;'},
+    {t:'ctx', s:'     AVCodecContext *a= s->avctx;'},
+    {t:'del', s:'-    const double last_p_q    = rcc->last_qscale_for[FF_P_TYPE];'},
+    {t:'del', s:'-    const double last_non_b_q= rcc->last_qscale_for[FF_P_TYPE];'},
+    {t:'add', s:'+    const double last_p_q     = rcc->last_qscale_for[FF_P_TYPE];'},
+    {t:'add', s:'+    const double last_non_b_q = rcc->last_qscale_for[FF_P_TYPE];'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if     (rce->new_pict_type==FF_I_TYPE && fabs(a->i_quant_factor)>0.0001)'},
+    {t:'ctx', s:'         q= last_p_q*fabs(a->i_quant_factor) + a->i_quant_offset;'},
+    {t:'ctx', s:'     else if(rce->new_pict_type==FF_B_TYPE && a->b_quant_factor>0.0001)'},
+    {t:'ctx', s:'         q= last_non_b_q*a->b_quant_factor + a->b_quant_offset;'},
+    {t:'del', s:'-    if(q<1) q=1;'},
+    {t:'add', s:'+    if(q < 1) q = 1;'},
+    {t:'add', s:'+    if(q > FF_LAMBDA_MAX / FF_QP2LAMBDA) q = FF_LAMBDA_MAX / FF_QP2LAMBDA;'},
+    {t:'ctx', s:'     return q;'},
+    {t:'ctx', s:' }'},
+  ]
+},
+{
+  file: 'libavcodec/vc1dec.c',
+  date: new Date(2005, 3, 14),
+  desc: 'VC-1: interlaced field picture',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/vc1dec.c b/libavcodec/vc1dec.c'},
+    {t:'ctx', s:'--- a/libavcodec/vc1dec.c'},
+    {t:'ctx', s:'+++ b/libavcodec/vc1dec.c'},
+    {t:'ctx', s:'@@ -1203,31 +1203,97 @@ static int vc1_decode_i_block(VC1Context *v,'},
+    {t:'ctx', s:'                              DCTELEM *block, int n,'},
+    {t:'ctx', s:'                              int coded, int codingset)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     GetBitContext *gb = &v->s.gb;'},
+    {t:'ctx', s:'     MpegEncContext *s = &v->s;'},
+    {t:'ctx', s:'     int dc_pred_dir = 0; /* Direction of the DC prediction used */'},
+    {t:'ctx', s:'     int run_diff, i;'},
+    {t:'ctx', s:'     int16_t *dc_val;'},
+    {t:'ctx', s:'     int16_t *ac_val, *ac_val2;'},
+    {t:'ctx', s:'     int dcdiff;'},
+    {t:'add', s:'+    int a_avail = v->a_avail, c_avail = v->c_avail;'},
+    {t:'add', s:'+    int use_pred = s->ac_pred;'},
+    {t:'add', s:'+    uint8_t *zz_table;'},
+    {t:'add', s:'+    int scale, k;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     /* Get DC differential */'},
+    {t:'ctx', s:'     if (n < 4) {'},
+    {t:'ctx', s:'         dcdiff = get_vlc2(&s->gb, ff_msmp4_dc_luma_vlc[s->dc_table_index].table,'},
+    {t:'ctx', s:'                           DC_VLC_BITS, 3);'},
+    {t:'ctx', s:'     } else {'},
+    {t:'ctx', s:'         dcdiff = get_vlc2(&s->gb, ff_msmp4_dc_chroma_vlc[s->dc_table_index].table,'},
+    {t:'ctx', s:'                           DC_VLC_BITS, 3);'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:'     if (dcdiff < 0) {'},
+    {t:'del', s:'-        av_log(s->avctx, AV_LOG_ERROR, "Illegal DC VLC\\n");'},
+    {t:'del', s:'-        return -1;'},
+    {t:'add', s:'+        av_log(s->avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "Illegal DC VLC code at MB %i %i\\n", s->mb_x, s->mb_y);'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:'     if (dcdiff) {'},
+    {t:'ctx', s:'         if (dcdiff == 119 /* ESC */) {'},
+    {t:'ctx', s:'             /* TODO: Handle ESC, I do not know how yet */'},
+    {t:'del', s:'-            av_log(s->avctx, AV_LOG_ERROR, "DC ESC: Not handled\\n");'},
+    {t:'del', s:'-            return -1;'},
+    {t:'add', s:'+            /* Escape: next 8 bits are the absolute DC value */'},
+    {t:'add', s:'+            dcdiff = get_bits(gb, 8);'},
+    {t:'add', s:'+            if (v->pq < 9 && v->overlap) {'},
+    {t:'add', s:'+                if(get_bits1(gb))'},
+    {t:'add', s:'+                    dcdiff = -dcdiff;'},
+    {t:'add', s:'+            } else {'},
+    {t:'add', s:'+                if(dcdiff & 0x80)'},
+    {t:'add', s:'+                    dcdiff -= 0x100;'},
+    {t:'add', s:'+            }'},
+    {t:'ctx', s:'         } else {'},
+    {t:'ctx', s:'             if (dcdiff & 0x400) {'},
+    {t:'ctx', s:'                 dcdiff |= -(dcdiff & 0x400);'},
+    {t:'ctx', s:'             }'},
+    {t:'ctx', s:'         }'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     /* Prediction */'},
+    {t:'del', s:'-    dcdiff += vc1_i_pred_dc(&v->s, v->overlap, n, &dc_val, &dc_pred_dir);'},
+    {t:'add', s:'+    dcdiff += vc1_pred_dc(&v->s, v->overlap, n,'},
+    {t:'add', s:'+                          &dc_val, &dc_pred_dir,'},
+    {t:'add', s:'+                          a_avail, c_avail);'},
+    {t:'ctx', s:'     *dc_val = dcdiff;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     /* Store the quantized DC coeff, used for prediction */'},
+    {t:'del', s:'-    if (n < 4) {'},
+    {t:'del', s:'-        block[0] = dcdiff * s->y_dc_scale;'},
+    {t:'del', s:'-    } else {'},
+    {t:'del', s:'-        block[0] = dcdiff * s->c_dc_scale;'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    block[0] = dcdiff * (n < 4 ? s->y_dc_scale : s->c_dc_scale);'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /* AC Prediction */'},
+    {t:'add', s:'+    if(use_pred) {'},
+    {t:'add', s:'+        /* scale predictors if needed */'},
+    {t:'add', s:'+        int q1 = s->current_picture.qscale_table[s->mb_x + s->mb_y * s->mb_stride];'},
+    {t:'add', s:'+        if(dc_pred_dir) { /* left */'},
+    {t:'add', s:'+            ac_val  = s->ac_val[0][s->block_index[n]];'},
+    {t:'add', s:'+            ac_val2 = ac_val - 16;'},
+    {t:'add', s:'+            if(c_avail && q1 != q2) {'},
+    {t:'add', s:'+                q2 = s->current_picture.qscale_table[s->mb_x - 1'},
+    {t:'add', s:'+                     + s->mb_y * s->mb_stride];'},
+    {t:'add', s:'+                scale = q2 * 2 + ((q2 == v->pq) ? v->halfpq : 0);'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        } else { /* top */'},
+    {t:'add', s:'+            ac_val  = s->ac_val[0][s->block_index[n]];'},
+    {t:'add', s:'+            ac_val2 = ac_val - 16 * s->block_wrap[n];'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        for(k = 1; k < 8; k++) {'},
+    {t:'add', s:'+            if(scale == q1 * 2 + ((q1 == v->pq) ? v->halfpq : 0))'},
+    {t:'add', s:'+                block[zz_table[k]] += ac_val2[k];'},
+    {t:'add', s:'+            else'},
+    {t:'add', s:'+                block[zz_table[k]] += (ac_val2[k] * scale'},
+    {t:'add', s:'+                    + (scale > 0 ? (q1 * 2) / 2 : -(q1 * 2) / 2))'},
+    {t:'add', s:'+                    / (q1 * 2 + ((q1 == v->pq) ? v->halfpq : 0));'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:'     return 0;'},
+    {t:'ctx', s:' }'},
+  ]
+},
+{
+  file: 'libavcodec/h264_cavlc.c',
+  date: new Date(2006, 0, 30),
+  desc: 'H.264: CAVLC residual, fix chroma',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/h264.c b/libavcodec/h264.c'},
+    {t:'ctx', s:'--- a/libavcodec/h264.c'},
+    {t:'ctx', s:'+++ b/libavcodec/h264.c'},
+    {t:'ctx', s:'@@ -1563,7 +1563,9 @@ static int decode_residual(H264Context *h, GetBitContext *gb,'},
+    {t:'ctx', s:'                           int *dc_val, int n, const uint8_t *scantable,'},
+    {t:'ctx', s:'                           const uint32_t *qmul, int max_coeff)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     static const int coeff_token_table_index[17]='},
+    {t:'ctx', s:'         {0,0,1,1,2,2,2,2,3,3,3,3,3,3,3,3,3};'},
+    {t:'ctx', s:'     int level[16];'},
+    {t:'ctx', s:'     int zeros_left, coeff_num, coeff_token, total_coeff, i,j, trailing_ones;'},
+    {t:'ctx', s:'     int level_code, mask;'},
+    {t:'add', s:'+    int8_t *top_samples_available, *left_samples_available;'},
+    {t:'add', s:'+    int nC;'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    if(max_coeff <= 8){'},
+    {t:'del', s:'-        int nC= pred_non_zero_count(h, n);'},
+    {t:'del', s:'-        coeff_token= get_vlc2(gb, (h->coeff_token_vlc+0)->table, COEFF_TOKEN_VLC_BITS, 2);'},
+    {t:'del', s:'-    } else if(max_coeff == 16){'},
+    {t:'del', s:'-        int nC= pred_non_zero_count(h, n);'},
+    {t:'del', s:'-        coeff_token= get_vlc2(gb, (h->coeff_token_vlc+3)->table, COEFF_TOKEN_VLC_BITS, 2);'},
+    {t:'del', s:'-    } else {'},
+    {t:'del', s:'-        coeff_token= get_vlc2(gb, (h->coeff_token_vlc+3)->table, COEFF_TOKEN_VLC_BITS, 2);'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    if(max_coeff <= 8) {'},
+    {t:'add', s:'+        if(n >= LUMA_DC_BLOCK_INDEX){'},
+    {t:'add', s:'+            nC = 0;'},
+    {t:'add', s:'+        } else {'},
+    {t:'add', s:'+            nC = pred_non_zero_count(h, n);'},
+    {t:'add', s:'+            if(nC < 0)'},
+    {t:'add', s:'+                return -1;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        coeff_token = get_vlc2(gb, (h->coeff_token_vlc + coeff_token_table_index[nC])->table,'},
+    {t:'add', s:'+                               COEFF_TOKEN_VLC_BITS, 2);'},
+    {t:'add', s:'+    } else if(max_coeff == 16) {'},
+    {t:'add', s:'+        nC = pred_non_zero_count(h, n);'},
+    {t:'add', s:'+        if(nC < 0)'},
+    {t:'add', s:'+            return -1;'},
+    {t:'add', s:'+        coeff_token = get_vlc2(gb, (h->coeff_token_vlc + coeff_token_table_index[nC])->table,'},
+    {t:'add', s:'+                               COEFF_TOKEN_VLC_BITS, 2);'},
+    {t:'add', s:'+    } else {'},
+    {t:'add', s:'+        /* Chroma DC: 2x2 transform, special table */'},
+    {t:'add', s:'+        coeff_token = get_vlc2(gb, (h->coeff_token_vlc + 4)->table,'},
+    {t:'add', s:'+                               COEFF_TOKEN_VLC_BITS, 2);'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:'     total_coeff = coeff_token >> 2;'},
+    {t:'ctx', s:'     trailing_ones= coeff_token & 3;'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    if(total_coeff > max_coeff || total_coeff < 0){'},
+    {t:'del', s:'-        av_log(h->s.avctx, AV_LOG_ERROR, "corrupted MB %d %d\\n", h->s.mb_x, h->s.mb_y);'},
+    {t:'del', s:'-        return -1;'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    if((unsigned)total_coeff > (unsigned)max_coeff) {'},
+    {t:'add', s:'+        av_log(h->s.avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "corrupted macroblock %d %d (total_coeff=%d max=%d)\\n",'},
+    {t:'add', s:'+               h->s.mb_x, h->s.mb_y, total_coeff, max_coeff);'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:'     if(total_coeff == 0)'},
+    {t:'ctx', s:'         return 0;'},
+    {t:'ctx', s:'     if(total_coeff > 10 && trailing_ones < 3){'},
+    {t:'ctx', s:'         i = trailing_ones;'},
+    {t:'ctx', s:'         level_code = get_se_golomb(gb);'},
+    {t:'ctx', s:'     } else {'},
+    {t:'ctx', s:'         i = 0;'},
+    {t:'ctx', s:'         level_code = (get_se_golomb(gb) << 1) + trailing_ones * 2;'},
+    {t:'ctx', s:'     }'},
+  ]
+},
+{
+  file: 'libavcodec/vp6.c',
+  date: new Date(2006, 10, 4),
+  desc: 'VP6: complete coeff probability model',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/vp6.c b/libavcodec/vp6.c'},
+    {t:'ctx', s:'--- a/libavcodec/vp6.c'},
+    {t:'ctx', s:'+++ b/libavcodec/vp6.c'},
+    {t:'ctx', s:'@@ -186,21 +186,74 @@ static void vp6_parse_coeff_models(VP56Context *s)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     VP6Context *c = s->modelp;'},
+    {t:'ctx', s:'     int def_prob[11];'},
+    {t:'ctx', s:'     int node, x, y, ct, b, zero_run_bit, coeff_types_bit;'},
+    {t:'add', s:'+    int i, j;'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    for(ct=0; ct<3; ct++)'},
+    {t:'del', s:'-        for(node=0; node<11; node++)'},
+    {t:'del', s:'-            if(vp56_rac_get_prob(&s->c, vp6_dccv_pct[ct][node]))'},
+    {t:'del', s:'-                c->coeff_model_dct[ct][node]= vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+    memcpy(def_prob, vp6_def_prob_models_dc, sizeof(def_prob));'},
+    {t:'add', s:'+    for(ct=0; ct<3; ct++) {'},
+    {t:'add', s:'+        for(node=0; node<11; node++) {'},
+    {t:'add', s:'+            if(vp56_rac_get_prob(&s->c, vp6_dccv_pct[ct][node])) {'},
+    {t:'add', s:'+                def_prob[node] = vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+                c->coeff_model_dct[ct][node] = def_prob[node];'},
+    {t:'add', s:'+            } else if(s->frames[VP56_FRAME_PREVIOUS].data[0]) {'},
+    {t:'add', s:'+                /* reuse previous frame\'s prob */'},
+    {t:'add', s:'+                def_prob[node] = c->coeff_model_dct[ct][node];'},
+    {t:'add', s:'+            } else {'},
+    {t:'add', s:'+                c->coeff_model_dct[ct][node] = def_prob[node];'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    for(ct=0; ct<3; ct++)'},
+    {t:'del', s:'-        for(node=0; node<11; node++)'},
+    {t:'del', s:'-            if(vp56_rac_get_prob(&s->c, vp6_acct_pct[ct][node]))'},
+    {t:'del', s:'-                c->coeff_model_acct[ct][node]= vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+    memcpy(def_prob, vp6_def_prob_models_ac, sizeof(def_prob));'},
+    {t:'add', s:'+    for(ct=0; ct<3; ct++) {'},
+    {t:'add', s:'+        for(node=0; node<11; node++) {'},
+    {t:'add', s:'+            if(vp56_rac_get_prob(&s->c, vp6_acct_pct[ct][node])) {'},
+    {t:'add', s:'+                def_prob[node] = vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+                c->coeff_model_acct[ct][node] = def_prob[node];'},
+    {t:'add', s:'+            } else if(s->frames[VP56_FRAME_PREVIOUS].data[0]) {'},
+    {t:'add', s:'+                def_prob[node] = c->coeff_model_acct[ct][node];'},
+    {t:'add', s:'+            } else {'},
+    {t:'add', s:'+                c->coeff_model_acct[ct][node] = def_prob[node];'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     for(b=0; b<3; b++) {'},
+    {t:'del', s:'-        for(j=0; j<6; j++)'},
+    {t:'del', s:'-            for(i=0; i<11; i++)'},
+    {t:'del', s:'-                if(vp56_rac_get_prob(&s->c, vp6_acct_pct[b][j*11+i]))'},
+    {t:'del', s:'-                    c->coeff_model_ac[b][j][i]= vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+        for(j=0; j<6; j++) {'},
+    {t:'add', s:'+            for(i=0; i<11; i++) {'},
+    {t:'add', s:'+                if(vp56_rac_get_prob(&s->c, vp6_coeff_reorder_pct[b][j*11+i])) {'},
+    {t:'add', s:'+                    c->coeff_model_ac[b][j][i] = vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+                }'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     for(ct=0; ct<3; ct++) {'},
+    {t:'ctx', s:'         for(b=0; b<3; b++) {'},
+    {t:'ctx', s:'             for(zero_run_bit=0; zero_run_bit<2; zero_run_bit++) {'},
+    {t:'del', s:'-                if(vp56_rac_get_prob(&s->c, vp6_zerorune_pct[ct][b][zero_run_bit]))'},
+    {t:'del', s:'-                    c->coeff_model_zero_run[ct][b][zero_run_bit]= vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+                if(vp56_rac_get_prob(&s->c, vp6_zerorune_pct[ct][b][zero_run_bit])) {'},
+    {t:'add', s:'+                    c->coeff_model_zero_run[ct][b][zero_run_bit] ='},
+    {t:'add', s:'+                        vp56_rac_gets_nn(&s->c, 7);'},
+    {t:'add', s:'+                }'},
+    {t:'ctx', s:'             }'},
+    {t:'ctx', s:'         }'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:' }'},
+  ]
+},
+{
+  file: 'libavcodec/h264_ps.c',
+  date: new Date(2007, 6, 18),
+  desc: 'H.264: SPS/PPS parser hardening',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/h264_ps.c b/libavcodec/h264_ps.c'},
+    {t:'ctx', s:'--- a/libavcodec/h264_ps.c'},
+    {t:'ctx', s:'+++ b/libavcodec/h264_ps.c'},
+    {t:'ctx', s:'@@ -97,6 +97,8 @@ int ff_h264_decode_seq_parameter_set(H264Context *h)'},
+    {t:'ctx', s:'     AVCodecContext * const avctx = h->s.avctx;'},
+    {t:'ctx', s:'     int profile_idc, level_idc, constraint_set_flags = 0;'},
+    {t:'ctx', s:'     unsigned int sps_id;'},
+    {t:'ctx', s:'     int i, log2_max_frame_num_minus4;'},
+    {t:'add', s:'+    int poc_type;'},
+    {t:'add', s:'+    SPS *sps;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     profile_idc           = get_bits(&h->s.gb, 8);'},
+    {t:'ctx', s:'     constraint_set_flags |= get_bits1(&h->s.gb) << 0; /* constraint_set0_flag */'},
+    {t:'ctx', s:'     constraint_set_flags |= get_bits1(&h->s.gb) << 1; /* constraint_set1_flag */'},
+    {t:'ctx', s:'     constraint_set_flags |= get_bits1(&h->s.gb) << 2; /* constraint_set2_flag */'},
+    {t:'ctx', s:'     constraint_set_flags |= get_bits1(&h->s.gb) << 3; /* constraint_set3_flag */'},
+    {t:'ctx', s:'     get_bits(&h->s.gb, 4); /* reserved_zero_4bits */'},
+    {t:'ctx', s:'     level_idc             = get_bits(&h->s.gb, 8);'},
+    {t:'ctx', s:'     sps_id                = get_ue_golomb_31(&h->s.gb);'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    if(sps_id >= MAX_SPS_COUNT) {'},
+    {t:'del', s:'-        av_log(avctx, AV_LOG_ERROR, "sps_id (%d) out of range\\n", sps_id);'},
+    {t:'del', s:'-        return -1;'},
+    {t:'del', s:'-    }'},
+    {t:'del', s:'-    sps = av_mallocz(sizeof(SPS));'},
+    {t:'del', s:'-    if(sps == NULL) return -1;'},
+    {t:'add', s:'+    if(sps_id >= MAX_SPS_COUNT) {'},
+    {t:'add', s:'+        av_log(avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "sps_id %u out of range\\n", sps_id);'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    sps = av_mallocz(sizeof(SPS));'},
+    {t:'add', s:'+    if(!sps)'},
+    {t:'add', s:'+        return AVERROR(ENOMEM);'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     sps->profile_idc          = profile_idc;'},
+    {t:'ctx', s:'     sps->constraint_set_flags = constraint_set_flags;'},
+    {t:'ctx', s:'     sps->level_idc            = level_idc;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     memset(sps->scaling_matrix4, 16, sizeof(sps->scaling_matrix4));'},
+    {t:'ctx', s:'     memset(sps->scaling_matrix8, 16, sizeof(sps->scaling_matrix8));'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if(profile_idc >= 100) { /* High profile */'},
+    {t:'del', s:'-        sps->chroma_format_idc = get_ue_golomb(&h->s.gb);'},
+    {t:'add', s:'+        sps->chroma_format_idc = get_ue_golomb_31(&h->s.gb);'},
+    {t:'add', s:'+        if(sps->chroma_format_idc > 3U) {'},
+    {t:'add', s:'+            av_log(avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+                   "chroma_format_idc %d is invalid\\n",'},
+    {t:'add', s:'+                   sps->chroma_format_idc);'},
+    {t:'add', s:'+            goto fail;'},
+    {t:'add', s:'+        }'},
+    {t:'ctx', s:'         if(sps->chroma_format_idc == 3)'},
+    {t:'ctx', s:'             sps->residual_color_transform_flag = get_bits1(&h->s.gb);'},
+    {t:'del', s:'-        sps->bit_depth_luma   = get_ue_golomb(&h->s.gb) + 8;'},
+    {t:'del', s:'-        sps->bit_depth_chroma = get_ue_golomb(&h->s.gb) + 8;'},
+    {t:'add', s:'+        sps->bit_depth_luma   = get_ue_golomb(&h->s.gb) + 8;'},
+    {t:'add', s:'+        sps->bit_depth_chroma = get_ue_golomb(&h->s.gb) + 8;'},
+    {t:'add', s:'+        if(sps->bit_depth_luma > 14U || sps->bit_depth_chroma > 14U) {'},
+    {t:'add', s:'+            av_log(avctx, AV_LOG_ERROR, "illegal bit depth\\n");'},
+    {t:'add', s:'+            goto fail;'},
+    {t:'add', s:'+        }'},
+    {t:'ctx', s:'         sps->transform_bypass  = get_bits1(&h->s.gb);'},
+    {t:'ctx', s:'         ff_h264_decode_scaling_matrices(h, sps, NULL, 1,'},
+    {t:'ctx', s:'                                        sps->scaling_matrix4,'},
+    {t:'ctx', s:'                                        sps->scaling_matrix8);'},
+    {t:'ctx', s:'     } else {'},
+    {t:'ctx', s:'         sps->chroma_format_idc = 1;'},
+    {t:'ctx', s:'         sps->bit_depth_luma    = 8;'},
+    {t:'ctx', s:'         sps->bit_depth_chroma  = 8;'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     log2_max_frame_num_minus4 = get_ue_golomb(&h->s.gb);'},
+    {t:'del', s:'-    if(log2_max_frame_num_minus4 > 12) {'},
+    {t:'del', s:'-        av_log(avctx, AV_LOG_ERROR, "illegal log2_max_frame_num_minus4 %d\\n",'},
+    {t:'del', s:'-               log2_max_frame_num_minus4);'},
+    {t:'del', s:'-        return -1;'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    if((unsigned)log2_max_frame_num_minus4 > 12U) {'},
+    {t:'add', s:'+        av_log(avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "log2_max_frame_num_minus4 out of range (0-12): %d\\n",'},
+    {t:'add', s:'+               log2_max_frame_num_minus4);'},
+    {t:'add', s:'+        goto fail;'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:'     sps->log2_max_frame_num = log2_max_frame_num_minus4 + 4;'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    sps->poc_type = get_ue_golomb(&h->s.gb);'},
+    {t:'add', s:'+    poc_type = get_ue_golomb_31(&h->s.gb);'},
+    {t:'add', s:'+    sps->poc_type = poc_type;'},
+    {t:'add', s:'+    if(poc_type > 2U) {'},
+    {t:'add', s:'+        av_log(avctx, AV_LOG_ERROR, "illegal poc_type %d\\n", poc_type);'},
+    {t:'add', s:'+        goto fail;'},
+    {t:'add', s:'+    }'},
+  ]
+},
+{
+  file: 'libavcodec/vp8.c',
+  date: new Date(2010, 3, 28),
+  desc: 'VP8: decoder, thread-safe rewrite',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/vp8.c b/libavcodec/vp8.c'},
+    {t:'ctx', s:'--- a/libavcodec/vp8.c'},
+    {t:'ctx', s:'+++ b/libavcodec/vp8.c'},
+    {t:'ctx', s:'@@ -1024,39 +1024,93 @@ static av_always_inline'},
+    {t:'ctx', s:' void decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,'},
+    {t:'ctx', s:'                              int jobnr, int threadnr)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     VP8Context *s = avctx->priv_data;'},
+    {t:'ctx', s:'     VP8ThreadData *td = &s->thread_data[threadnr];'},
+    {t:'del', s:'-    int mb_x, mb_y = td->thread_mb_pos >> 16;'},
+    {t:'del', s:'-    int num_jobs = s->num_coeff_partitions;'},
+    {t:'add', s:'+    VP8ThreadData *prev_td, *next_td;'},
+    {t:'add', s:'+    int mb_x, mb_y = atomic_load(&td->thread_mb_pos) >> 16;'},
+    {t:'add', s:'+    int num_jobs  = s->num_coeff_partitions;'},
+    {t:'add', s:'+    int ret = 0;'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if (s->mb_layout == 1)'},
+    {t:'ctx', s:'         vp8_decode_mv_mb_modes(avctx, td->kf_mb_mode);'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    for (mb_x = 0; mb_x < s->mb_width; mb_x++) {'},
+    {t:'del', s:'-        VP8Macroblock *mb = s->macroblocks_base'},
+    {t:'del', s:'-                          + (s->mb_width + 1) * (mb_y + 1) + mb_x + 1;'},
+    {t:'del', s:'-        decode_mb_mode(s, mb, mb_x, mb_y,'},
+    {t:'del', s:'-                       s->intra4x4_pred_mode_left,'},
+    {t:'del', s:'-                       s->intra4x4_pred_mode_top + mb_x * 4);'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    if (mb_y == 0)'},
+    {t:'add', s:'+        prev_td = td;'},
+    {t:'add', s:'+    else'},
+    {t:'add', s:'+        prev_td = &s->thread_data[(jobnr + num_jobs - 1) % num_jobs];'},
+    {t:'add', s:'+    if (mb_y == s->mb_height - 1)'},
+    {t:'add', s:'+        next_td = td;'},
+    {t:'add', s:'+    else'},
+    {t:'add', s:'+        next_td = &s->thread_data[(jobnr + 1) % num_jobs];'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    for (mb_x = 0; mb_x < s->mb_width; mb_x++, td->mv_bounds.mv_min.x -= 64,'},
+    {t:'add', s:'+                                                td->mv_bounds.mv_max.x -= 64) {'},
+    {t:'add', s:'+        /* Wait for previous row before reading top samples */'},
+    {t:'add', s:'+        if (mb_x == 0 && mb_y > 0) {'},
+    {t:'add', s:'+            int threshold = (mb_y - 1) << 16 | (s->mb_width - 1);'},
+    {t:'add', s:'+            while(atomic_load(&prev_td->thread_mb_pos) < threshold)'},
+    {t:'add', s:'+                av_cpu_relax();'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        VP8Macroblock *mb = s->macroblocks_base'},
+    {t:'add', s:'+                          + (s->mb_width + 1) * (mb_y + 1) + mb_x + 1;'},
+    {t:'add', s:'+        uint8_t *dst[3] = {'},
+    {t:'add', s:'+            td->dst[0] + 16 * mb_x,'},
+    {t:'add', s:'+            td->dst[1] +  8 * mb_x,'},
+    {t:'add', s:'+            td->dst[2] +  8 * mb_x,'},
+    {t:'add', s:'+        };'},
+    {t:'add', s:'+        if (mb_x)'},
+    {t:'add', s:'+            transfer_prev_mb_edge(s, td, dst, mb_x, mb_y);'},
+    {t:'add', s:'+        decode_mb_mode(s, &td->mv_bounds, mb, mb_x, mb_y,'},
+    {t:'add', s:'+                       td->intra4x4_pred_mode_left,'},
+    {t:'add', s:'+                       s->intra4x4_pred_mode_top + mb_x * 4,'},
+    {t:'add', s:'+                       td->segment, s->mb_layout);'},
+    {t:'add', s:'+        /* signal row progress */'},
+    {t:'add', s:'+        atomic_store(&td->thread_mb_pos,'},
+    {t:'add', s:'+                     (mb_y << 16) | (mb_x + 1));'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:' }'},
+  ]
+},
+{
+  file: 'libavcodec/avcodec.h',
+  date: new Date(2010, 11, 3),
+  desc: 'API: add AVFrame.pkt_pts, pkt_dts',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/avcodec.h b/libavcodec/avcodec.h'},
+    {t:'ctx', s:'--- a/libavcodec/avcodec.h'},
+    {t:'ctx', s:'+++ b/libavcodec/avcodec.h'},
+    {t:'ctx', s:'@@ -2231,6 +2231,58 @@ typedef struct AVFrame {'},
+    {t:'ctx', s:'      */'},
+    {t:'ctx', s:'     int64_t pkt_pts;'},
+    {t:'ctx', s:''},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * DTS copied from the AVPacket that triggered returning this frame. (if frame threading isn\'t used)'},
+    {t:'add', s:'+     * This is also the Presentation time of this AVFrame calculated from'},
+    {t:'add', s:'+     * only AVPacket.dts values without pts values.'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int64_t pkt_dts;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * picture number in bitstream order'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int coded_picture_number;'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * picture number in display order'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int display_picture_number;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * quality (between 1 (good) and FF_LAMBDA_MAX (bad))'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int quality;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * is this picture used as reference'},
+    {t:'add', s:'+     * The values for this are the same as the MpegEncContext.picture_structure'},
+    {t:'add', s:'+     * variable, that is 1->top field, 2->bottom field, 3->frame/both fields.'},
+    {t:'add', s:'+     * Set to 4 for delayed, unset (to 0) when not a reference.'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int reference;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * QP table'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int8_t *qscale_table;'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * QP store stride'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int qstride;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * mbskip_table[mb]>=1 if MB didn\'t change'},
+    {t:'add', s:'+     * stride= mb_width = (width+15)>>4'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    uint8_t *mbskip_table;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * motion vector table'},
+    {t:'add', s:'+     * @code'},
+    {t:'add', s:'+     * example:'},
+    {t:'add', s:'+     * int mv_sample_log2= 4 - motion_subsample_log2;'},
+    {t:'add', s:'+     * int mb_width= (width+15)>>4;'},
+    {t:'add', s:'+     * int mv_stride= (mb_width << mv_sample_log2) + 1;'},
+    {t:'add', s:'+     * motion_val[direction][x + y*mv_stride][0->mv_x, 1->mv_y];'},
+    {t:'add', s:'+     * @endcode'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int16_t (*motion_val[2])[2];'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     /**'},
+    {t:'ctx', s:'      * macroblock type table'},
+    {t:'ctx', s:'      * - encoding: Set by libavcodec.'},
+    {t:'ctx', s:'      * - decoding: Set by libavcodec.'},
+    {t:'ctx', s:'      */'},
+    {t:'ctx', s:'     uint32_t *mb_type;'},
+  ]
+},
+{
+  file: 'libavcodec/h264.c',
+  date: new Date(2011, 1, 14),
+  desc: 'H.264: fix ref list B slice crash',
+  lines: [
+    {t:'ctx', s:'diff --git a/libavcodec/h264.c b/libavcodec/h264.c'},
+    {t:'ctx', s:'--- a/libavcodec/h264.c'},
+    {t:'ctx', s:'+++ b/libavcodec/h264.c'},
+    {t:'ctx', s:'@@ -3902,47 +3902,74 @@ static int decode_slice_header(H264Context *h)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     MpegEncContext * const s = &h->s;'},
+    {t:'ctx', s:'     unsigned int first_mb_in_slice;'},
+    {t:'ctx', s:'     unsigned int pps_id;'},
+    {t:'ctx', s:'     int num_ref_idx_active_override_flag, ret;'},
+    {t:'ctx', s:'     unsigned int slice_type, tmp, i, j;'},
+    {t:'ctx', s:'     pps_id = get_ue_golomb(&s->gb);'},
+    {t:'del', s:'-    if(pps_id >= MAX_PPS_COUNT){'},
+    {t:'del', s:'-        av_log(h->s.avctx, AV_LOG_ERROR, "pps_id out of range\\n");'},
+    {t:'del', s:'-        return -1;'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    if(pps_id >= MAX_PPS_COUNT) {'},
+    {t:'add', s:'+        av_log(h->s.avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "pps_id %u out of range\\n", pps_id);'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:'     if(!h->pps_buffers[pps_id]) {'},
+    {t:'del', s:'-        av_log(h->s.avctx, AV_LOG_ERROR, "non-existing PPS referenced\\n");'},
+    {t:'del', s:'-        return -1;'},
+    {t:'add', s:'+        av_log(h->s.avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "non-existing PPS %u referenced\\n", pps_id);'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     h->pps = *h->pps_buffers[pps_id];'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if(!h->sps_buffers[h->pps.sps_id]) {'},
+    {t:'del', s:'-        av_log(h->s.avctx, AV_LOG_ERROR, "non-existing SPS referenced\\n");'},
+    {t:'del', s:'-        return -1;'},
+    {t:'add', s:'+        av_log(h->s.avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "non-existing SPS %u referenced\\n", h->pps.sps_id);'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if(h->dequant_coeff_pps != pps_id){'},
+    {t:'ctx', s:'         h->dequant_coeff_pps = pps_id;'},
+    {t:'ctx', s:'         ff_h264_init_dequant_tables(h);'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if(h->slice_type_nos != FF_B_TYPE) goto out;'},
+    {t:'ctx', s:''},
+    {t:'del', s:'-    for(list=0; list<2; list++){'},
+    {t:'del', s:'-        h->ref_count[list]= get_ue_golomb(&s->gb) + 1;'},
+    {t:'del', s:'-        if(h->ref_count[list] > 32){'},
+    {t:'del', s:'-            av_log(h->s.avctx, AV_LOG_ERROR, "ref overflow\\n");'},
+    {t:'del', s:'-            return -1;'},
+    {t:'del', s:'-        }'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    for(list = 0; list < 2; list++) {'},
+    {t:'add', s:'+        unsigned val = get_ue_golomb(&s->gb);'},
+    {t:'add', s:'+        if(val > MAX_REF_FRAMES - 1) {'},
+    {t:'add', s:'+            av_log(h->s.avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+                   "reference overflow (list=%d val=%u max=%d)\\n",'},
+    {t:'add', s:'+                   list, val, MAX_REF_FRAMES - 1);'},
+    {t:'add', s:'+            return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        h->ref_count[list] = val + 1;'},
+    {t:'ctx', s:'     }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:'     if(h->slice_type_nos == FF_B_TYPE && !h->direct_spatial_mv_pred)'},
+    {t:'ctx', s:'         ff_h264_direct_dist_scale_factor(h);'},
+    {t:'ctx', s:'     ff_h264_direct_ref_list_init(h);'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' out:'},
+    {t:'ctx', s:'     return 0;'},
+    {t:'ctx', s:' }'},
+  ]
+},
+];
+
+const DATE_START = new Date(2004, 0, 1).getTime();
+const DATE_END   = new Date(2011, 11, 31).getTime();
+const DUR        = 48;
+const CHUNK_DUR  = DUR / CHUNKS.length;
+const TOTAL_COMMITS = 27314;
+
+// Layout
+const TREE_W  = 340;
+const GUT_W   = 88;
+const TAB_H   = 50;
+const STAT_H  = 36;
+const CODE_X  = TREE_W + GUT_W;
+const CODE_W  = W - CODE_X;
+const CODE_Y  = TAB_H;
+const CODE_H  = H - TAB_H - STAT_H;
+const LINE_H  = 36;
+const FSIZE   = 21;
+const MAX_VIS = Math.floor(CODE_H / LINE_H);
+
+let running = false, t0 = 0, raf = null;
+let chunkIdx = 0, lastChunkIdx = -1, lastBurstTime = 0;
+let bursts = [];
+
+// Grain
+const GR = document.createElement('canvas');
+GR.width = 512; GR.height = 512;
+const GX = GR.getContext('2d');
+function mkGrain() {
+  const id = GX.createImageData(512,512);
+  for(let i=0;i<id.data.length;i+=4){const v=Math.random()*14|0;id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=255;}
+  GX.putImageData(id,0,0);
+}
+
+const MO = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const DW = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+function getDate(p){return new Date(DATE_START+(DATE_END-DATE_START)*p);}
+
+// Syntax tokenizer
+const KW_RE   = /\b(static|int|void|const|char|unsigned|return|if|else|for|while|struct|typedef|sizeof|NULL|uint8_t|uint32_t|uint16_t|int16_t|int32_t|int64_t|float|double|short|do|break|switch|case|default|continue|goto|av_always_inline|av_cold)\b/g;
+const TYPE_RE = /\b(MpegEncContext|H264Context|VP6Context|VP8Context|VP56Context|VC1Context|HEVCContext|RateControlContext|RateControlEntry|AVFilterGraph|AVFilterContext|GetBitContext|DCTELEM|AVCodecContext|AVFrame|VP8ThreadData|VP8Macroblock|SPS|PPS)\b/g;
+const STR_RE  = /"[^"]*"/g;
+const CMT_RE  = /\/\*.*?\*\/|\/\/.*/g;
+const NUM_RE  = /\b(0x[0-9a-fA-F]+|[0-9]+U?)\b/g;
+const FN_RE   = /\b([a-z_][a-z0-9_]*)\s*(?=\()/g;
+
+function tokenize(raw, lineType) {
+  const baseColor = lineType==='add' ? K.add : lineType==='del' ? K.del
+                  : raw.startsWith('@@') ? K.hdr : K.ctx;
+  if(!raw.replace(/^[+\- ]/,'').trim()) return [{text:raw,color:baseColor}];
+  const code = raw; // keep prefix, offset marks by 0 (prefix is 1 char)
+  const marks=[];
+  let m;
+  for(const[re,color] of [[CMT_RE,K.cmt],[STR_RE,K.str_],[TYPE_RE,K.type_],[KW_RE,K.kw],[FN_RE,K.fn_],[NUM_RE,K.num_]]){
+    re.lastIndex=0;
+    while((m=re.exec(code))!==null)
+      marks.push({s:m.index,e:m.index+m[0].length,color,text:m[0]});
+  }
+  marks.sort((a,b)=>a.s-b.s);
+  const clean=[];
+  for(const mk of marks){if(clean.some(u=>mk.s<u.e&&mk.e>u.s))continue;clean.push(mk);}
+  clean.sort((a,b)=>a.s-b.s);
+  const tokens=[];
+  let pos=0;
+  for(const mk of clean){
+    if(mk.s>pos)tokens.push({text:code.slice(pos,mk.s),color:baseColor});
+    tokens.push({text:mk.text,color:mk.color});
+    pos=mk.e;
+  }
+  if(pos<code.length)tokens.push({text:code.slice(pos),color:baseColor});
+  return tokens;
+}
+
+// ─── DRAW ──────────────────────────────────────────────────────────────────
+
+function dBg(){X.fillStyle=K.bg;X.fillRect(0,0,W,H);}
+
+function dDiff(chunk, revealed, ts){
+  if(!chunk)return;
+  const lines=chunk.lines;
+  X.save();X.beginPath();X.rect(CODE_X,CODE_Y,CODE_W,CODE_H);X.clip();
+  X.font=`400 ${FSIZE}px ${MONO}`;X.textBaseline='middle';X.textAlign='left';
+
+  const total=Math.min(Math.floor(revealed),lines.length);
+  const start=Math.max(0,total-MAX_VIS);
+
+  for(let vi=0;vi<Math.min(total-start,MAX_VIS);vi++){
+    const li=start+vi;
+    if(li>=lines.length)break;
+    const line=lines[li];
+    const y=CODE_Y+vi*LINE_H+LINE_H/2;
+
+    if(line.t==='add'){X.fillStyle=K.addBg;X.fillRect(CODE_X,y-LINE_H/2,CODE_W,LINE_H);}
+    else if(line.t==='del'){X.fillStyle=K.delBg;X.fillRect(CODE_X,y-LINE_H/2,CODE_W,LINE_H);}
+
+    const isCur=li===total-1;
+    const frac=isCur?(revealed-Math.floor(revealed)):1;
+    const fullText=line.s;
+    const shown=isCur?Math.floor(frac*fullText.length):fullText.length;
+
+    if(isCur){
+      const partial=fullText.slice(0,shown);
+      const ptok=tokenize(partial,line.t);
+      let tx=CODE_X+18;
+      for(const tok of ptok){X.fillStyle=tok.color;X.fillText(tok.text,tx,y);tx+=X.measureText(tok.text).width;}
+      if(Math.floor(ts/480)%2===0){X.fillStyle=K.blue;X.fillRect(tx+1,y-12,2,24);}
+    } else {
+      const tok=tokenize(fullText,line.t);
+      let tx=CODE_X+18;
+      for(const t of tok){X.fillStyle=t.color;X.fillText(t.text,tx,y);tx+=X.measureText(t.text).width;}
+    }
+  }
+  X.restore();
+}
+
+function dGutter(chunk,revealed){
+  X.fillStyle='#040404';X.fillRect(TREE_W,CODE_Y,GUT_W,CODE_H);
+  X.fillStyle='#101010';X.fillRect(TREE_W+GUT_W-1,CODE_Y,1,CODE_H);
+  if(!chunk)return;
+  const lines=chunk.lines;
+  const total=Math.min(Math.floor(revealed),lines.length);
+  const start=Math.max(0,total-MAX_VIS);
+  X.font=`300 ${FSIZE*0.7}px ${MONO}`;X.textAlign='right';X.textBaseline='middle';
+  for(let vi=0;vi<Math.min(total-start,MAX_VIS);vi++){
+    const li=start+vi;if(li>=lines.length)break;
+    const line=lines[li];
+    const y=CODE_Y+vi*LINE_H+LINE_H/2;
+    X.fillStyle=line.t==='add'?K.bDim:line.t==='del'?'#550010':K.lnum;
+    X.fillText(String(li+1),TREE_W+GUT_W-12,y);
+  }
+}
+
+function dTree(chunk){
+  X.fillStyle='#030303';X.fillRect(0,0,TREE_W,H);
+  X.fillStyle='#101010';X.fillRect(TREE_W-1,0,1,H);
+  X.fillStyle='#060606';X.fillRect(0,0,TREE_W,TAB_H);
+  X.fillStyle='#101010';X.fillRect(0,TAB_H-1,TREE_W,1);
+
+  // Brand
+  X.font=`900 28px ${DISPLAY}`;X.letterSpacing='1px';
+  X.fillStyle=K.blue;X.textAlign='left';X.textBaseline='middle';
+  X.fillText('FFmpeg',20,TAB_H/2);X.letterSpacing='0px';
+
+  // EXPLORER
+  X.font=`600 13px ${DISPLAY}`;X.letterSpacing='3px';
+  X.fillStyle='#555';X.fillText('EXPLORER',20,TAB_H+22);X.letterSpacing='0px';
+
+  const touched=new Set(CHUNKS.slice(0,chunkIdx+1).map(c=>c.file));
+  const curFile=chunk?chunk.file:'';
+
+  const groups=[
+    {dir:'▾ libavcodec',files:[
+      'libavcodec/mpegvideo_enc.c',
+      'libavcodec/h264.c',
+      'libavcodec/h264_cavlc.c',
+      'libavcodec/h264_ps.c',
+      'libavcodec/vc1dec.c',
+      'libavcodec/vp6.c',
+      'libavcodec/vp8.c',
+      'libavcodec/avcodec.h',
+      'libavcodec/ratecontrol.c',
+    ]},
+    {dir:'▾ libavformat',files:[
+      'libavformat/mov.c',
+      'libavformat/matroska.c',
+    ]},
+    {dir:'▾ libavutil',files:[
+      'libavutil/mem.c',
+      'libavutil/mathematics.c',
+    ]},
+  ];
+
+  const FILE_LH=28, DIR_LH=30;
+  let fy=TAB_H+44;
+
+  for(const g of groups){
+    X.font=`400 16px ${MONO}`;X.textBaseline='middle';
+    X.fillStyle='#444';X.textAlign='left';
+    X.fillText(g.dir,14,fy);fy+=DIR_LH;
+    for(const f of g.files){
+      const sn=f.split('/').pop();
+      const isActive=f===curFile,isTouched=touched.has(f);
+      if(isActive){X.fillStyle='rgba(0,212,255,0.08)';X.fillRect(0,fy-FILE_LH/2,TREE_W,FILE_LH);}
+      X.font=`400 17px ${MONO}`;X.textBaseline='middle';
+      X.fillStyle=isActive?K.blue:isTouched?'#606060':'#2a2a2a';
+      X.textAlign='left';X.fillText(sn,32,fy);fy+=FILE_LH;
+      if(fy>H-STAT_H-200)break;
+    }
+    fy+=6;if(fy>H-STAT_H-200)break;
+  }
+  dPatchList();
+}
+
+function dPatchList(){
+  const show=Math.min(chunkIdx+1,10);
+  const lh=25,ly0=H-STAT_H-12;
+  X.font=`300 15px ${MONO}`;X.textBaseline='middle';
+  for(let i=0;i<show;i++){
+    const c=CHUNKS[chunkIdx-(show-1-i)];
+    const y=ly0-(show-1-i)*lh;
+    const fresh=i===show-1;
+    X.textAlign='left';
+    X.fillStyle=fresh?K.blue:'#2e2e2e';
+    X.fillText((fresh?'● ':'  ')+c.desc,14,y);
+  }
+}
+
+function dTabs(chunk){
+  X.fillStyle='#030303';X.fillRect(TREE_W,0,W-TREE_W,TAB_H);
+  X.fillStyle='#101010';X.fillRect(TREE_W,TAB_H-1,W-TREE_W,1);
+  if(!chunk)return;
+  const fn=chunk.file.split('/').pop();
+  const tw=300,tx=TREE_W+4;
+  X.fillStyle=K.bg;X.fillRect(tx,0,tw,TAB_H);
+  X.fillStyle=K.blue;X.fillRect(tx,0,tw,2);
+  X.font=`400 20px ${MONO}`;X.textBaseline='middle';X.textAlign='left';
+  X.fillStyle=K.white;X.fillText(fn,tx+16,TAB_H/2);
+  X.fillStyle=K.blue;X.beginPath();X.arc(tx+tw-14,TAB_H/2,4,0,Math.PI*2);X.fill();
+  X.font=`300 17px ${MONO}`;X.fillStyle='#505050';X.textAlign='right';
+  X.fillText(chunk.file,W-32,TAB_H/2);
+  const adds=chunk.lines.filter(l=>l.t==='add').length;
+  const dels=chunk.lines.filter(l=>l.t==='del').length;
+  X.font=`500 18px ${MONO}`;X.textAlign='left';
+  X.fillStyle=K.add;X.fillText('+'+adds,tx+tw+22,TAB_H/2-1);
+  X.fillStyle=K.del;X.fillText('-'+dels,tx+tw+84,TAB_H/2-1);
+  X.fillStyle='#333';X.fillText('  '+chunk.desc,tx+tw+145,TAB_H/2-1);
+}
+
+function dStatus(date,prog,commits){
+  const sy=H-STAT_H;
+  X.fillStyle='#040404';X.fillRect(0,sy,W,STAT_H);
+  X.fillStyle='#101010';X.fillRect(0,sy,W,1);
+  const bw=180;X.fillStyle=K.blue;X.fillRect(TREE_W,sy,bw,STAT_H);
+  X.font=`700 17px ${MONO}`;X.fillStyle='#000';X.textBaseline='middle';X.textAlign='left';
+  X.fillText('⎇  master',TREE_W+12,sy+STAT_H/2);
+  X.font=`300 17px ${MONO}`;X.fillStyle=K.bMid;
+  X.fillText(commits.toLocaleString()+' commits',TREE_W+bw+18,sy+STAT_H/2);
+  X.textAlign='right';X.fillStyle='#555';
+  X.fillText('Michael Niedermayer  ·  C  ·  UTF-8  ·  LF',W-28,sy+STAT_H/2);
+}
+
+function dDate(date,prog){
+  const bw=380,bh=162,bx=W-bw-40,by=TAB_H+24;
+  X.fillStyle='rgba(0,0,0,0.94)';X.fillRect(bx,by,bw,bh);
+  X.fillStyle=K.blue;X.fillRect(bx,by,3,bh);
+  X.font=`600 18px ${DISPLAY}`;X.letterSpacing='4px';X.fillStyle=K.bDim;
+  X.textAlign='left';X.textBaseline='alphabetic';X.fillText(DW[date.getDay()],bx+20,by+38);
+  X.letterSpacing='0px';
+  X.font=`900 100px ${DISPLAY}`;X.fillStyle=K.white;
+  X.fillText(String(date.getDate()).padStart(2,'0'),bx+14,by+bh-14);
+  X.font=`300 28px ${DISPLAY}`;X.letterSpacing='2px';X.fillStyle=K.blue;
+  X.textAlign='right';X.fillText(MO[date.getMonth()],bx+bw-18,by+46);X.letterSpacing='0px';
+  X.font=`700 48px ${DISPLAY}`;X.fillStyle='#1a1a1a';
+  X.fillText(String(date.getFullYear()),bx+bw-16,by+bh-14);
+  X.fillStyle='#0c0c0c';X.fillRect(bx+3,by+bh-4,bw-3,4);
+  X.fillStyle=K.blue;X.fillRect(bx+3,by+bh-4,(bw-3)*prog,4);
+  const days=Math.floor(prog*(7*365+2));
+  X.font=`300 15px ${MONO}`;X.fillStyle=K.bDim;X.textAlign='left';
+  X.fillText('day '+days,bx+20,by+bh+20);
+  X.textAlign='right';X.fillStyle='#282828';
+  X.fillText('no weekends',bx+bw,by+bh+20);
+}
+
+function dBursts(){
+  X.font=`700 17px ${MONO}`;X.textBaseline='middle';
+  for(const b of bursts){
+    X.globalAlpha=b.life*0.7;X.fillStyle=K.blue;X.textAlign='left';
+    X.fillText('+'+b.val,b.x,b.y);
+  }
+  X.globalAlpha=1;
+  for(const b of bursts){b.y-=0.7;b.life-=0.016;}
+  bursts=bursts.filter(b=>b.life>0);
+}
+
+function addBurst(v){bursts.push({x:TREE_W+200+Math.random()*350,y:H-STAT_H-22,val:v,life:1});}
+
+function dGrain(el){
+  mkGrain();
+  X.globalAlpha=0.02+0.008*Math.sin(el*11.3);
+  X.globalCompositeOperation='screen';
+  for(let tx=0;tx<W;tx+=512)for(let ty=0;ty<H;ty+=512)X.drawImage(GR,0,0,512,512,tx,ty,512,512);
+  X.globalAlpha=1;X.globalCompositeOperation='source-over';
+}
+
+// ─── LOOP ──────────────────────────────────────────────────────────────────
+
+function frame(ts){
+  if(!running)return;
+  const elapsed=(ts-t0)/1000;
+  const prog=Math.min(elapsed/DUR,1);
+  const ci=Math.min(Math.floor(elapsed/CHUNK_DUR),CHUNKS.length-1);
+  if(ci<0||ci>=CHUNKS.length){raf=requestAnimationFrame(frame);return;}
+
+  if(ci!==lastChunkIdx){
+    lastChunkIdx=ci;chunkIdx=ci;
+    addBurst(Math.floor(3+Math.random()*6));
+  }
+  if(ts-lastBurstTime>1700+Math.random()*700){addBurst(1);lastBurstTime=ts;}
+
+  const chunk=CHUNKS[ci];
+  if(!chunk||!chunk.lines){raf=requestAnimationFrame(frame);return;}
+
+  const chunkEl=elapsed-ci*CHUNK_DUR;
+  const typeWin=CHUNK_DUR*0.72;
+  const revealed=Math.min(chunkEl/typeWin,1)*chunk.lines.length;
+
+  const date=getDate(prog);
+  const commits=Math.round(prog*TOTAL_COMMITS);
+
+  dBg();dDiff(chunk,revealed,ts);dGutter(chunk,revealed);
+  dTree(chunk);dTabs(chunk);dStatus(date,prog,commits);
+  dDate(date,prog);dBursts();dGrain(elapsed);
+
+  if(prog<1)raf=requestAnimationFrame(frame);
+}
+
+function reset(){
+  if(raf)cancelAnimationFrame(raf);
+  running=false;chunkIdx=0;lastChunkIdx=-1;bursts=[];lastBurstTime=0;
+  const c=CHUNKS[0];
+  dBg();dDiff(c,0,0);dGutter(c,0);dTree(c);dTabs(c);
+  dStatus(getDate(0),0,0);dDate(getDate(0),0);
+}
+
+function start(){reset();running=true;t0=performance.now();raf=requestAnimationFrame(frame);}
+
+document.addEventListener('keydown',e=>{if(['r','R','к','К'].includes(e.key))start();});
+document.fonts.ready.then(reset);
+</script>
+</body>
+</html>

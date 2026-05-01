@@ -1,0 +1,3147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Bellard — после FFmpeg · v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500;700;800&family=Russo+One&family=Unbounded:wght@400;700;900&family=Oswald:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0a0a;
+    --fg:#f4f1e8;
+    --grid:rgba(244,241,232,0.06);
+    --rule:rgba(244,241,232,0.18);
+  }
+  *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+  html,body{
+    width:100%;height:100%;
+    background:#000;
+    overflow:hidden;
+    font-family:'JetBrains Mono',monospace;
+    color:var(--fg);
+  }
+  #stage{
+    position:absolute;
+    width:2560px;height:1440px;
+    top:50%;left:50%;
+    transform:translate(-50%,-50%) scale(var(--scale,1));
+    transform-origin:center center;
+    background:var(--bg);
+    overflow:hidden;
+    color:var(--fg);
+  }
+  canvas.layer{
+    position:absolute;top:0;left:0;
+    width:2560px;height:1440px;
+    pointer-events:none;
+  }
+
+  /* ============ HUD ============ */
+  #hud{
+    position:absolute;top:24px;left:36px;
+    z-index:1000;display:flex;gap:24px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:15px;letter-spacing:0.2em;
+    pointer-events:none;
+  }
+  #hud .tc{color:var(--fg);font-weight:700;}
+  #hud .tag{color:rgba(244,241,232,0.5);}
+  #help{
+    position:absolute;bottom:24px;right:36px;
+    z-index:1000;
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;letter-spacing:0.2em;
+    color:rgba(244,241,232,0.25);
+    pointer-events:none;text-align:right;line-height:1.7;
+  }
+  body.hide-ui #hud,body.hide-ui #help,body.hide-ui #ctrl{display:none;}
+
+  /* ============ CONTROL PANEL ============ */
+  #ctrl{
+    position:absolute;bottom:80px;left:36px;
+    z-index:1000;
+    display:flex;flex-direction:column;gap:8px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px;letter-spacing:0.2em;
+    background:rgba(0,0,0,0.72);
+    border:1px solid rgba(244,241,232,0.18);
+    padding:10px 14px;
+    backdrop-filter:blur(6px);
+  }
+  #ctrl .ctrl-row{
+    display:flex;align-items:center;gap:10px;
+  }
+  #ctrl .ctrl-lab{
+    color:rgba(244,241,232,0.5);
+    font-weight:700;
+    width:90px;
+  }
+  #ctrl .ctrl-btn{
+    background:transparent;
+    border:1px solid rgba(244,241,232,0.3);
+    color:var(--fg);
+    padding:5px 11px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;font-weight:700;letter-spacing:0.2em;
+    cursor:pointer;
+    transition:background 0.15s,border-color 0.15s;
+  }
+  #ctrl .ctrl-btn:hover{
+    border-color:rgba(244,241,232,0.7);
+  }
+  #ctrl .ctrl-btn.active,#ctrl .ctrl-btn.on{
+    background:#ffea00;color:#000;border-color:#ffea00;
+  }
+  #ctrl .ctrl-btn.small{padding:4px 8px;}
+  #ctrl input[type=range]{
+    flex:1;
+    -webkit-appearance:none;
+    height:3px;background:rgba(244,241,232,0.2);
+    outline:none;cursor:pointer;
+    max-width:160px;
+  }
+  #ctrl input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:12px;height:12px;background:#ffea00;
+    border-radius:0;cursor:pointer;
+  }
+  #ctrl input[type=range]::-moz-range-thumb{
+    width:12px;height:12px;background:#ffea00;
+    border:none;border-radius:0;cursor:pointer;
+  }
+  #ctrl .ctrl-val{
+    color:#ffea00;font-weight:700;
+    width:36px;text-align:right;
+  }
+
+  /* ============ BPM PULSE — full-screen background tint ============
+     Single layer behind everything except UI; tints with current --pulse.
+     No filters on content, no scale, no jitter. Only the background breathes. */
+  :root{ --pulse:0; }
+
+  #bpm-bg{
+    position:fixed;inset:0;
+    pointer-events:none;
+    z-index:1;            /* above stage bg, below stage content */
+    opacity:0;
+    transition:opacity 0.3s;
+    mix-blend-mode:screen;
+  }
+  body.bpm-on #bpm-bg{ opacity:1; }
+
+  body.fx-warm #bpm-bg{
+    background:radial-gradient(ellipse at 50% 50%,
+      rgba(255,140,40,calc(var(--pulse) * 0.18)) 0%,
+      rgba(255,80,0,calc(var(--pulse) * 0.10)) 40%,
+      transparent 80%);
+  }
+  body.fx-cool #bpm-bg{
+    background:radial-gradient(ellipse at 50% 50%,
+      rgba(0,180,255,calc(var(--pulse) * 0.16)) 0%,
+      rgba(80,80,255,calc(var(--pulse) * 0.10)) 40%,
+      transparent 80%);
+  }
+  body.fx-accent #bpm-bg{
+    background:radial-gradient(ellipse at 50% 50%,
+      var(--bpm-accent, rgba(255,234,0,calc(var(--pulse) * 0.18))) 0%,
+      transparent 75%);
+  }
+  /* the stage already has its own bg behind sub-scenes — boost the bg-only color
+     so the pulse feels like the floor is breathing, not the foreground. */
+
+  /* ============ INTRO ============ */
+  #intro{
+    position:absolute;inset:0;
+    background:#0a0a0a;
+    display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    z-index:5000;color:var(--fg);
+  }
+  #intro.hidden{display:none;}
+  #intro h1{
+    font-family:'Russo One',sans-serif;
+    font-size:120px;letter-spacing:-0.02em;line-height:0.95;
+    text-align:center;
+  }
+  #intro h1 span{color:#ffea00;}
+  #intro p{
+    margin-top:24px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:22px;letter-spacing:0.25em;
+    color:rgba(244,241,232,0.5);
+  }
+  #intro .key{
+    margin-top:80px;
+    border:3px solid var(--fg);
+    padding:18px 40px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:28px;font-weight:700;letter-spacing:0.3em;
+    animation:blink 1.2s steps(2) infinite;
+  }
+  @keyframes blink{50%{opacity:0.25;}}
+
+  /* ============ COMMON SUB-SCENE ============ */
+  .sub{
+    position:absolute;inset:0;
+    display:none;
+    opacity:0;
+    overflow:hidden;
+  }
+  .sub.on{display:block;opacity:1;}
+
+  /* glitch transition between scenes */
+  @keyframes scene-cut{
+    0%{transform:translate(0,0);clip-path:none;filter:none;}
+    20%{transform:translate(-30px,4px) skewX(3deg);clip-path:inset(8% 0 50% 0);filter:hue-rotate(60deg) contrast(1.4);}
+    40%{transform:translate(20px,-6px);clip-path:inset(60% 0 8% 0);filter:invert(0.4);}
+    60%{transform:translate(-10px,3px);clip-path:inset(20% 0 60% 0);filter:saturate(2);}
+    100%{transform:none;clip-path:none;filter:none;}
+  }
+  .sub.cut{animation:scene-cut 0.45s steps(3) forwards;}
+
+  /* element wipes — every keyframe must control opacity, otherwise inline opacity:0 from JS sticks */
+  @keyframes wipe-r{from{clip-path:inset(0 100% 0 0);opacity:1;}to{clip-path:inset(0 0 0 0);opacity:1;}}
+  @keyframes wipe-l{from{clip-path:inset(0 0 0 100%);opacity:1;}to{clip-path:inset(0 0 0 0);opacity:1;}}
+  @keyframes wipe-d{from{clip-path:inset(0 0 100% 0);opacity:1;}to{clip-path:inset(0 0 0 0);opacity:1;}}
+  @keyframes drop-in{from{opacity:0;transform:translateY(-20px);}to{opacity:1;transform:none;}}
+  @keyframes pop-in{from{opacity:0;transform:scale(0.85);}to{opacity:1;transform:scale(1);}}
+  @keyframes fade-in{from{opacity:0;}to{opacity:1;}}
+
+  .anim-wipe-r{animation:wipe-r 0.4s cubic-bezier(0.4,0,0.2,1) both;}
+  .anim-wipe-l{animation:wipe-l 0.4s cubic-bezier(0.4,0,0.2,1) both;}
+  .anim-wipe-d{animation:wipe-d 0.4s cubic-bezier(0.4,0,0.2,1) both;}
+  .anim-drop  {animation:drop-in 0.35s cubic-bezier(0.4,0,0.2,1) both;}
+  .anim-pop   {animation:pop-in 0.3s cubic-bezier(0.4,0,0.2,1) both;}
+  .anim-fade  {animation:fade-in 0.5s ease both;}
+
+  /* persistent ticker bar at bottom of scene group */
+  .ticker{
+    position:absolute;left:0;right:0;height:48px;
+    background:var(--fg);color:#0a0a0a;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.18em;
+    display:flex;align-items:center;
+    overflow:hidden;
+    z-index:50;
+  }
+  .ticker.bottom{bottom:0;}
+  .ticker.top{top:0;}
+  .ticker-track{
+    display:flex;gap:60px;white-space:nowrap;
+    padding-left:100%;
+    animation:scroll 28s linear infinite;
+  }
+  @keyframes scroll{from{transform:translateX(0);}to{transform:translateX(-100%);}}
+  .ticker-dot{display:inline-block;width:14px;height:14px;background:#0a0a0a;border-radius:50%;vertical-align:middle;margin:0 16px;}
+
+  /* small spinning glyph */
+  @keyframes spinslow{from{transform:rotate(0);}to{transform:rotate(360deg);}}
+  .spin{animation:spinslow 8s linear infinite;}
+
+  /* timer pulse */
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  .pulse{animation:pulse 1s ease-in-out infinite;}
+
+  /* ===================== SCENE GROUPS ===================== */
+
+  /* Each scene group has a different accent color */
+  .grp1 { --acc:#00ff8c; --acc-dim:rgba(0,255,140,0.18); }
+  .grp2 { --acc:#ff2080; --acc-dim:rgba(255,32,128,0.18); }
+  .grp3 { --acc:#ffea00; --acc-dim:rgba(255,234,0,0.18); }
+  .grp4 { --acc:#c850ff; --acc-dim:rgba(200,80,255,0.18); }
+  .grp5 { --acc:#00e5ff; --acc-dim:rgba(0,229,255,0.18); }
+  .grp6 { --acc:#f4f1e8; --acc-dim:rgba(244,241,232,0.18); }
+
+  /* common reveal panels */
+  .panel{
+    border:3px solid var(--rule);
+    padding:24px 30px;
+  }
+  .panel.acc{border-color:var(--acc);}
+  .panel.fill{background:var(--fg);color:#0a0a0a;}
+
+  /* huge title block */
+  .hero{
+    position:absolute;
+    font-family:'Russo One',sans-serif;
+    line-height:0.88;letter-spacing:-0.015em;
+  }
+  .hero .yr{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:0.7em;letter-spacing:0.04em;
+    color:var(--acc);
+  }
+
+  .stamp{
+    display:inline-block;
+    border:5px solid currentColor;
+    padding:10px 22px;
+    font-family:'JetBrains Mono',monospace;
+    font-weight:700;
+    letter-spacing:0.18em;
+    transform:rotate(-3deg);
+    text-transform:uppercase;
+  }
+
+  /* ============== SCENE 1: JSLINUX ============== */
+  .s1-bg{
+    position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 30% 50%,rgba(0,255,140,0.08),transparent 65%),
+      #050a07;
+  }
+  .s1-grid{
+    position:absolute;inset:0;
+    background-image:
+      linear-gradient(rgba(0,255,140,0.05) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(0,255,140,0.05) 1px,transparent 1px);
+    background-size:48px 48px;
+  }
+
+  /* 1A — title reveal */
+  .s1a-name{
+    position:absolute;top:280px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:520px;line-height:0.85;letter-spacing:0.02em;
+    color:var(--fg);
+  }
+  .s1a-name b{color:var(--acc);font-weight:normal;}
+  .s1a-yr{
+    position:absolute;top:160px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:320px;line-height:0.85;color:var(--acc);
+  }
+  .s1a-tag{
+    position:absolute;top:880px;left:90px;
+    font-family:'Russo One',sans-serif;
+    font-size:80px;line-height:1;color:var(--fg);
+    border-left:14px solid var(--acc);
+    padding-left:34px;
+    max-width:2380px;
+  }
+  .s1a-stamp{
+    position:absolute;bottom:120px;right:140px;
+    color:var(--acc);
+    font-size:36px;
+  }
+
+  /* 1B — explainer */
+  .s1b-eyebrow{
+    position:absolute;top:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;
+    font-weight:700;
+    font-size:24px;letter-spacing:0.4em;
+    color:var(--acc);
+  }
+  .s1b-question{
+    position:absolute;top:140px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:120px;line-height:1;color:var(--fg);
+    letter-spacing:-0.01em;
+  }
+  .s1b-eq{
+    position:absolute;top:380px;left:80px;width:2400px;
+    display:flex;align-items:stretch;gap:28px;
+    height:780px;
+  }
+  .s1b-card{
+    flex:1;
+    border:5px solid var(--rule);
+    padding:36px 30px;
+    display:flex;flex-direction:column;justify-content:space-between;
+    background:#0c0c0c;
+  }
+  .s1b-card.acc{
+    border-color:var(--acc);
+    background:rgba(0,255,140,0.05);
+  }
+  .s1b-card .lab{
+    font-family:'JetBrains Mono',monospace;
+    font-weight:700;
+    font-size:18px;letter-spacing:0.3em;
+    color:var(--acc);
+    margin-bottom:10px;
+  }
+  .s1b-card .nm{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:140px;line-height:0.95;
+    margin:8px 0 16px;
+  }
+  .s1b-card .nm-cyr{
+    font-family:'Russo One',sans-serif;
+    font-size:96px;line-height:1;
+    margin:8px 0 16px;
+    letter-spacing:-0.01em;
+  }
+  .s1b-card .desc{
+    font-family:'JetBrains Mono',monospace;
+    font-size:22px;line-height:1.45;
+    color:rgba(244,241,232,0.85);
+  }
+  .s1b-card .desc b{color:var(--acc);}
+  .s1b-op{
+    flex:0 0 80px;
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Russo One',sans-serif;
+    font-size:120px;color:var(--acc);
+  }
+  .s1b-foot{
+    position:absolute;bottom:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:24px;letter-spacing:0.1em;
+    color:rgba(244,241,232,0.7);
+    border-left:8px solid var(--acc);padding-left:24px;
+    max-width:2400px;
+    line-height:1.5;
+  }
+
+  /* 1C — terminal */
+  .s1c-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s1c-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:88px;line-height:1;
+  }
+  .s1c-browser{
+    position:absolute;top:280px;left:80px;
+    width:1700px;height:880px;
+    background:#1a1a1a;
+    border:3px solid var(--rule);
+    box-shadow:0 0 80px rgba(0,255,140,0.12);
+  }
+  .s1c-chrome{
+    background:linear-gradient(to bottom,#bbb,#888);
+    height:54px;display:flex;align-items:center;
+    padding:0 20px;border-bottom:2px solid #444;gap:18px;
+  }
+  .s1c-dots{display:flex;gap:9px;}
+  .s1c-dot{width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,0.25);}
+  .s1c-url{
+    flex:1;background:#fff;border:1px solid #777;
+    padding:7px 14px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:16px;color:#222;
+  }
+  .s1c-bbody{
+    background:#000;height:calc(100% - 54px);
+    padding:24px 30px;
+    font-family:'VT323',monospace;
+    font-size:24px;line-height:1.18;
+    color:#c8ffc8;
+    overflow:hidden;position:relative;
+  }
+  .s1c-bbody .ln{display:block;}
+  .s1c-bbody .ok{color:#00ff88;}
+  .s1c-bbody .warn{color:#ffcc44;}
+  .s1c-bbody .prompt{color:#00ff88;}
+  .s1c-bbody .b{font-weight:700;}
+  .s1c-cur{
+    display:inline-block;width:12px;height:22px;
+    background:#00ff88;vertical-align:middle;
+    animation:caret 1s steps(2) infinite;
+  }
+  @keyframes caret{50%{opacity:0;}}
+  .s1c-side{
+    position:absolute;top:280px;left:1820px;
+    width:660px;height:880px;
+    display:flex;flex-direction:column;gap:12px;
+  }
+  .s1c-spec{
+    border:3px solid var(--acc);
+    background:rgba(0,255,140,0.06);
+    padding:14px 22px;
+    flex:1;
+  }
+  .s1c-spec .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:13px;letter-spacing:0.3em;
+    color:var(--acc);
+  }
+  .s1c-spec .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:50px;line-height:1;color:var(--fg);
+    margin-top:4px;
+  }
+  .s1c-spec .v-cyr{
+    font-family:'Russo One',sans-serif;
+    font-size:30px;line-height:1.05;color:var(--fg);
+    margin-top:4px;
+  }
+  .s1c-spec .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px;letter-spacing:0.1em;
+    color:rgba(244,241,232,0.5);margin-top:4px;
+  }
+
+  /* compact forum quote banner used inline inside other sub-scenes */
+  .quote-banner{
+    position:absolute;
+    background:rgba(0,255,140,0.07);
+    border-left:8px solid var(--acc);
+    padding:18px 28px;
+    font-family:'JetBrains Mono',monospace;
+    line-height:1.4;
+  }
+  .quote-banner .src{
+    display:block;
+    font-size:14px;font-weight:700;letter-spacing:0.2em;
+    color:var(--acc);margin-bottom:6px;
+  }
+  .quote-banner .src small{font-weight:400;color:rgba(244,241,232,0.4);margin-left:10px;}
+  .quote-banner .txt{
+    font-size:24px;font-weight:500;color:var(--fg);
+  }
+  .quote-banner .txt b{color:var(--acc);}
+
+  /* 1D — quotes */
+  .s1d-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s1d-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:88px;
+  }
+  .s1d-quotes{
+    position:absolute;top:280px;left:80px;width:2400px;
+    display:flex;flex-direction:column;gap:22px;
+  }
+  .s1d-q{
+    display:flex;gap:30px;align-items:flex-start;
+    border-left:8px solid var(--acc);
+    padding:18px 28px;
+    background:rgba(0,255,140,0.05);
+  }
+  .s1d-q .src{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:20px;color:var(--acc);
+    letter-spacing:0.15em;
+    width:280px;flex-shrink:0;line-height:1.4;
+  }
+  .s1d-q .src small{
+    display:block;font-size:14px;color:rgba(244,241,232,0.5);
+    letter-spacing:0.1em;margin-top:4px;font-weight:400;
+  }
+  .s1d-q .txt{
+    font-family:'JetBrains Mono',monospace;font-weight:500;
+    font-size:30px;line-height:1.4;
+    color:var(--fg);
+    flex:1;
+  }
+  .s1d-q .txt b{color:var(--acc);}
+
+  /* ============== SCENE 2: AMARISOFT ============== */
+  .s2-bg{
+    position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 80% 30%,rgba(255,32,128,0.1),transparent 60%),
+      radial-gradient(ellipse at 20% 80%,rgba(0,80,255,0.06),transparent 60%),
+      #08050a;
+  }
+
+  /* 2AB merged title + traditional */
+  .s2ab-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s2ab-name{
+    position:absolute;top:100px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:280px;line-height:0.85;letter-spacing:0.01em;
+    color:var(--fg);
+  }
+  .s2ab-yr{
+    position:absolute;top:110px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:240px;line-height:0.85;color:var(--acc);
+  }
+  .s2ab-explainer{
+    position:absolute;top:430px;left:80px;
+    width:1200px;height:920px;
+    border:3px solid var(--rule);
+    background:#0c0c0c;
+    padding:32px 36px;
+    display:grid;
+    grid-template-columns:340px 1fr;
+    grid-template-rows:auto 1fr;
+    gap:24px 36px;
+  }
+  .s2ab-exp-title{
+    grid-column:1 / 3;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.3em;
+    color:var(--acc);
+    border-bottom:2px solid var(--rule);
+    padding-bottom:14px;
+  }
+  .s2ab-exp-tower{
+    color:var(--acc);
+    grid-row:2;grid-column:1;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .s2ab-exp-stats{
+    grid-row:2;grid-column:2;
+    display:flex;flex-direction:column;justify-content:center;gap:24px;
+  }
+  .s2ab-exp-stat .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:16px;letter-spacing:0.25em;
+    color:var(--acc);margin-bottom:8px;
+  }
+  .s2ab-exp-stat .v{
+    font-family:'Russo One',sans-serif;
+    font-size:32px;line-height:1.2;color:var(--fg);
+  }
+  .s2ab-trad{
+    position:absolute;top:430px;left:1320px;
+    width:1180px;height:920px;
+    border:3px solid var(--acc);
+    background:rgba(255,32,128,0.03);
+    padding:32px 36px;
+    display:grid;
+    grid-template-rows:auto auto 1fr auto;
+    gap:18px;
+  }
+  .s2ab-trad-head{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.3em;color:var(--acc);
+  }
+  .s2ab-trad-price{
+    border-bottom:2px solid var(--rule);padding-bottom:18px;
+  }
+  .s2ab-trad-price .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:16px;letter-spacing:0.25em;color:var(--acc);
+  }
+  .s2ab-trad-price .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:200px;line-height:0.9;color:var(--fg);margin-top:4px;
+  }
+  .s2ab-trad-price .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:16px;color:rgba(244,241,232,0.55);
+    letter-spacing:0.05em;
+  }
+  .s2ab-trad-rack{
+    overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .s2ab-trad-rack .rh{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:13px;letter-spacing:0.25em;
+    color:rgba(244,241,232,0.45);margin-bottom:8px;
+  }
+  .s2ab-trad-rack #s2ab-rackcont{flex:1;display:flex;flex-direction:column;gap:6px;}
+  .s2ab-trad-rack .s2b-unit{margin:0;height:36px;font-size:12px;}
+  .s2ab-trad-rack .s2b-unit .led{width:8px;height:8px;}
+  .s2ab-trad-foot{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.05em;
+    color:rgba(244,241,232,0.85);
+    border-top:2px solid var(--rule);padding-top:14px;
+  }
+  .s2ab-trad-foot .x{color:var(--acc);font-weight:900;margin:0 4px;}
+
+  /* 2A — what is a base station */
+  .s2a-eyebrow{
+    position:absolute;top:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:24px;letter-spacing:0.4em;color:var(--acc);
+  }
+  .s2a-q{
+    position:absolute;top:130px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:130px;line-height:1;
+  }
+  .s2a-illust{
+    position:absolute;top:380px;left:80px;
+    width:2400px;height:600px;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 80px;
+  }
+  .s2a-tower{
+    width:340px;height:540px;
+    position:relative;
+    color:var(--acc);
+    display:flex;align-items:flex-end;justify-content:center;
+  }
+  .s2a-phone{
+    width:180px;height:340px;
+    border:8px solid var(--fg);
+    border-radius:24px;
+    position:relative;
+    background:#0a0a0a;
+  }
+  .s2a-phone::after{
+    content:'';position:absolute;
+    top:60px;left:14px;right:14px;bottom:30px;
+    background:repeating-linear-gradient(to bottom,
+      rgba(0,229,255,0.4) 0,rgba(0,229,255,0.4) 4px,
+      transparent 4px,transparent 14px);
+  }
+  .s2a-arrow{
+    flex:1;display:flex;align-items:center;justify-content:center;
+    position:relative;
+    color:var(--acc);
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:36px;letter-spacing:0.1em;
+  }
+  .s2a-bottom{
+    position:absolute;bottom:80px;left:80px;width:2400px;
+    border-top:6px solid var(--acc);padding-top:32px;
+    display:flex;gap:60px;
+  }
+  .s2a-bottom .col{flex:1;}
+  .s2a-bottom .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;
+    color:var(--acc);margin-bottom:8px;
+  }
+  .s2a-bottom .v{
+    font-family:'Russo One',sans-serif;
+    font-size:42px;line-height:1.2;
+  }
+
+  /* 2B — traditional */
+  .s2b-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s2b-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:96px;
+  }
+  .s2b-grid{
+    position:absolute;top:300px;left:80px;width:2400px;
+    display:grid;grid-template-columns:1fr 1.6fr;gap:50px;
+  }
+  .s2b-price{
+    border:6px solid var(--acc);
+    background:rgba(255,32,128,0.05);
+    padding:50px 50px;
+    display:flex;flex-direction:column;justify-content:space-between;
+    height:980px;
+  }
+  .s2b-price .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.3em;
+    color:var(--acc);
+  }
+  .s2b-price .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:340px;line-height:0.85;color:var(--fg);
+    margin:18px 0;
+  }
+  .s2b-price .vsub{
+    font-family:'Russo One',sans-serif;
+    font-size:36px;line-height:1.2;color:rgba(244,241,232,0.6);
+    margin-bottom:24px;
+  }
+  .s2b-price .extras{
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;line-height:1.6;
+    color:rgba(244,241,232,0.7);
+  }
+  .s2b-price .extras div{padding:6px 0;border-top:1px solid rgba(244,241,232,0.1);}
+  .s2b-price .extras .x{color:var(--acc);font-weight:700;}
+  .s2b-rack{
+    background:#0c0c0c;
+    border:3px solid var(--rule);
+    padding:20px;
+    height:980px;
+    overflow:hidden;
+    position:relative;
+  }
+  .s2b-rack .rh{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:16px;letter-spacing:0.3em;
+    color:rgba(244,241,232,0.5);margin-bottom:12px;
+  }
+  .s2b-unit{
+    background:linear-gradient(to bottom,#222,#111);
+    border:1px solid #444;
+    height:60px;
+    margin-bottom:8px;
+    display:flex;align-items:center;
+    padding:0 18px;
+    justify-content:space-between;
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;letter-spacing:0.1em;
+    color:rgba(244,241,232,0.85);
+  }
+  .s2b-unit .led{
+    width:9px;height:9px;border-radius:50%;
+    background:var(--acc);
+    box-shadow:0 0 12px var(--acc);
+  }
+  .s2b-unit .leds{display:flex;gap:6px;}
+
+  /* 2C — bellard */
+  .s2c-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:#00e5ff;
+  }
+  .s2c-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:96px;
+  }
+  .s2c-grid{
+    position:absolute;top:300px;left:80px;width:2400px;
+    display:grid;grid-template-columns:1fr 1.6fr;gap:50px;
+  }
+  .s2c-price{
+    border:6px solid #00e5ff;
+    background:rgba(0,229,255,0.05);
+    padding:50px 50px;
+    display:flex;flex-direction:column;justify-content:space-between;
+    height:980px;
+  }
+  .s2c-price .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.3em;
+    color:#00e5ff;
+  }
+  .s2c-price .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:340px;line-height:0.85;color:var(--fg);
+    margin:18px 0;
+  }
+  .s2c-price .vsub{
+    font-family:'Russo One',sans-serif;
+    font-size:36px;line-height:1.2;color:rgba(244,241,232,0.6);
+    margin-bottom:24px;
+  }
+  .s2c-price .extras{
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;line-height:1.6;
+    color:rgba(244,241,232,0.85);
+  }
+  .s2c-price .extras div{padding:6px 0;border-top:1px solid rgba(244,241,232,0.1);}
+  .s2c-price .extras .b{color:#00e5ff;font-weight:700;}
+  .s2c-pc{
+    background:#0c0c0c;
+    border:3px solid rgba(0,229,255,0.3);
+    height:980px;position:relative;
+    overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .s2c-pc .ph{
+    background:rgba(0,229,255,0.15);
+    border-bottom:1px solid rgba(0,229,255,0.3);
+    padding:14px 22px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;letter-spacing:0.2em;
+    color:#00e5ff;font-weight:700;
+    display:flex;justify-content:space-between;
+  }
+  .s2c-pc .pb{
+    flex:1;
+    padding:22px 26px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;line-height:1.5;
+    color:#cfeeff;
+    overflow:hidden;
+  }
+  .s2c-pc .pb .ts{color:rgba(0,229,255,0.5);margin-right:10px;}
+  .s2c-pc .pb .info{color:#88e0ff;}
+  .s2c-pc .pb .ok{color:#00ff88;}
+  .s2c-pc .pb .stat{color:#ffcc44;}
+  .s2c-pc .pb .ue{color:#ff88ff;}
+
+  /* 2D — world map */
+  .s2d-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s2d-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:96px;
+  }
+  .s2d-counter{
+    position:absolute;top:80px;right:120px;
+    text-align:right;
+  }
+  .s2d-counter .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:20px;letter-spacing:0.3em;
+    color:var(--acc);
+  }
+  .s2d-counter .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:240px;line-height:0.85;color:var(--fg);
+  }
+  .s2d-counter .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;letter-spacing:0.2em;
+    color:rgba(244,241,232,0.5);
+  }
+  .s2d-mapwrap{
+    position:absolute;top:340px;left:80px;
+    width:2400px;height:880px;
+    border:3px solid var(--rule);
+    background:rgba(0,30,40,0.3);
+    overflow:hidden;
+  }
+  .s2d-stats{
+    position:absolute;bottom:80px;left:80px;width:2400px;
+    display:flex;gap:30px;
+  }
+  .s2d-stat{
+    flex:1;
+    border-top:5px solid var(--acc);
+    padding:14px 0 0;
+  }
+  .s2d-stat .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:14px;letter-spacing:0.3em;
+    color:var(--acc);
+  }
+  .s2d-stat .v{
+    font-family:'Russo One',sans-serif;
+    font-size:32px;line-height:1.1;margin-top:6px;
+  }
+
+  /* 2E — vendors */
+  .s2e-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s2e-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:96px;line-height:1;
+  }
+  .s2e-list{
+    position:absolute;top:330px;left:80px;width:2400px;
+    display:flex;flex-direction:column;gap:18px;
+  }
+  .s2e-row{
+    display:flex;align-items:center;gap:30px;
+    padding:24px 30px;
+    border:3px solid var(--rule);
+    background:#0c0c0c;
+    height:130px;
+  }
+  .s2e-row.uses{
+    border-color:var(--acc);
+    background:rgba(255,32,128,0.08);
+  }
+  .s2e-row .num{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:96px;line-height:1;
+    width:120px;color:rgba(244,241,232,0.4);
+  }
+  .s2e-row.uses .num{color:var(--acc);}
+  .s2e-row .nm{
+    font-family:'Russo One',sans-serif;
+    font-size:64px;line-height:1;flex:1;letter-spacing:-0.01em;
+  }
+  .s2e-row .tag{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;
+    border:3px solid var(--acc);
+    padding:10px 18px;color:var(--acc);
+    text-transform:uppercase;
+  }
+  .s2e-row .pct{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:64px;line-height:1;
+    color:rgba(244,241,232,0.6);
+    width:160px;text-align:right;
+  }
+  .s2e-foot{
+    position:absolute;bottom:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:26px;letter-spacing:0.05em;
+    color:var(--fg);
+    border-left:8px solid var(--acc);
+    padding-left:24px;line-height:1.4;
+    max-width:2400px;
+  }
+  .s2e-foot b{color:var(--acc);}
+
+  /* ============== SCENE 3: QUICKJS ============== */
+  .s3-bg{
+    position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 50% 40%,rgba(255,234,0,0.08),transparent 65%),
+      #0a0905;
+  }
+
+  /* 3 TITLE — large QuickJS hero */
+  .s3title-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s3title-name{
+    position:absolute;top:120px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:560px;line-height:0.85;letter-spacing:0.005em;
+    color:var(--fg);
+  }
+  .s3title-yr{
+    position:absolute;top:160px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:300px;line-height:0.85;color:var(--acc);
+  }
+  .s3title-tag{
+    position:absolute;top:780px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:64px;line-height:1.15;
+    border-left:14px solid var(--acc);padding-left:34px;
+    max-width:2400px;
+  }
+  .s3title-tag b{color:var(--acc);}
+  .s3title-stats{
+    position:absolute;bottom:80px;left:80px;width:2400px;
+    display:flex;gap:30px;
+  }
+  .s3title-stat{
+    flex:1;border-top:6px solid var(--acc);
+    padding:18px 0 0;
+  }
+  .s3title-stat .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;color:var(--acc);
+  }
+  .s3title-stat .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:140px;line-height:0.9;color:var(--fg);margin-top:6px;
+  }
+
+  /* 3A what is js engine */
+  .s3a-eyebrow{
+    position:absolute;top:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:24px;letter-spacing:0.4em;color:var(--acc);
+  }
+  .s3a-q{
+    position:absolute;top:130px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:130px;line-height:1;
+  }
+  .s3a-flow{
+    position:absolute;top:380px;left:80px;width:2400px;height:560px;
+    display:flex;align-items:center;justify-content:space-between;gap:30px;
+  }
+  .s3a-step{
+    flex:1;
+    border:5px solid var(--rule);
+    background:#0c0c0c;
+    padding:28px 26px;
+    height:480px;
+    display:flex;flex-direction:column;justify-content:space-between;
+    position:relative;
+  }
+  .s3a-step.acc{
+    border-color:var(--acc);
+    background:rgba(255,234,0,0.06);
+  }
+  .s3a-step .lab{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;
+    color:var(--acc);
+  }
+  .s3a-step .t{
+    font-family:'Russo One',sans-serif;
+    font-size:50px;line-height:1.05;
+    margin:14px 0;
+  }
+  .s3a-step .demo{
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;line-height:1.55;
+    color:rgba(244,241,232,0.7);
+    background:#000;border:1px solid var(--rule);
+    padding:14px 16px;
+  }
+  .s3a-arr{
+    flex:0 0 60px;
+    font-family:'Russo One',sans-serif;
+    font-size:80px;color:var(--acc);
+    text-align:center;
+  }
+  .s3a-foot{
+    position:absolute;bottom:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:26px;letter-spacing:0.05em;line-height:1.4;
+    border-left:8px solid var(--acc);padding-left:24px;
+    max-width:2400px;
+  }
+  .s3a-foot b{color:var(--acc);}
+
+  /* 3B/C/D engine showcase */
+  .s3-eng-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;
+  }
+  .s3-eng-title{
+    position:absolute;top:120px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:300px;line-height:0.85;letter-spacing:0.01em;
+  }
+  .s3-eng-vendor{
+    position:absolute;top:140px;right:120px;text-align:right;
+    font-family:'Russo One',sans-serif;
+    font-size:80px;line-height:1;
+    color:rgba(244,241,232,0.7);
+  }
+  .s3-eng-vendor span{
+    display:block;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:24px;letter-spacing:0.2em;
+    color:rgba(244,241,232,0.4);margin-top:8px;
+  }
+  .s3-eng-stats{
+    position:absolute;top:560px;left:80px;width:1600px;
+    display:grid;grid-template-columns:1fr 1fr;gap:24px;
+  }
+  .s3-eng-stat{
+    border-top:6px solid currentColor;
+    padding:18px 0 0;
+  }
+  .s3-eng-stat .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.25em;
+    color:rgba(244,241,232,0.6);
+  }
+  .s3-eng-stat .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:120px;line-height:1;margin-top:6px;
+  }
+  .s3-eng-stat .u{
+    font-family:'JetBrains Mono',monospace;font-weight:500;
+    font-size:18px;letter-spacing:0.1em;
+    color:rgba(244,241,232,0.5);
+  }
+  .s3-eng-side{
+    position:absolute;top:560px;right:120px;
+    width:760px;border:3px solid var(--rule);
+    padding:24px 28px;background:#0c0c0c;
+  }
+  .s3-eng-side h4{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:16px;letter-spacing:0.3em;
+    color:rgba(244,241,232,0.5);margin-bottom:14px;
+  }
+  .s3-eng-side ul{list-style:none;}
+  .s3-eng-side li{
+    border-bottom:1px solid var(--rule);padding:10px 0;
+    font-family:'JetBrains Mono',monospace;
+    font-size:18px;display:flex;justify-content:space-between;
+  }
+  .s3-eng-side li b{color:var(--fg);}
+  .s3-eng-side li span{color:rgba(244,241,232,0.5);}
+
+  /* 3E comparison */
+  .s3e-title{
+    position:absolute;top:60px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:96px;line-height:1;
+  }
+  .s3e-eyebrow{
+    position:absolute;top:60px;right:120px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s3e-bars{
+    position:absolute;top:280px;left:80px;width:2400px;
+    display:flex;flex-direction:column;gap:30px;
+  }
+  .s3e-row{
+    display:flex;align-items:center;gap:36px;
+    height:140px;
+  }
+  .s3e-row .nm{
+    width:520px;flex-shrink:0;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:96px;line-height:1;letter-spacing:0.02em;
+  }
+  .s3e-row .nm small{
+    display:block;font-family:'JetBrains Mono',monospace;
+    font-size:18px;letter-spacing:0.15em;
+    color:rgba(244,241,232,0.5);font-weight:700;margin-top:2px;
+  }
+  .s3e-row .barouter{
+    flex:1;height:80px;
+    border:3px solid var(--rule);
+    position:relative;overflow:hidden;
+    background:#0c0c0c;
+  }
+  .s3e-row .barfill{
+    height:100%;width:0;
+  }
+  .s3e-row .v{
+    width:340px;flex-shrink:0;text-align:right;
+    font-family:'Russo One',sans-serif;
+    font-size:64px;line-height:1;
+  }
+  .s3e-row.qjs .v,.s3e-row.qjs .nm{color:var(--acc);}
+  .s3e-foot{
+    position:absolute;bottom:100px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:30px;letter-spacing:0.05em;line-height:1.4;
+    border-left:8px solid var(--acc);padding-left:24px;
+    max-width:2400px;
+  }
+  .s3e-foot b{color:var(--acc);}
+
+  /* 3F embedded explainer */
+  .s3f-eyebrow{
+    position:absolute;top:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:24px;letter-spacing:0.4em;color:var(--acc);
+  }
+  .s3f-q{
+    position:absolute;top:130px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:120px;line-height:1;
+  }
+  .s3f-grid{
+    position:absolute;top:380px;left:80px;width:2400px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:24px;height:540px;
+  }
+  .s3f-card{
+    border:4px solid var(--rule);background:#0c0c0c;
+    padding:24px 22px;
+    display:flex;flex-direction:column;justify-content:space-between;
+  }
+  .s3f-card .pic{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:120px;line-height:1;color:var(--acc);text-align:center;
+  }
+  .s3f-card .nm{
+    font-family:'Russo One',sans-serif;
+    font-size:38px;line-height:1.05;
+    margin-top:8px;
+  }
+  .s3f-card .ram{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:60px;color:var(--acc);line-height:1;
+    margin-top:10px;
+  }
+  .s3f-card .desc{
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;color:rgba(244,241,232,0.6);
+    letter-spacing:0.1em;margin-top:6px;
+  }
+  .s3f-foot{
+    position:absolute;bottom:80px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:28px;letter-spacing:0.05em;line-height:1.4;
+    border-left:8px solid var(--acc);padding-left:24px;
+    max-width:2400px;
+  }
+  .s3f-foot b{color:var(--acc);}
+
+  /* 3G size compare */
+  .s3g-title{
+    position:absolute;top:60px;left:80px;
+    font-family:'Russo One',sans-serif;font-size:88px;line-height:1;
+  }
+  .s3g-eyebrow{
+    position:absolute;top:60px;right:120px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s3g-rows{
+    position:absolute;top:300px;left:80px;width:2400px;
+    display:flex;flex-direction:column;gap:30px;
+  }
+  .s3g-row{
+    display:flex;align-items:center;gap:30px;
+    height:170px;
+    padding:20px 30px;
+    border:3px solid var(--rule);
+    background:#0c0c0c;
+  }
+  .s3g-row.win{border-color:var(--acc);background:rgba(255,234,0,0.05);}
+  .s3g-row .nm{
+    width:560px;flex-shrink:0;
+    font-family:'Russo One',sans-serif;
+    font-size:38px;line-height:1.1;
+  }
+  .s3g-row .vis{
+    flex:1;height:100px;position:relative;background:#080808;
+    border:2px solid var(--rule);overflow:hidden;
+  }
+  .s3g-row .visfill{
+    position:absolute;left:0;top:0;height:100%;
+    background:repeating-linear-gradient(45deg,var(--rule),var(--rule) 4px,transparent 4px,transparent 8px);
+    width:0;
+  }
+  .s3g-row.win .visfill{background:var(--acc);}
+  .s3g-row .v{
+    width:300px;flex-shrink:0;text-align:right;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:88px;line-height:1;
+  }
+  .s3g-row.win .v{color:var(--acc);}
+
+  /* 3DE merged: shrink the top half so comparison fits below */
+  #s3de .s3-eng-eyebrow{top:50px;}
+  #s3de .s3-eng-title{top:90px;font-size:200px;}
+  #s3de .s3-eng-vendor{top:130px;font-size:54px;}
+  #s3de .s3-eng-stats{
+    top:340px;left:80px;width:1500px;
+  }
+  #s3de .s3-eng-stat .v{font-size:80px;}
+  #s3de .s3-eng-side{
+    top:340px;right:120px;width:760px;height:280px;
+    padding:18px 24px;
+  }
+  #s3de .s3-eng-side ul li{padding:5px 0;font-size:15px;}
+  #s3de .s3-eng-side h4{margin-bottom:8px;font-size:14px;}
+  .s3de-cmp{
+    position:absolute;top:740px;left:80px;width:2400px;
+    border-top:4px solid var(--acc);
+    padding-top:24px;
+    display:flex;flex-direction:column;gap:18px;
+  }
+  .s3de-cmp-head{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.3em;color:var(--acc);
+  }
+  .s3de-cmp-foot{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:32px;letter-spacing:0.05em;line-height:1.4;
+    border-left:8px solid var(--acc);padding-left:24px;
+    margin-top:14px;
+  }
+  .s3de-cmp-foot b{color:var(--acc);font-size:48px;}
+  /* shrink rows for embed */
+  #s3de .s3e-row{height:90px;}
+  #s3de .s3e-row .nm{width:480px;font-size:60px;}
+  #s3de .s3e-row .nm small{font-size:14px;}
+  #s3de .s3e-row .barouter{height:50px;}
+  #s3de .s3e-row .v{font-size:46px;width:300px;}
+
+  /* 3FG merged */
+  #s3fg .s3fg-eyebrow{
+    position:absolute;top:50px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  #s3fg .s3fg-name{
+    position:absolute;top:90px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:240px;line-height:0.85;color:var(--fg);
+  }
+  #s3fg .s3fg-yr{
+    position:absolute;top:120px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:200px;line-height:0.85;color:var(--acc);
+  }
+  .s3fg-left{
+    position:absolute;top:340px;left:80px;
+    width:1180px;height:1020px;
+    border:3px solid var(--rule);
+    background:#0c0c0c;padding:30px 36px;
+    display:flex;flex-direction:column;gap:18px;
+  }
+  .s3fg-right{
+    position:absolute;top:340px;left:1300px;
+    width:1180px;height:1020px;
+    border:3px solid var(--acc);
+    background:rgba(255,234,0,0.04);padding:30px 36px;
+    display:flex;flex-direction:column;gap:24px;
+    overflow:hidden;
+  }
+  /* tighter rows for narrow column — override base absolute positioning */
+  #s3fg .s3g-rows{
+    position:static !important;
+    top:auto !important;left:auto !important;width:auto !important;
+    flex:1;
+    display:flex;flex-direction:column;
+    justify-content:space-around;
+    gap:0;
+  }
+  #s3fg .s3g-row{
+    height:auto;padding:18px 22px;
+    display:grid !important;
+    grid-template-columns:1fr 100px;
+    grid-template-rows:auto 60px;
+    column-gap:24px;row-gap:14px;
+    align-items:center;
+    width:100%;
+    box-sizing:border-box;
+  }
+  #s3fg .s3g-row .nm{
+    grid-column:1;grid-row:1;
+    width:auto !important;flex:none;
+    font-family:'Russo One',sans-serif;
+    font-size:24px;line-height:1.2;
+    min-width:0;
+  }
+  #s3fg .s3g-row .nm small{
+    display:block;
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px;letter-spacing:0.15em;
+    color:rgba(244,241,232,0.5);font-weight:700;
+    margin-top:4px;
+  }
+  #s3fg .s3g-row .v{
+    grid-column:2;grid-row:1;
+    width:auto !important;flex:none;text-align:right;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:54px;line-height:1;
+    min-width:0;
+  }
+  #s3fg .s3g-row .vis{
+    grid-column:1 / 3;grid-row:2;
+    width:100% !important;height:100% !important;flex:none;
+    min-width:0;
+  }
+  .s3fg-block-title{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;color:var(--acc);
+    border-bottom:2px solid var(--rule);padding-bottom:14px;
+  }
+  .s3fg-block-sub{
+    font-family:'Russo One',sans-serif;
+    font-size:36px;line-height:1.15;color:var(--fg);
+  }
+  .s3fg-grid{
+    display:grid;grid-template-columns:repeat(2,1fr);gap:18px;
+    flex:1;
+  }
+  .s3fg-card{
+    border:3px solid var(--rule);background:#080808;
+    padding:18px 22px;
+    display:flex;flex-direction:column;justify-content:center;align-items:center;
+    text-align:center;
+  }
+  .s3fg-card .pic{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:80px;line-height:1;color:var(--acc);
+  }
+  .s3fg-card .nm{
+    font-family:'Russo One',sans-serif;
+    font-size:28px;margin-top:6px;
+  }
+  .s3fg-card .ram{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:60px;color:var(--acc);line-height:1;margin-top:6px;
+  }
+  .s3fg-foot{
+    font-family:'JetBrains Mono',monospace;font-weight:600;
+    font-size:20px;line-height:1.4;
+    border-left:6px solid var(--acc);padding-left:18px;
+  }
+  .s3fg-foot b{color:var(--acc);}
+  /* (old s3fg row hacks removed — replaced by grid above) */
+  .s4-bg{
+    position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 70% 40%,rgba(200,80,255,0.1),transparent 60%),
+      #060008;
+  }
+
+  /* 4A title */
+  .s4a-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s4a-name{
+    position:absolute;top:100px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:380px;line-height:0.85;letter-spacing:0.01em;
+  }
+  .s4a-yr{
+    position:absolute;top:120px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:240px;line-height:0.85;color:var(--acc);
+  }
+  .s4a-tag{
+    position:absolute;top:520px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:46px;line-height:1.2;
+    border-left:14px solid var(--acc);
+    padding-left:34px;max-width:2400px;
+  }
+  .s4a-info{
+    position:absolute;bottom:80px;left:80px;width:2400px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:24px;
+    height:520px;
+  }
+  .s4a-card{
+    border:3px solid var(--rule);background:#0c0c0c;
+    padding:28px 30px;
+    display:flex;flex-direction:column;gap:14px;
+  }
+  .s4a-card .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:16px;letter-spacing:0.3em;color:var(--acc);
+  }
+  .s4a-card .v{
+    font-family:'Russo One',sans-serif;
+    font-size:48px;line-height:1.05;color:var(--fg);
+  }
+  .s4a-card .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:16px;line-height:1.45;
+    color:rgba(244,241,232,0.7);
+    margin-top:auto;
+  }
+  .s4a-card .x b{color:var(--acc);}
+
+  /* 4B leaderboard */
+  .s4b-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s4b-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;font-size:80px;line-height:1;
+  }
+  .s4b-sub{
+    position:absolute;top:230px;left:80px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:24px;letter-spacing:0.05em;
+    color:rgba(244,241,232,0.6);
+    max-width:2400px;
+  }
+  .s4b-sub b{color:var(--acc);}
+  .s4b-rows{
+    position:absolute;top:340px;left:80px;width:2400px;
+    display:flex;flex-direction:column;gap:14px;
+  }
+  .s4b-row{
+    display:flex;align-items:center;gap:30px;
+    padding:16px 28px;
+    border-left:8px solid var(--rule);
+    background:#0c0c0c;
+    height:80px;
+  }
+  .s4b-row.win{
+    border-left-color:var(--acc);
+    background:rgba(200,80,255,0.12);
+  }
+  .s4b-row .rk{
+    width:60px;font-family:'Bebas Neue',sans-serif;
+    font-size:60px;line-height:1;
+    color:rgba(244,241,232,0.4);
+  }
+  .s4b-row.win .rk{color:var(--acc);}
+  .s4b-row .nm{
+    flex:1;font-family:'Russo One',sans-serif;
+    font-size:32px;line-height:1;
+  }
+  .s4b-row .nm small{
+    display:inline-block;font-family:'JetBrains Mono',monospace;
+    font-size:14px;letter-spacing:0.2em;
+    color:rgba(244,241,232,0.4);font-weight:400;margin-left:14px;
+  }
+  .s4b-row .yr{
+    width:80px;font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;color:rgba(244,241,232,0.4);
+    letter-spacing:0.15em;
+  }
+  .s4b-row .sz{
+    width:340px;text-align:right;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:54px;line-height:1;
+    font-feature-settings:"tnum";
+  }
+  .s4b-row.win .sz{color:var(--acc);}
+
+  /* 4C ts_zip */
+  .s4c-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s4c-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:300px;line-height:0.85;
+  }
+  .s4c-yr{
+    position:absolute;top:140px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:200px;line-height:1;color:var(--acc);
+  }
+  .s4c-desc{
+    position:absolute;top:520px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:48px;line-height:1.25;
+    border-left:10px solid var(--acc);
+    padding-left:30px;max-width:2400px;
+  }
+  .s4c-desc b{color:var(--acc);}
+  .s4c-demo{
+    position:absolute;top:880px;left:80px;width:2400px;height:380px;
+    display:flex;align-items:center;justify-content:center;gap:36px;
+  }
+  .s4c-blob{
+    border:5px solid;text-align:center;
+    display:flex;flex-direction:column;justify-content:space-between;
+    padding:30px 36px;
+  }
+  .s4c-blob.before{
+    border-color:var(--rule);
+    width:560px;height:340px;
+  }
+  .s4c-blob.after{
+    border-color:var(--acc);
+    width:200px;height:200px;
+    background:rgba(200,80,255,0.1);
+  }
+  .s4c-blob .lab{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;
+    color:rgba(244,241,232,0.6);
+  }
+  .s4c-blob.after .lab{color:var(--acc);}
+  .s4c-blob .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:120px;line-height:1;
+  }
+  .s4c-blob.after .v{font-size:60px;color:var(--acc);}
+  .s4c-blob .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:14px;letter-spacing:0.1em;
+    color:rgba(244,241,232,0.6);
+  }
+  .s4c-arr{
+    font-family:'Russo One',sans-serif;
+    font-size:80px;color:var(--acc);
+  }
+
+  /* ============== SCENE 5: TSAC ============== */
+  .s5-bg{
+    position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 50% 50%,rgba(0,229,255,0.1),transparent 60%),
+      #00080a;
+  }
+  .s5a-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s5a-name{
+    position:absolute;top:100px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:380px;line-height:0.85;
+  }
+  .s5a-yr{
+    position:absolute;top:120px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:240px;line-height:0.85;color:var(--acc);
+  }
+  .s5a-tag{
+    position:absolute;top:520px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:46px;line-height:1.2;
+    border-left:14px solid var(--acc);padding-left:34px;
+    max-width:2400px;
+  }
+  .s5a-tag b{color:var(--acc);}
+  .s5a-info{
+    position:absolute;bottom:80px;left:80px;width:2400px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:24px;
+    height:520px;
+  }
+  .s5a-card{
+    border:3px solid var(--rule);background:#0c0c0c;
+    padding:28px 30px;
+    display:flex;flex-direction:column;gap:14px;
+  }
+  .s5a-card .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:16px;letter-spacing:0.3em;color:var(--acc);
+  }
+  .s5a-card .v{
+    font-family:'Russo One',sans-serif;
+    font-size:38px;line-height:1.05;color:var(--fg);
+  }
+  .s5a-card .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:16px;line-height:1.45;
+    color:rgba(244,241,232,0.7);
+    margin-top:auto;
+  }
+  .s5a-card .x b{color:var(--acc);}
+
+  .s5b-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s5b-title{
+    position:absolute;top:110px;left:80px;
+    font-family:'Russo One',sans-serif;font-size:88px;line-height:1;
+  }
+  .s5b-bars{
+    position:absolute;top:300px;left:80px;width:2400px;
+    display:flex;flex-direction:column;gap:34px;
+  }
+  .s5b-row{
+    display:flex;align-items:center;gap:36px;
+    height:130px;
+  }
+  .s5b-row .nm{
+    width:480px;flex-shrink:0;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:88px;line-height:1;letter-spacing:0.02em;
+  }
+  .s5b-row .nm small{
+    display:block;font-family:'JetBrains Mono',monospace;
+    font-size:16px;letter-spacing:0.15em;
+    color:rgba(244,241,232,0.5);font-weight:700;margin-top:4px;
+  }
+  .s5b-row.win .nm{color:var(--acc);}
+  .s5b-row .barouter{
+    flex:1;height:80px;
+    border:3px solid var(--rule);background:#0c0c0c;
+    position:relative;overflow:hidden;
+  }
+  .s5b-row .barfill{
+    height:100%;width:0;
+  }
+  .s5b-row.win .barfill{
+    background:linear-gradient(to right,#00ffd0,var(--acc));
+    box-shadow:0 0 30px rgba(0,229,255,0.5);
+  }
+  .s5b-row.mp3low .barfill{background:linear-gradient(to right,#ff8c64,#ffaa44);}
+  .s5b-row.mp3hi .barfill{background:linear-gradient(to right,#ff5577,#ff3399);}
+  .s5b-row.opus .barfill{background:linear-gradient(to right,#88e0ff,#5599ff);}
+  .s5b-row .v{
+    width:340px;text-align:right;flex-shrink:0;
+    font-family:'Russo One',sans-serif;font-size:48px;line-height:1;
+  }
+  .s5b-row.win .v{color:var(--acc);}
+  .s5b-foot{
+    position:absolute;bottom:120px;left:80px;width:2400px;
+    display:flex;gap:30px;
+  }
+  .s5b-foot .col{
+    flex:1;border-top:5px solid var(--acc);
+    padding:14px 0 0;
+  }
+  .s5b-foot .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:14px;letter-spacing:0.3em;color:var(--acc);
+  }
+  .s5b-foot .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:90px;line-height:1;color:var(--fg);margin-top:4px;
+  }
+  .s5b-foot .x{
+    font-family:'JetBrains Mono',monospace;font-size:16px;
+    color:rgba(244,241,232,0.6);letter-spacing:0.05em;
+  }
+
+  /* 5C — final stamp */
+  .s5c-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:var(--acc);
+  }
+  .s5c-name{
+    position:absolute;top:140px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:1200px;line-height:0.78;letter-spacing:-0.02em;
+    color:var(--acc);
+  }
+  .s5c-name small{
+    display:block;font-family:'Russo One',sans-serif;
+    font-size:80px;color:var(--fg);line-height:1;letter-spacing:-0.01em;margin-top:0;
+  }
+
+  /* ============== SCENE 6: 2026 ============== */
+  .s6-bg{
+    position:absolute;inset:0;
+    background:#000;
+  }
+  .s6-eyebrow{
+    position:absolute;top:60px;left:80px;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:22px;letter-spacing:0.35em;color:rgba(244,241,232,0.6);
+  }
+  .s6-name{
+    position:absolute;top:120px;left:80px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:440px;line-height:0.85;
+  }
+  .s6-yr{
+    position:absolute;top:130px;right:120px;
+    font-family:'Bebas Neue',sans-serif;
+    font-size:280px;line-height:0.85;color:rgba(244,241,232,0.5);
+  }
+  .s6-tag{
+    position:absolute;top:680px;left:80px;
+    font-family:'Russo One',sans-serif;
+    font-size:62px;line-height:1.2;
+    border-left:14px solid var(--fg);padding-left:34px;
+    max-width:2400px;
+  }
+  .s6-tag b{color:var(--fg);background:rgba(244,241,232,0.08);padding:0 10px;}
+  .s6-counter{
+    position:absolute;bottom:80px;left:80px;width:2400px;
+    border-top:6px solid var(--fg);padding-top:24px;
+  }
+  .s6-counter .l{
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:18px;letter-spacing:0.3em;color:rgba(244,241,232,0.5);
+  }
+  .s6-counter .v{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:200px;line-height:0.9;margin-top:6px;
+  }
+  .s6-counter .x{
+    font-family:'JetBrains Mono',monospace;
+    font-size:22px;letter-spacing:0.05em;color:rgba(244,241,232,0.7);
+    margin-top:14px;line-height:1.5;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- INTRO -->
+  <div id="intro">
+    <h1>BELLARD<br>после <span>FFmpeg</span></h1>
+    <p>2011 — 2026 · 6 ПРОЕКТОВ · 130 СЕКУНД</p>
+    <div class="key">PRESS R / К</div>
+  </div>
+
+  <!-- Background canvas -->
+  <canvas class="layer" id="bgcanvas" width="2560" height="1440"></canvas>
+
+  <!-- =================================================== -->
+  <!-- =============== SCENE 1 SUBSCENES ================ -->
+  <!-- =================================================== -->
+
+  <!-- 1A title reveal -->
+  <div class="sub grp1" id="s1a">
+    <div class="s1-bg"></div><div class="s1-grid"></div>
+    <div class="s1a-name" data-anim="wipe-r" data-t="0">JS<b>LINUX</b></div>
+    <div class="s1a-yr" data-anim="drop" data-t="0.4">2011</div>
+    <div class="s1a-tag" data-anim="wipe-r" data-t="1.0">Полноценный <b style="color:var(--acc)">эмулятор Linux</b> на чистом JavaScript</div>
+    <div class="s1a-stamp stamp" data-anim="pop" data-t="1.6">1.7 MB · ВСЁ</div>
+  </div>
+
+  <!-- 1B explainer -->
+  <div class="sub grp1" id="s1b">
+    <div class="s1-bg"></div><div class="s1-grid"></div>
+    <div class="s1b-eyebrow" data-anim="wipe-r" data-t="0">// ЧТО ЭТО ЗНАЧИТ</div>
+    <div class="s1b-question" data-anim="wipe-r" data-t="0.2">Сложить две вещи, которые сложить нельзя.</div>
+    <div class="s1b-eq">
+      <div class="s1b-card" data-anim="wipe-d" data-t="0.8">
+        <div class="lab">A · ИНСТРУМЕНТ</div>
+        <div class="nm">JavaScript</div>
+        <div class="desc">В 2011 году — язык для <b>анимации меню и кнопок</b> на сайтах. Считался слабым, медленным, игрушечным.</div>
+      </div>
+      <div class="s1b-op" data-anim="pop" data-t="1.2">+</div>
+      <div class="s1b-card" data-anim="wipe-d" data-t="1.4">
+        <div class="lab">B · ЦЕЛЬ</div>
+        <div class="nm-cyr">Linux</div>
+        <div class="desc">Целая операционная система. Запускает серверы, спутники, телефоны. Внутри — миллионы строк С-кода и виртуальный <b>процессор x86</b>.</div>
+      </div>
+      <div class="s1b-op" data-anim="pop" data-t="1.8">=</div>
+      <div class="s1b-card acc" data-anim="wipe-d" data-t="2.0">
+        <div class="lab">C · РЕЗУЛЬТАТ</div>
+        <div class="nm">JSLinux</div>
+        <div class="desc"><b>Целый компьютер с Linux</b>, работающий внутри вкладки браузера. Без плагинов, без VM, без WebAssembly. Ничего этого тогда ещё не существовало.</div>
+      </div>
+    </div>
+    <div class="s1b-foot" data-anim="wipe-r" data-t="3.0" style="bottom:80px;left:80px;right:1240px;max-width:none;">
+      Беллар написал на JavaScript полноценный <b>эмулятор процессора x86</b> — и загрузил в него Linux 2.6.20.
+    </div>
+    <div class="quote-banner" data-anim="wipe-r" data-t="3.8" style="bottom:80px;right:80px;width:1100px;">
+      <span class="src">news.ycombinator.com<small>17 may 2011 · 482 ↑</small></span>
+      <span class="txt">«Это вообще <b>законно</b>? Я запустил Linux в Firefox без плагинов. У меня <b>vi работает</b>.»</span>
+    </div>
+  </div>
+
+  <!-- 1C terminal + specs -->
+  <div class="sub grp1" id="s1c">
+    <div class="s1-bg"></div><div class="s1-grid"></div>
+    <div class="s1c-eyebrow" data-anim="wipe-r" data-t="0">// ВНУТРИ БРАУЗЕРА</div>
+    <div class="s1c-title" data-anim="wipe-r" data-t="0.2">Загрузка — в реальном времени</div>
+    <div class="s1c-browser" data-anim="wipe-d" data-t="0.5">
+      <div class="s1c-chrome">
+        <div class="s1c-dots">
+          <div class="s1c-dot" style="background:#ff5f57"></div>
+          <div class="s1c-dot" style="background:#ffbd2e"></div>
+          <div class="s1c-dot" style="background:#28c940"></div>
+        </div>
+        <div class="s1c-url">https://bellard.org/jslinux/</div>
+      </div>
+      <div class="s1c-bbody" id="s1c-boot"></div>
+    </div>
+    <div class="s1c-side">
+      <div class="s1c-spec" data-anim="wipe-l" data-t="0.7">
+        <div class="l">ЯДРО</div>
+        <div class="v">Linux 2.6.20</div>
+        <div class="x">релиз 2007 · полная сборка</div>
+      </div>
+      <div class="s1c-spec" data-anim="wipe-l" data-t="1.0">
+        <div class="l">USERLAND</div>
+        <div class="v">BusyBox 1.16.1</div>
+        <div class="x">vi · sh · gcc · perl</div>
+      </div>
+      <div class="s1c-spec" data-anim="wipe-l" data-t="1.3">
+        <div class="l">ЭМУЛЯТОР CPU</div>
+        <div class="v">x86 · 32-bit</div>
+        <div class="x">~600 опкодов · переведено в JS</div>
+      </div>
+      <div class="s1c-spec" data-anim="wipe-l" data-t="1.6">
+        <div class="l">ОЗУ</div>
+        <div class="v">32 MB</div>
+        <div class="x">Uint8Array внутри страницы</div>
+      </div>
+      <div class="s1c-spec" data-anim="wipe-l" data-t="1.9">
+        <div class="l">РАЗМЕР ЗАГРУЗКИ</div>
+        <div class="v-cyr">1.7 MB всего</div>
+        <div class="x">эмулятор + ядро + ФС</div>
+      </div>
+      <div class="s1c-spec" data-anim="wipe-l" data-t="2.2">
+        <div class="l">ВРЕМЯ ЗАГРУЗКИ</div>
+        <div class="v">~6 сек</div>
+        <div class="x">на любом ноутбуке 2011 года</div>
+      </div>
+    </div>
+    <div class="quote-banner" data-anim="wipe-r" data-t="3.5" style="bottom:80px;left:80px;width:830px;">
+      <span class="src">slashdot.org<small>4203 комментария</small></span>
+      <span class="txt">«Думал — это прокси. Открыл Wireshark. <b>Никакого трафика</b>. Всё локально.»</span>
+    </div>
+    <div class="quote-banner" data-anim="wipe-r" data-t="4.2" style="bottom:80px;left:950px;width:830px;">
+      <span class="src">arstechnica.com<small>«Bellard does it again»</small></span>
+      <span class="txt">«Реальный shell. Реальный gcc. На <b>JavaScript</b>. В 2011 году.»</span>
+    </div>
+  </div>
+
+  <!-- 1D removed — content merged into s1b/s1c -->
+
+  <!-- =================================================== -->
+  <!-- =============== SCENE 2 SUBSCENES ================ -->
+  <!-- =================================================== -->
+
+  <!-- 2AB merged: Amarisoft title + traditional path -->
+  <div class="sub grp2" id="s2ab">
+    <div class="s2-bg"></div>
+    <!-- huge title block -->
+    <div class="s2ab-eyebrow" data-anim="wipe-r" data-t="0">// 2012 · СОФТВЕРНАЯ БАЗОВАЯ СТАНЦИЯ 4G</div>
+    <div class="s2ab-name" data-anim="wipe-r" data-t="0.2">AMARISOFT</div>
+    <div class="s2ab-yr" data-anim="drop" data-t="0.5">2012</div>
+
+    <!-- mini explainer left -->
+    <div class="s2ab-explainer">
+      <div class="s2ab-exp-title" data-anim="wipe-r" data-t="1.0">// БАЗОВАЯ СТАНЦИЯ — ЭТО</div>
+      <div class="s2ab-exp-tower" data-anim="pop" data-t="1.4">
+        <svg viewBox="0 0 200 320" width="100%" height="100%" style="overflow:visible">
+          <line x1="100" y1="20" x2="100" y2="320" stroke="currentColor" stroke-width="5"/>
+          <line x1="100" y1="80" x2="40" y2="320" stroke="currentColor" stroke-width="2.5"/>
+          <line x1="100" y1="80" x2="160" y2="320" stroke="currentColor" stroke-width="2.5"/>
+          <line x1="40" y1="320" x2="160" y2="320" stroke="currentColor" stroke-width="2.5"/>
+          <rect x="92" y="20" width="16" height="50" fill="currentColor"/>
+          <rect x="60" y="120" width="14" height="34" fill="currentColor"/>
+          <rect x="126" y="120" width="14" height="34" fill="currentColor"/>
+          <rect x="92" y="160" width="16" height="40" fill="currentColor"/>
+          <line x1="58" y1="220" x2="142" y2="220" stroke="currentColor" stroke-width="2"/>
+          <line x1="50" y1="270" x2="150" y2="270" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="s2ab-exp-stats">
+        <div class="s2ab-exp-stat" data-anim="wipe-r" data-t="1.7">
+          <div class="l">ЕСТЬ В КАЖДОМ ДВОРЕ</div>
+          <div class="v">Раздаёт сотовую связь на десятки телефонов одновременно</div>
+        </div>
+        <div class="s2ab-exp-stat" data-anim="wipe-r" data-t="2.0">
+          <div class="l">РАЗМЕР</div>
+          <div class="v">Шкаф со стиральную машину</div>
+        </div>
+        <div class="s2ab-exp-stat" data-anim="wipe-r" data-t="2.3">
+          <div class="l">ОТРАСЛЬ</div>
+          <div class="v">Ericsson · Nokia · Huawei — миллиарды долларов</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- traditional rack right -->
+    <div class="s2ab-trad">
+      <div class="s2ab-trad-head" data-anim="wipe-r" data-t="2.6">// ТРАДИЦИОННЫЙ ПУТЬ</div>
+      <div class="s2ab-trad-price" data-anim="wipe-d" data-t="3.0">
+        <div class="l">ЦЕНА · 1 ШТ</div>
+        <div class="v">$50 000+</div>
+        <div class="x">плюс монтаж, охлаждение, лицензии</div>
+      </div>
+      <div class="s2ab-trad-rack" data-anim="wipe-d" data-t="3.4">
+        <div class="rh">// СОДЕРЖИМОЕ ШКАФА</div>
+        <div id="s2ab-rackcont"></div>
+      </div>
+      <div class="s2ab-trad-foot" data-anim="wipe-r" data-t="6.5">
+        <span class="x">×</span> Спец-ASIC <span class="x">×</span> FPGA <span class="x">×</span> Закрытая прошивка <span class="x">×</span> Контракт на поддержку
+      </div>
+    </div>
+  </div>
+
+  <!-- 2C bellard -->
+  <div class="sub grp2" id="s2c">
+    <div class="s2-bg"></div>
+    <div class="s2c-eyebrow" data-anim="wipe-r" data-t="0">// ПОДХОД БЕЛЛАРА</div>
+    <div class="s2c-title" data-anim="wipe-r" data-t="0.2">Всё в софте</div>
+    <div class="s2c-grid">
+      <div class="s2c-price" data-anim="wipe-d" data-t="0.6">
+        <div>
+          <div class="l">ЦЕНА · ОДНА СТАНЦИЯ</div>
+          <div class="v">$2 500</div>
+          <div class="vsub">обычный сервер + SDR-плата</div>
+        </div>
+        <div class="extras">
+          <div><span class="b">›</span> x86 PC · обычный Intel Xeon</div>
+          <div><span class="b">›</span> Linux + софтверный стек LTE</div>
+          <div><span class="b">›</span> baseband на CPU, без FPGA</div>
+          <div><span class="b">›</span> патч прилетает за минуту</div>
+          <div><span class="b">›</span> новый стандарт — обновить .deb</div>
+          <div><span class="b">›</span> отладка — gdb как у программистов</div>
+        </div>
+      </div>
+      <div class="s2c-pc" data-anim="wipe-d" data-t="1.0">
+        <div class="ph">
+          <span>linux@xeon-w2245:~$ ./lteenb config/enb.cfg</span>
+          <span class="pulse">● LIVE</span>
+        </div>
+        <div class="pb" id="s2c-pclog"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2D world map -->
+  <div class="sub grp2" id="s2d">
+    <div class="s2-bg"></div>
+    <div class="s2d-eyebrow" data-anim="wipe-r" data-t="0">// ГДЕ ИСПОЛЬЗУЕТСЯ СЕЙЧАС</div>
+    <div class="s2d-title" data-anim="wipe-r" data-t="0.2">Amarisoft в мире</div>
+    <div class="s2d-counter">
+      <div class="l" data-anim="wipe-l" data-t="0.4">СТРАН</div>
+      <div class="v" id="s2d-cnt" data-anim="drop" data-t="0.5">0</div>
+      <div class="x" data-anim="wipe-l" data-t="0.7">подтверждённые развёртывания</div>
+    </div>
+    <div class="s2d-mapwrap" data-anim="wipe-d" data-t="0.8">
+      <canvas id="s2d-map" width="2400" height="880" style="display:block;width:100%;height:100%;"></canvas>
+    </div>
+    <div class="s2d-stats">
+      <div class="s2d-stat" data-anim="wipe-r" data-t="2.5"><div class="l">КЛИЕНТЫ</div><div class="v">Verizon · AT&T · Vodafone · DoCoMo · KT</div></div>
+      <div class="s2d-stat" data-anim="wipe-r" data-t="2.8"><div class="l">ИСПОЛЬЗУЮТ ДЛЯ</div><div class="v">Тестовые сети 4G/5G · научные лаборатории · частные сети</div></div>
+      <div class="s2d-stat" data-anim="wipe-r" data-t="3.1"><div class="l">КОМАНДА</div><div class="v">~50 человек · Париж</div></div>
+    </div>
+  </div>
+
+  <!-- 2E vendors -->
+  <div class="sub grp2" id="s2e">
+    <div class="s2-bg"></div>
+    <div class="s2e-eyebrow" data-anim="wipe-r" data-t="0">// ТОП-5 ТЕЛЕКОМ-ВЕНДОРОВ В МИРЕ</div>
+    <div class="s2e-title" data-anim="wipe-r" data-t="0.2">Их клиенты</div>
+    <div class="s2e-list">
+      <div class="s2e-row uses" data-anim="wipe-r" data-t="0.6">
+        <div class="num">01</div>
+        <div class="nm">Huawei</div>
+        <div class="pct">29%</div>
+        <div class="tag">КЛИЕНТ AMARISOFT</div>
+      </div>
+      <div class="s2e-row" data-anim="wipe-r" data-t="0.9">
+        <div class="num">02</div>
+        <div class="nm">Ericsson</div>
+        <div class="pct">24%</div>
+      </div>
+      <div class="s2e-row" data-anim="wipe-r" data-t="1.2">
+        <div class="num">03</div>
+        <div class="nm">Nokia</div>
+        <div class="pct">15%</div>
+      </div>
+      <div class="s2e-row uses" data-anim="wipe-r" data-t="1.5">
+        <div class="num">04</div>
+        <div class="nm">ZTE</div>
+        <div class="pct">11%</div>
+        <div class="tag">КЛИЕНТ AMARISOFT</div>
+      </div>
+      <div class="s2e-row" data-anim="wipe-r" data-t="1.8">
+        <div class="num">05</div>
+        <div class="nm">Samsung</div>
+        <div class="pct">7%</div>
+      </div>
+    </div>
+    <div class="s2e-foot" data-anim="wipe-r" data-t="2.4">
+      <b>2 из 5</b> крупнейших телеком-вендоров в мире покупают софт у Беллара.
+    </div>
+  </div>
+
+  <!-- =================================================== -->
+  <!-- =============== SCENE 3 SUBSCENES ================ -->
+  <!-- =================================================== -->
+
+  <!-- 3 TITLE — QuickJS with year -->
+  <div class="sub grp3" id="s3title">
+    <div class="s3-bg"></div>
+    <div class="s3title-eyebrow" data-anim="wipe-r" data-t="0">// 2019 · JS-ДВИЖОК ОТ ОДНОГО ЧЕЛОВЕКА</div>
+    <div class="s3title-name" data-anim="wipe-r" data-t="0.1">QuickJS</div>
+    <div class="s3title-yr" data-anim="drop" data-t="0.25">2019</div>
+    <div class="s3title-tag" data-anim="wipe-r" data-t="0.5">
+      Беллар написал <b>JavaScript-движок</b> размером с README его конкурентов.
+    </div>
+    <div class="s3title-stats">
+      <div class="s3title-stat" data-anim="wipe-r" data-t="0.8">
+        <div class="l">КОМАНДА</div><div class="v">1 чел</div>
+      </div>
+      <div class="s3title-stat" data-anim="wipe-r" data-t="0.95">
+        <div class="l">РАЗМЕР</div><div class="v"><410 KB</div>
+      </div>
+      <div class="s3title-stat" data-anim="wipe-r" data-t="1.1">
+        <div class="l">TEST262</div><div class="v">~99%</div>
+      </div>
+      <div class="s3title-stat" data-anim="wipe-r" data-t="1.25">
+        <div class="l">СТАРТ</div><div class="v"><1 мс</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3A what is js engine -->
+  <div class="sub grp3" id="s3a">
+    <div class="s3-bg"></div>
+    <div class="s3a-eyebrow" data-anim="wipe-r" data-t="0">// СНАЧАЛА — ЧТО ТАКОЕ JS-ДВИЖОК</div>
+    <div class="s3a-q" data-anim="wipe-r" data-t="0.1">То, что делает интернет — интернетом</div>
+    <div class="s3a-flow">
+      <div class="s3a-step" data-anim="wipe-d" data-t="0.35">
+        <div>
+          <div class="lab">ИСХОДНЫЙ КОД</div>
+          <div class="t">Текст программы</div>
+        </div>
+        <div class="demo">function hi(){<br>&nbsp;&nbsp;return 2 + 2;<br>}</div>
+      </div>
+      <div class="s3a-arr" data-anim="pop" data-t="0.5">▶</div>
+      <div class="s3a-step acc" data-anim="wipe-d" data-t="0.6">
+        <div>
+          <div class="lab">JS-ДВИЖОК</div>
+          <div class="t">Парсит. Компилирует. Запускает.</div>
+        </div>
+        <div class="demo">▸ AST · байткод · машинный код<br>▸ JIT · GC · isolate · heap<br>▸ всё это — миллионы строк С++</div>
+      </div>
+      <div class="s3a-arr" data-anim="pop" data-t="0.75">▶</div>
+      <div class="s3a-step" data-anim="wipe-d" data-t="0.85">
+        <div>
+          <div class="lab">ВЫПОЛНЕНИЕ</div>
+          <div class="t">Сайт работает</div>
+        </div>
+        <div class="demo">// результат: 4<br>// открылось меню<br>// загрузился YouTube</div>
+      </div>
+    </div>
+    <div class="s3a-foot" data-anim="wipe-r" data-t="1.2">
+      Без JS-движка сайт — это <b>просто текст</b>. Каждый браузер таскает с собой огромный движок: Chrome — V8, Firefox — SpiderMonkey, Safari — JavaScriptCore.
+    </div>
+  </div>
+
+  <!-- 3B V8 -->
+  <div class="sub grp3" id="s3b">
+    <div class="s3-bg"></div>
+    <div class="s3-eng-eyebrow" data-anim="wipe-r" data-t="0" style="color:#4285f4">// JS-ДВИЖОК · 1 ИЗ 3</div>
+    <div class="s3-eng-title" data-anim="wipe-r" data-t="0.2" style="color:#4285f4">V8</div>
+    <div class="s3-eng-vendor" data-anim="wipe-l" data-t="0.4">GOOGLE<span>POWERS · CHROME · NODE.JS · EDGE</span></div>
+    <div class="s3-eng-stats">
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="0.8" style="color:#4285f4">
+        <div class="l" style="color:rgba(66,133,244,0.7);">РАЗМЕР БИНАРНИКА</div>
+        <div class="v">~58 MB</div>
+        <div class="u">в одной версии Chrome</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.0" style="color:#4285f4">
+        <div class="l" style="color:rgba(66,133,244,0.7);">КОМАНДА</div>
+        <div class="v">~200 чел</div>
+        <div class="u">штатных инженеров Google</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.2" style="color:#4285f4">
+        <div class="l" style="color:rgba(66,133,244,0.7);">TEST262</div>
+        <div class="v">99.9%</div>
+        <div class="u">официальные тесты языка</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.4" style="color:#4285f4">
+        <div class="l" style="color:rgba(66,133,244,0.7);">ЛЕТ РАЗРАБОТКИ</div>
+        <div class="v">17</div>
+        <div class="u">с 2008 года, без перерыва</div>
+      </div>
+    </div>
+    <div class="s3-eng-side" data-anim="wipe-l" data-t="1.0">
+      <h4>// ВНУТРИ V8</h4>
+      <ul>
+        <li><b>v8/src/</b><span>3 800+ файлов</span></li>
+        <li><b>torque/</b><span>DSL-компилятор</span></li>
+        <li><b>turbofan/</b><span>JIT optimizer</span></li>
+        <li><b>maglev/</b><span>tier-2 JIT</span></li>
+        <li><b>sparkplug/</b><span>baseline compiler</span></li>
+        <li><b>cppgc/</b><span>C++ garbage collector</span></li>
+        <li><b>≈ 2,5 млн строк C++</b><span>исходного кода</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 3C SpiderMonkey -->
+  <div class="sub grp3" id="s3c">
+    <div class="s3-bg"></div>
+    <div class="s3-eng-eyebrow" data-anim="wipe-r" data-t="0" style="color:#ff8c00">// JS-ДВИЖОК · 2 ИЗ 3</div>
+    <div class="s3-eng-title" data-anim="wipe-r" data-t="0.2" style="color:#ff8c00">Spider<br>Monkey</div>
+    <div class="s3-eng-vendor" data-anim="wipe-l" data-t="0.4">MOZILLA<span>POWERS · FIREFOX · SERVO · DENO RUNTIME</span></div>
+    <div class="s3-eng-stats">
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="0.8" style="color:#ff8c00">
+        <div class="l" style="color:rgba(255,140,0,0.7);">РАЗМЕР БИНАРНИКА</div>
+        <div class="v">~32 MB</div>
+        <div class="u">в одной версии Firefox</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.0" style="color:#ff8c00">
+        <div class="l" style="color:rgba(255,140,0,0.7);">КОМАНДА</div>
+        <div class="v">~80 чел</div>
+        <div class="u">плюс контрибьюторы</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.2" style="color:#ff8c00">
+        <div class="l" style="color:rgba(255,140,0,0.7);">TEST262</div>
+        <div class="v">99.5%</div>
+        <div class="u">официальные тесты языка</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.4" style="color:#ff8c00">
+        <div class="l" style="color:rgba(255,140,0,0.7);">ЛЕТ РАЗРАБОТКИ</div>
+        <div class="v">29</div>
+        <div class="u">самый старый JS-движок</div>
+      </div>
+    </div>
+    <div class="s3-eng-side" data-anim="wipe-l" data-t="1.0">
+      <h4>// ВНУТРИ SPIDERMONKEY</h4>
+      <ul>
+        <li><b>js/src/</b><span>2 100+ файлов</span></li>
+        <li><b>jit/</b><span>IonMonkey + Warp</span></li>
+        <li><b>vm/</b><span>runtime ядро</span></li>
+        <li><b>wasm/</b><span>WebAssembly</span></li>
+        <li><b>gc/</b><span>incremental GC</span></li>
+        <li><b>frontend/</b><span>парсер</span></li>
+        <li><b>≈ 1,6 млн строк</b><span>в основном C++</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 3DE — QuickJS detail + comparison MERGED -->
+  <div class="sub grp3" id="s3de">
+    <div class="s3-bg"></div>
+    <div class="s3-eng-eyebrow" data-anim="wipe-r" data-t="0">// JS-ДВИЖОК · 3 ИЗ 3</div>
+    <div class="s3-eng-title" data-anim="wipe-r" data-t="0.2" style="color:var(--acc)">QuickJS</div>
+    <div class="s3-eng-vendor" data-anim="wipe-l" data-t="0.4">F. BELLARD<span>ОДИН ЧЕЛОВЕК · НЕСКОЛЬКО ВЫХОДНЫХ</span></div>
+    <div class="s3-eng-stats">
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="0.8" style="color:var(--acc)">
+        <div class="l" style="color:rgba(255,234,0,0.7);">РАЗМЕР БИНАРНИКА</div>
+        <div class="v"><410 KB</div>
+        <div class="u">в 142 раза меньше V8</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.0" style="color:var(--acc)">
+        <div class="l" style="color:rgba(255,234,0,0.7);">КОМАНДА</div>
+        <div class="v">1 чел</div>
+        <div class="u">Беллар. Один. Вечером.</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.2" style="color:var(--acc)">
+        <div class="l" style="color:rgba(255,234,0,0.7);">TEST262</div>
+        <div class="v">~99%</div>
+        <div class="u">наравне с гигантами</div>
+      </div>
+      <div class="s3-eng-stat" data-anim="wipe-d" data-t="1.4" style="color:var(--acc)">
+        <div class="l" style="color:rgba(255,234,0,0.7);">СТАРТ</div>
+        <div class="v"><1 мс</div>
+        <div class="u">в 50 раз быстрее V8</div>
+      </div>
+    </div>
+    <div class="s3-eng-side" data-anim="wipe-l" data-t="1.0" style="border-color:var(--acc);">
+      <h4 style="color:var(--acc);">// ВНУТРИ QUICKJS</h4>
+      <ul>
+        <li><b style="color:var(--acc);">quickjs.c</b><span>5.2 MB · ядро</span></li>
+        <li><b style="color:var(--acc);">quickjs-libc.c</b><span>stdlib</span></li>
+        <li><b style="color:var(--acc);">libregexp.c</b><span>RegExp</span></li>
+        <li><b style="color:var(--acc);">libunicode.c</b><span>Unicode</span></li>
+        <li><b style="color:var(--acc);">libbf.c</b><span>BigFloat</span></li>
+        <li><b style="color:var(--acc);">qjs.c</b><span>командная строка</span></li>
+        <li><b style="color:var(--acc);">≈ 80 000 строк C</b><span>всего проекта</span></li>
+      </ul>
+    </div>
+    <!-- inline comparison bars at the bottom -->
+    <div class="s3de-cmp">
+      <div class="s3de-cmp-head" data-anim="wipe-r" data-t="3.5">// ЕСЛИ ПОСТАВИТЬ РЯДОМ · РАЗМЕР В МЕГАБАЙТАХ</div>
+      <div class="s3e-row" data-anim="wipe-r" data-t="3.9">
+        <div class="nm">V8<small>GOOGLE · 200 ИНЖЕНЕРОВ</small></div>
+        <div class="barouter"><div class="barfill" id="s3e-b1" style="background:#4285f4"></div></div>
+        <div class="v">58 MB</div>
+      </div>
+      <div class="s3e-row" data-anim="wipe-r" data-t="4.3">
+        <div class="nm">SpiderMonkey<small>MOZILLA · 80 ИНЖЕНЕРОВ</small></div>
+        <div class="barouter"><div class="barfill" id="s3e-b2" style="background:#ff8c00"></div></div>
+        <div class="v">32 MB</div>
+      </div>
+      <div class="s3e-row qjs" data-anim="wipe-r" data-t="4.7">
+        <div class="nm">QuickJS<small>БЕЛЛАР · 1 ЧЕЛОВЕК</small></div>
+        <div class="barouter"><div class="barfill" id="s3e-b3" style="background:var(--acc);box-shadow:0 0 30px var(--acc-dim);"></div></div>
+        <div class="v">0.4 MB</div>
+      </div>
+      <div class="s3de-cmp-foot" data-anim="wipe-r" data-t="5.5"><b>×142</b> компактнее, на C, и проходит почти все те же тесты.</div>
+    </div>
+  </div>
+
+  <!-- 3FG — Micro QuickJS + embedded MERGED -->
+  <div class="sub grp3" id="s3fg">
+    <div class="s3-bg"></div>
+    <div class="s3fg-eyebrow" data-anim="wipe-r" data-t="0">// КОНЕЦ 2025 · MICRO QUICKJS</div>
+    <div class="s3fg-name" data-anim="wipe-r" data-t="0.2">Micro QuickJS</div>
+    <div class="s3fg-yr" data-anim="drop" data-t="0.5">2025</div>
+
+    <!-- left: what's "embedded" -->
+    <div class="s3fg-left">
+      <div class="s3fg-block-title" data-anim="wipe-r" data-t="1.0">// ЧТО ТАКОЕ ВСТРАИВАЕМЫЕ СИСТЕМЫ</div>
+      <div class="s3fg-block-sub" data-anim="wipe-r" data-t="1.2">Компьютеры, которых ты не видишь — но в каждом доме их десятки.</div>
+      <div class="s3fg-grid">
+        <div class="s3fg-card" data-anim="pop" data-t="1.5">
+          <div class="pic">⏱</div>
+          <div class="nm">Часы</div>
+          <div class="ram">2 KB</div>
+        </div>
+        <div class="s3fg-card" data-anim="pop" data-t="1.7">
+          <div class="pic">≋</div>
+          <div class="nm">Датчик пожара</div>
+          <div class="ram">8 KB</div>
+        </div>
+        <div class="s3fg-card" data-anim="pop" data-t="1.9">
+          <div class="pic">⌨</div>
+          <div class="nm">Клавиатура</div>
+          <div class="ram">16 KB</div>
+        </div>
+        <div class="s3fg-card" data-anim="pop" data-t="2.1">
+          <div class="pic">⌬</div>
+          <div class="nm">IoT-розетка</div>
+          <div class="ram">64 KB</div>
+        </div>
+      </div>
+      <div class="s3fg-foot" data-anim="wipe-r" data-t="2.5">
+        В 1000 раз меньше памяти, чем у телефона. <b>JavaScript туда не заходил</b> никогда. До Беллара.
+      </div>
+    </div>
+
+    <!-- right: 10 KB compare -->
+    <div class="s3fg-right">
+      <div class="s3fg-block-title" data-anim="wipe-r" data-t="3.0" style="color:var(--acc);">// 10 КИЛОБАЙТ — ЭТО СКОЛЬКО</div>
+      <div class="s3g-rows">
+        <div class="s3g-row win" data-anim="wipe-r" data-t="3.4">
+          <div class="nm">Micro QuickJS<br><small>JS-ДВИЖОК БЕЛЛАРА</small></div>
+          <div class="vis"><div class="visfill" id="s3g-v1"></div></div>
+          <div class="v">10 KB</div>
+        </div>
+        <div class="s3g-row" data-anim="wipe-r" data-t="3.9">
+          <div class="nm">Сценарий ролика<br><small>ОБЫЧНЫЙ TXT-ФАЙЛ</small></div>
+          <div class="vis"><div class="visfill" id="s3g-v2"></div></div>
+          <div class="v">~70 KB</div>
+        </div>
+        <div class="s3g-row" data-anim="wipe-r" data-t="4.4">
+          <div class="nm">Обложка ролика<br><small>JPEG 2560×1440</small></div>
+          <div class="vis"><div class="visfill" id="s3g-v3"></div></div>
+          <div class="v">~10 MB</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================== -->
+  <!-- =============== SCENE 4 SUBSCENES ================ -->
+  <!-- =================================================== -->
+
+  <!-- 4A title -->
+  <div class="sub grp4" id="s4a">
+    <div class="s4-bg"></div>
+    <div class="s4a-eyebrow" data-anim="wipe-r" data-t="0">// 2021 · СЖАТИЕ НЕЙРОСЕТЬЮ</div>
+    <div class="s4a-name" data-anim="wipe-r" data-t="0.2">NNCP</div>
+    <div class="s4a-yr" data-anim="drop" data-t="0.5">2021</div>
+    <div class="s4a-tag" data-anim="wipe-r" data-t="1.0">Беллар написал собственную <b style="color:var(--acc)">библиотеку нейросетей с нуля</b>. И сразу выиграл главный мировой бенчмарк сжатия текста.</div>
+    <div class="s4a-info">
+      <div class="s4a-card" data-anim="wipe-d" data-t="2.0">
+        <div class="l">// ЧТО ЭТО</div>
+        <div class="v">Архиватор</div>
+        <div class="x">сжимает любые данные — текст, код, логи, дампы — как gzip, но в разы плотнее</div>
+      </div>
+      <div class="s4a-card" data-anim="wipe-d" data-t="2.3">
+        <div class="l">// КАК РАБОТАЕТ</div>
+        <div class="v">Трансформер</div>
+        <div class="x">та же архитектура, что у GPT и Claude — но обучен предсказывать <b>следующий байт</b></div>
+      </div>
+      <div class="s4a-card" data-anim="wipe-d" data-t="2.6">
+        <div class="l">// ИДЕЯ</div>
+        <div class="v">Угадал — 0 бит</div>
+        <div class="x">если нейросеть верно предсказала байт, его можно не записывать. Чем точнее модель — тем меньше файл</div>
+      </div>
+      <div class="s4a-card" data-anim="wipe-d" data-t="2.9">
+        <div class="l">// БИБЛИОТЕКА</div>
+        <div class="v">LibNC</div>
+        <div class="x">собственная NN-библиотека Беллара. Без PyTorch, без TensorFlow. На C, ~3000 строк</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4B leaderboard -->
+  <div class="sub grp4" id="s4b">
+    <div class="s4-bg"></div>
+    <div class="s4b-eyebrow" data-anim="wipe-r" data-t="0">// LARGE TEXT COMPRESSION BENCHMARK</div>
+    <div class="s4b-title" data-anim="wipe-r" data-t="0.2">Сжать 1 GB Википедии</div>
+    <div class="s4b-sub" data-anim="wipe-r" data-t="0.5">Файл <b>enwik9</b> — 1 миллиард байт английской Википедии. Чем меньше после сжатия, тем лучше. Соревнование идёт с 2006 года.</div>
+    <div class="s4b-rows">
+      <div class="s4b-row" data-anim="wipe-r" data-t="0.9"><div class="rk">×</div><div class="nm">enwik9 <small>исходный размер</small></div><div class="yr">—</div><div class="sz">1 000 000 000</div></div>
+      <div class="s4b-row" data-anim="wipe-r" data-t="1.1"><div class="rk">↓</div><div class="nm">gzip −9 <small>САМЫЙ ИЗВЕСТНЫЙ АЛГОРИТМ</small></div><div class="yr">'93</div><div class="sz">322 591 995</div></div>
+      <div class="s4b-row" data-anim="wipe-r" data-t="1.3"><div class="rk">↓</div><div class="nm">bzip2 <small>СЛЕДУЮЩЕЕ ПОКОЛЕНИЕ</small></div><div class="yr">'96</div><div class="sz">253 977 891</div></div>
+      <div class="s4b-row" data-anim="wipe-r" data-t="1.5"><div class="rk">↓</div><div class="nm">xz · 7z LZMA <small>СОВРЕМЕННЫЙ СТАНДАРТ</small></div><div class="yr">'09</div><div class="sz">182 327 656</div></div>
+      <div class="s4b-row" data-anim="wipe-r" data-t="1.7"><div class="rk">↓</div><div class="nm">zpaq −m5 <small>ТОП-РАЗРАБОТКА 2010-Х</small></div><div class="yr">'15</div><div class="sz">137 580 400</div></div>
+      <div class="s4b-row" data-anim="wipe-r" data-t="1.9"><div class="rk">↓</div><div class="nm">cmix v18 <small>ОЧЕНЬ МЕДЛЕННО, ОЧЕНЬ ПЛОТНО</small></div><div class="yr">'19</div><div class="sz">115 714 367</div></div>
+      <div class="s4b-row win" data-anim="wipe-r" data-t="2.2"><div class="rk">★</div><div class="nm">→ NNCP v2 · Bellard <small>1 МЕСТО · ПЕРВАЯ НЕЙРОСЕТЬ В РЕЙТИНГЕ</small></div><div class="yr">'21</div><div class="sz">108 378 032</div></div>
+    </div>
+  </div>
+
+  <!-- 4C ts_zip -->
+  <div class="sub grp4" id="s4c">
+    <div class="s4-bg"></div>
+    <div class="s4c-eyebrow" data-anim="wipe-r" data-t="0">// 2023 · СЖАТИЕ БОЛЬШИМИ ЯЗЫКОВЫМИ МОДЕЛЯМИ</div>
+    <div class="s4c-title" data-anim="wipe-r" data-t="0.2">ts_zip</div>
+    <div class="s4c-yr" data-anim="drop" data-t="0.4">2023</div>
+    <div class="s4c-desc" data-anim="wipe-r" data-t="0.7">
+      Та же идея, что у <b>ChatGPT</b>: LLM умеет угадывать, какое слово будет следующим. ts_zip кодирует только <b>разницу между угадыванием и реальностью</b>.
+    </div>
+    <div class="s4c-demo">
+      <div class="s4c-blob before" data-anim="pop" data-t="1.5">
+        <div class="lab">// ИСХОДНЫЙ ТЕКСТ</div>
+        <div class="v">18.3 MB</div>
+        <div class="x">статьи Wikipedia · 18 шт.</div>
+      </div>
+      <div class="s4c-arr" data-anim="pop" data-t="1.9">▶ ▶ ▶</div>
+      <div class="s4c-blob after" data-anim="pop" data-t="2.3">
+        <div class="lab">// ts_zip</div>
+        <div class="v">1.36</div>
+        <div class="x">×13.4 СЖАТИЕ</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================== -->
+  <!-- =============== SCENE 5 SUBSCENES ================ -->
+  <!-- =================================================== -->
+
+  <!-- 5A title -->
+  <div class="sub grp5" id="s5a">
+    <div class="s5-bg"></div>
+    <div class="s5a-eyebrow" data-anim="wipe-r" data-t="0">// 2024 · НЕЙРОСЕТЕВОЙ АУДИО-КОДЕК</div>
+    <div class="s5a-name" data-anim="wipe-r" data-t="0.2">TSAC</div>
+    <div class="s5a-yr" data-anim="drop" data-t="0.5">2024</div>
+    <div class="s5a-tag" data-anim="wipe-r" data-t="1.0">Беллар сжал стерео-звук до <b>7,5 кбит/с</b>. Это <b>в 17–43 раза меньше</b>, чем привычный MP3 — и качество остаётся приемлемым.</div>
+    <div class="s5a-info">
+      <div class="s5a-card" data-anim="wipe-d" data-t="2.0">
+        <div class="l">// ЧТО ЭТО</div>
+        <div class="v">Аудио-кодек</div>
+        <div class="x">сжимает звук — как MP3, AAC, Opus — но с <b>радикально</b> меньшим размером файла</div>
+      </div>
+      <div class="s5a-card" data-anim="wipe-d" data-t="2.3">
+        <div class="l">// АРХИТЕКТУРА</div>
+        <div class="v">Transformer + SpectralCodec</div>
+        <div class="x">та же нейросетевая архитектура, что у GPT — но обучена не предсказывать слова, а звуковые спектры</div>
+      </div>
+      <div class="s5a-card" data-anim="wipe-d" data-t="2.6">
+        <div class="l">// ЗАЧЕМ ТАКОЙ МАЛЕНЬКИЙ БИТРЕЙТ</div>
+        <div class="v">Спутник · радио · IoT</div>
+        <div class="x">передача голоса там, где каждый бит дорог: спутниковый интернет, узкополосные радиоканалы, военные сети</div>
+      </div>
+      <div class="s5a-card" data-anim="wipe-d" data-t="2.9">
+        <div class="l">// СВЯЗЬ С NNCP</div>
+        <div class="v">та же LibNC</div>
+        <div class="x">кодек построен поверх собственной нейросетевой библиотеки Беллара. Полный стек — от математики до wave-формата</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5B bars -->
+  <div class="sub grp5" id="s5b">
+    <div class="s5b-eyebrow" data-anim="wipe-r" data-t="0">// БИТРЕЙТ · СТЕРЕО АУДИО · НИЖЕ = ЛУЧШЕ</div>
+    <div class="s5b-title" data-anim="wipe-r" data-t="0.2">Если поставить рядом</div>
+    <div class="s5b-bars">
+      <div class="s5b-row win" data-anim="wipe-r" data-t="0.6">
+        <div class="nm">TSAC<small>F. BELLARD · 2024 · НЕЙРОСЕТЬ</small></div>
+        <div class="barouter"><div class="barfill" id="s5b-bar-tsac"></div></div>
+        <div class="v">7.5 кбит/с</div>
+      </div>
+      <div class="s5b-row opus" data-anim="wipe-r" data-t="1.0">
+        <div class="nm">Opus low<small>СОВРЕМЕННЫЙ ВЕБ-КОДЕК · МИНИМУМ</small></div>
+        <div class="barouter"><div class="barfill" id="s5b-bar-opus"></div></div>
+        <div class="v">32 кбит/с</div>
+      </div>
+      <div class="s5b-row mp3low" data-anim="wipe-r" data-t="1.4">
+        <div class="nm">MP3 low<small>МИНИМАЛЬНОЕ ПРИЕМЛЕМОЕ MP3</small></div>
+        <div class="barouter"><div class="barfill" id="s5b-bar-mp3low"></div></div>
+        <div class="v">128 кбит/с</div>
+      </div>
+      <div class="s5b-row mp3hi" data-anim="wipe-r" data-t="1.8">
+        <div class="nm">MP3 high<small>СТАНДАРТ В ITUNES / СТРИМИНГЕ</small></div>
+        <div class="barouter"><div class="barfill" id="s5b-bar-mp3hi"></div></div>
+        <div class="v">320 кбит/с</div>
+      </div>
+    </div>
+    <div class="s5b-foot">
+      <div class="col" data-anim="wipe-r" data-t="2.4"><div class="l">МИНУТА АУДИО</div><div class="v">≈ 56 KB</div><div class="x">в TSAC vs 2.4 MB в MP3 320</div></div>
+      <div class="col" data-anim="wipe-r" data-t="2.7"><div class="l">vs MP3 320</div><div class="v">−97.7%</div><div class="x">сэкономленный размер</div></div>
+      <div class="col" data-anim="wipe-r" data-t="3.0"><div class="l">ВНУТРИ</div><div class="v">Transformer</div><div class="x">кодер на нейросети, как у LLM</div></div>
+    </div>
+  </div>
+
+  <!-- 5C removed — content folded into s5b -->
+
+  <!-- =================================================== -->
+  <!-- =============== SCENE 6: 2026 ===================== -->
+  <!-- =================================================== -->
+  <!-- 6 — single 8s scene: BELLARD title + year + project list (ref-style) -->
+  <div class="sub grp6" id="s6">
+    <div class="s6-bg"></div>
+    <canvas class="layer" id="s6canvas" width="2560" height="1440"></canvas>
+    <div class="s6-eyebrow" data-anim="wipe-r" data-t="0">// 2026 · FABRICE BELLARD · ВСЁ ЕЩЁ ПИШЕТ КОД</div>
+    <div class="s6-name" data-anim="wipe-r" data-t="0.2">BELLARD</div>
+    <div class="s6-yr" data-anim="drop" data-t="0.5">2026</div>
+    <div class="s6-tag" data-anim="wipe-r" data-t="1.0">26 лет назад он сел писать FFmpeg.<br>С тех пор — <b>не остановился ни на один год</b>.</div>
+    <div class="s6-counter" data-anim="wipe-r" data-t="2.0">
+      <div class="l">// САЙТ BELLARD.ORG · НЕПОЛНЫЙ СПИСОК</div>
+      <div class="v">десятки проектов</div>
+      <div class="x">от математических библиотек и компиляторов до эмуляторов, кодеков, нейросетей и софтверных базовых станций. Эти — самые известные: FFmpeg · QEMU · TinyCC · JSLinux · Amarisoft · BPG · QuickJS · NNCP · ts_zip · TSAC · Micro QuickJS</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- UI — outside #stage so filter/zoom/shake effects don't distort it -->
+<div id="hud">
+  <span class="tc" id="tc">00:00.0</span>
+  <span class="tag" id="sctag">— · —</span>
+</div>
+<div id="ctrl">
+  <div class="ctrl-row">
+    <span class="ctrl-lab">BPM PULSE</span>
+    <button class="ctrl-btn" id="bpmToggle">OFF</button>
+    <input type="range" id="bpmSlider" min="40" max="200" value="120" step="1">
+    <span class="ctrl-val" id="bpmVal">120</span>
+    <button class="ctrl-btn small" id="bpmTap">TAP</button>
+  </div>
+  <div class="ctrl-row">
+    <span class="ctrl-lab">PULSE FX</span>
+    <button class="ctrl-btn fx active" data-fx="warm">WARM</button>
+    <button class="ctrl-btn fx" data-fx="cool">COOL</button>
+    <button class="ctrl-btn fx" data-fx="accent">ACCENT</button>
+  </div>
+</div>
+<div id="help">R / К — restart · TAB — hide UI · BPM control bottom-left</div>
+
+<!-- BPM background tint — fixed-position, behind stage content but above stage bg -->
+<div id="bpm-bg"></div>
+
+<script>
+// =================== TIMELINE ===================
+// Each sub-scene: id, start, end (in seconds — global)
+const subs = [
+  // 1. JSLINUX 0..19  (3 sub-scenes; s1d removed, content merged)
+  { id:'s1a', start:0,    end:5,    name:'JSLinux · титул'         },
+  { id:'s1b', start:5,    end:12,   name:'JSLinux · что это + цитаты' },
+  { id:'s1c', start:12,   end:19,   name:'JSLinux · загрузка'      },
+  // 2. AMARISOFT 19..50  (4 sub-scenes; s2a+s2b merged into s2ab)
+  { id:'s2ab',start:19,   end:29,   name:'Amarisoft · традиционный путь' },
+  { id:'s2c', start:29,   end:36,   name:'Amarisoft · подход Беллара'    },
+  { id:'s2d', start:36,   end:43,   name:'Amarisoft · в мире'            },
+  { id:'s2e', start:43,   end:50,   name:'Amarisoft · вендоры'           },
+  // 3. QUICKJS 50..86  — title/a shortened by 3s each, fg lengthened
+  { id:'s3title',start:50,end:52,   name:'QuickJS · титул'                },
+  { id:'s3a', start:52,   end:54,   name:'QuickJS · что такое JS-движок' },
+  { id:'s3b', start:54,   end:57.5, name:'QuickJS · V8'                  },
+  { id:'s3c', start:57.5, end:61,   name:'QuickJS · SpiderMonkey'        },
+  { id:'s3de',start:61,   end:69,   name:'QuickJS · подход Беллара'      },
+  { id:'s3fg',start:69,   end:86,   name:'Micro QuickJS · 10 KB'         },
+  // 4. NNCP 86..106  (3 sub-scenes; s4a expanded with info)
+  { id:'s4a', start:86,   end:93,   name:'NNCP · титул'            },
+  { id:'s4b', start:93,   end:101,  name:'NNCP · leaderboard'      },
+  { id:'s4c', start:101,  end:106,  name:'ts_zip'                  },
+  // 5. TSAC 106..122  (2 sub-scenes; s5c removed; s5a expanded with info)
+  { id:'s5a', start:106,  end:114,  name:'TSAC · титул'            },
+  { id:'s5b', start:114,  end:122,  name:'TSAC · битрейты'         },
+  // 6. 2026  122..130 — ONE scene
+  { id:'s6',  start:122,  end:130,  name:'2026 · 53'           }
+];
+const TOTAL = 130;
+let running = false;
+let startTime = 0;
+let elapsed = 0;
+let currentSubId = null;
+
+// =================== SCALE ===================
+function fitStage(){
+  const sw = window.innerWidth, sh = window.innerHeight;
+  document.documentElement.style.setProperty('--scale', Math.min(sw/2560, sh/1440));
+}
+window.addEventListener('resize', fitStage);
+fitStage();
+
+// =================== HELPERS ===================
+const rand=(a,b)=>a+Math.random()*(b-a);
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const smoothstep=t=>t*t*(3-2*t);
+
+// =================== SUB-SCENE ENTER/EXIT ===================
+function activateSub(id){
+  if (id === currentSubId) return;
+  const prev = currentSubId ? document.getElementById(currentSubId) : null;
+  if (prev) prev.classList.remove('on','cut');
+  currentSubId = id;
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('on');
+  // pick the scene's accent color for the BPM "accent" mode
+  const accentMap = {
+    'grp1':'rgba(0,255,140,calc(var(--pulse) * 0.22))',
+    'grp2':'rgba(255,32,128,calc(var(--pulse) * 0.22))',
+    'grp3':'rgba(255,234,0,calc(var(--pulse) * 0.22))',
+    'grp4':'rgba(200,80,255,calc(var(--pulse) * 0.22))',
+    'grp5':'rgba(0,229,255,calc(var(--pulse) * 0.22))',
+    'grp6':'rgba(255,255,255,calc(var(--pulse) * 0.18))'
+  };
+  for (const [k,v] of Object.entries(accentMap)) {
+    if (el.classList.contains(k)) { document.body.style.setProperty('--bpm-accent', v); break; }
+  }
+  // run anim attributes
+  el.querySelectorAll('[data-anim]').forEach(node=>{
+    // strip any prior animation so re-activation re-runs it
+    node.style.animation = 'none';
+    // force reflow so the browser sees the reset
+    void node.offsetWidth;
+    const a = node.getAttribute('data-anim');
+    const t = parseFloat(node.getAttribute('data-t')) || 0;
+    let name = '';
+    if (a==='wipe-r') name = 'wipe-r';
+    else if (a==='wipe-l') name = 'wipe-l';
+    else if (a==='wipe-d') name = 'wipe-d';
+    else if (a==='drop')   name = 'drop-in';
+    else if (a==='pop')    name = 'pop-in';
+    else if (a==='fade')   name = 'fade-in';
+    if (!name) return;
+    // hide it before its delay starts; `both` will then take over and apply the keyframe values
+    node.style.animation = `${name} 0.45s cubic-bezier(0.4,0,0.2,1) ${t}s both`;
+  });
+  subInit[id] && subInit[id]();
+}
+
+// =================== SUB INIT FUNCTIONS ===================
+const subInit = {};
+
+// ---- 1C boot terminal init ----
+const s1Boot = [
+`Linux version 2.6.20 (bellard@jslinux) (gcc 4.4.5)`,
+`Booting paravirtualized kernel on x86 emulator`,
+`BIOS-provided physical RAM map:`,
+` BIOS-e820: 0000000000000000 - 0000000000002000 (usable)`,
+` BIOS-e820: 0000000000002000 - 000000000009f000 (usable)`,
+`Memory: 32MB available`,
+`PCI: Probing PCI hardware`,
+`pci 0000:00:00.0: ide0: BM-DMA at 0xc000-0xc007`,
+`NET: Registered protocol family 2 (TCP/IP)`,
+`TCP established hash table entries: 1024`,
+`Console: colour VGA+ 80x25`,
+`Serial: 8250/16550 driver, 4 ports`,
+`ttyS0 at I/O 0x3f8 (irq = 4) is a 16550A`,
+`mice: PS/2 mouse device common for all mice`,
+`md: linear personality registered`,
+`md: raid0 personality registered`,
+`Initializing CPU#0`,
+`CPU0: Intel x86 (jslinux emulated)`,
+`Kernel command line: console=ttyS0 root=/dev/ram0`,
+`Freeing unused kernel memory: 88k freed`,
+`init started: BusyBox v1.16.1`,
+`@@_@Welcome to Linux running in JavaScript.`,
+`~ # uname -a`,
+`@@@Linux jslinux 2.6.20 #1 i586 GNU/Linux`,
+`~ # ls /usr/bin | wc -l`,
+`@@@     143`,
+`~ # cat /proc/cpuinfo | head -3`,
+`@@@processor : 0`,
+`@@@vendor_id : JSLinuxFakeCPU`,
+`@@@cpu family : 5`,
+`~ # echo "running in a browser tab"`,
+`@@@running in a browser tab`,
+`~ # _`
+];
+let s1cInited = false, s1cLine = 0;
+subInit.s1c = function(){ s1cInited = true; s1cLine = 0; document.getElementById('s1c-boot').innerHTML=''; };
+
+function s1cFrame(t){
+  if (!s1cInited) return;
+  const tBoot = t - 0.6;
+  if (tBoot <= 0) return;
+  const target = Math.min(s1Boot.length, Math.floor(tBoot / 0.16));
+  if (target > s1cLine) {
+    const cont = document.getElementById('s1c-boot');
+    for (let i = s1cLine; i < target; i++) {
+      const raw = s1Boot[i];
+      let txt = raw.replace(/^@@@/,'').replace(/^@@_@/,'');
+      let cls = '';
+      if (raw.startsWith('@@_@')) cls = 'b ok';
+      else if (raw.startsWith('@@@')) cls = 'ok';
+      else if (raw.startsWith('~ #')) cls = 'prompt';
+      else if (raw.includes('init started') || raw.includes('Booting')) cls = 'ok';
+      const div = document.createElement('div');
+      div.className = 'ln';
+      div.innerHTML = cls ? `<span class="${cls}">${txt}</span>` : txt;
+      cont.appendChild(div);
+    }
+    s1cLine = target;
+    cont.scrollTop = cont.scrollHeight;
+  }
+}
+
+// ---- 2B rack ----
+const s2bUnits = [
+  'BBU · BASEBAND UNIT · ASIC',
+  'RRU · REMOTE RADIO HEAD',
+  'POWER AMPLIFIER · 80W',
+  'IF MODULE · DIGITAL UPCONV',
+  'TRANSPORT · CPRI 9.8 Gbps',
+  'CONTROL · MAC / RLC',
+  'POWER SUPPLY · −48V / 30A',
+  'COOLING · ACTIVE FAN ARRAY',
+  'BACKUP BATTERY · 4 HRS',
+  'SYNC · GPS / IEEE-1588',
+  'O&M PORT · LOCKED'
+];
+let s2bInited = false;
+subInit.s2ab = function(){
+  s2bInited = true;
+  const c = document.getElementById('s2ab-rackcont');
+  c.innerHTML = '';
+  s2bUnits.forEach((u,i)=>{
+    const el = document.createElement('div');
+    el.className = 's2b-unit';
+    el.innerHTML = `<span>${u}</span><span class="leds"><div class="led"></div><div class="led"></div><div class="led" style="background:#ffaa44;box-shadow:0 0 12px #ffaa44"></div></span>`;
+    el.style.animation = `wipe-r 0.4s cubic-bezier(0.4,0,0.2,1) ${3.6 + i*0.18}s both`;
+    c.appendChild(el);
+  });
+};
+function s2abFrame(t){
+  // pulse leds
+  const leds = document.querySelectorAll('#s2ab-rackcont .led');
+  leds.forEach((led,i)=>{
+    if (Math.random() < 0.025) {
+      led.style.background = pick(['#ff2080','#ffaa44','#ff5599']);
+      led.style.boxShadow = '0 0 12px ' + led.style.background;
+    }
+  });
+}
+
+// ---- 2C PC log ----
+const s2cLines = [
+  ['[INFO]', 'amarisoft eNodeB · v2024.05'],
+  ['[INFO]', 'CPU: Intel Xeon W-2245 · 8 cores · 64GB RAM'],
+  ['[INFO]', 'SDR: USRP B210 · USB 3.0 · OK'],
+  ['[INFO]', 'LTE Band 7 · 2620 MHz · BW 20 MHz'],
+  ['[INFO]', 'PCI 100 · TAC 0001 · MCC 001 / MNC 01'],
+  ['[INFO]', 'S1-MME ready · X2 enabled'],
+  ['[INFO]', 'PHY layer: 100% software · CPU only'],
+  ['[OK]',   'eNB started · listening for UE'],
+  ['[UE]',   'IMSI 001010123456789 · attached'],
+  ['[UE]',   'bearer activated · QCI 9 · 100 Mbps'],
+  ['[STAT]', 'DL: 87 Mbps · UL: 23 Mbps · BLER 0.4%'],
+  ['[INFO]', 'no FPGA, no ASIC, no proprietary HW'],
+  ['[OK]',   'all baseband math runs on the CPU'],
+  ['[STAT]', 'idle: 32% · used: 68% · core 0..7']
+];
+let s2cInited = false, s2cLineN = 0;
+subInit.s2c = function(){ s2cInited = true; s2cLineN = 0; document.getElementById('s2c-pclog').innerHTML=''; };
+function s2cFrame(t){
+  if (!s2cInited) return;
+  const tt = t - 0.8;
+  if (tt <= 0) return;
+  const target = Math.min(s2cLines.length, Math.floor(tt / 0.32));
+  if (target > s2cLineN) {
+    const c = document.getElementById('s2c-pclog');
+    for (let i = s2cLineN; i < target; i++) {
+      const [tag, msg] = s2cLines[i];
+      const cls = tag === '[OK]' ? 'ok' : tag === '[STAT]' ? 'stat' : tag === '[UE]' ? 'ue' : 'info';
+      const div = document.createElement('div');
+      div.innerHTML = `<span class="ts">${(i*0.31).toFixed(2)}s</span><span class="${cls}">${tag}</span> ${msg}`;
+      c.appendChild(div);
+    }
+    s2cLineN = target;
+    c.scrollTop = c.scrollHeight;
+  }
+}
+
+// ---- 2D world map ----
+const s2dCountries = [
+  // x, y in 0..1 (world equirectangular-ish)
+  [0.16,0.30,'CAN'],[0.18,0.36,'USA'],[0.20,0.46,'MEX'],
+  [0.27,0.62,'BRA'],[0.24,0.72,'ARG'],[0.22,0.55,'COL'],[0.21,0.65,'PER'],[0.25,0.78,'CHL'],[0.30,0.55,'VEN'],[0.31,0.66,'BOL'],
+  [0.48,0.27,'GBR'],[0.50,0.27,'FRA'],[0.52,0.26,'DEU'],[0.53,0.30,'ITA'],[0.49,0.32,'ESP'],[0.55,0.25,'POL'],[0.54,0.22,'SWE'],[0.51,0.23,'NLD'],[0.55,0.34,'GRC'],[0.50,0.30,'CHE'],[0.46,0.24,'IRL'],[0.51,0.23,'BEL'],[0.55,0.21,'NOR'],[0.57,0.21,'FIN'],[0.59,0.27,'UKR'],[0.54,0.30,'AUT'],[0.51,0.32,'PRT'],
+  [0.65,0.20,'RUS'],[0.62,0.22,'BLR'],
+  [0.58,0.36,'TUR'],[0.62,0.40,'SAU'],[0.61,0.38,'ISR'],[0.65,0.41,'ARE'],[0.63,0.40,'JOR'],[0.59,0.43,'IRN'],[0.61,0.30,'GEO'],
+  [0.52,0.45,'MAR'],[0.55,0.48,'EGY'],[0.50,0.52,'NGA'],[0.58,0.62,'ZAF'],[0.55,0.55,'KEN'],[0.42,0.64,'AGO'],[0.45,0.35,'TUN'],[0.46,0.40,'DZA'],
+  [0.72,0.34,'IND'],[0.78,0.32,'CHN'],[0.85,0.30,'JPN'],[0.83,0.32,'KOR'],[0.74,0.40,'THA'],[0.77,0.45,'IDN'],[0.79,0.40,'PHL'],[0.78,0.42,'VNM'],[0.76,0.35,'MMR'],[0.71,0.36,'PAK'],[0.75,0.38,'BGD'],[0.69,0.30,'KAZ'],[0.76,0.28,'MNG'],[0.71,0.40,'LKA'],[0.72,0.31,'NPL'],
+  [0.86,0.65,'AUS'],[0.92,0.70,'NZL'],
+  [0.40,0.27,'ISL'],[0.65,0.45,'OMN']
+];
+let s2dInited = false;
+subInit.s2d = function(){ s2dInited = true; document.getElementById('s2d-cnt').textContent = '0'; };
+
+function s2dFrame(t){
+  if (!s2dInited) return;
+  const cv = document.getElementById('s2d-map');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0,0,W,H);
+  // background
+  ctx.fillStyle = 'rgba(20,0,40,0.4)';
+  ctx.fillRect(0,0,W,H);
+  // grid
+  ctx.strokeStyle = 'rgba(255,32,128,0.07)';
+  ctx.lineWidth = 1;
+  for (let i=0;i<W;i+=40){ ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,H); ctx.stroke(); }
+  for (let i=0;i<H;i+=40){ ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(W,i); ctx.stroke(); }
+  // continents - rough
+  ctx.fillStyle = 'rgba(80,30,90,0.5)';
+  ctx.fillRect(W*0.08, H*0.18, W*0.18, H*0.30);   // NA
+  ctx.fillRect(W*0.20, H*0.50, W*0.10, H*0.36);   // SA
+  ctx.fillRect(W*0.45, H*0.18, W*0.15, H*0.18);   // EUR
+  ctx.fillRect(W*0.45, H*0.42, W*0.16, H*0.30);   // AFR
+  ctx.fillRect(W*0.60, H*0.15, W*0.30, H*0.30);   // ASIA
+  ctx.fillRect(W*0.78, H*0.55, W*0.16, H*0.20);   // SE-AS / OZ
+  ctx.fillRect(W*0.55, H*0.13, W*0.32, H*0.13);   // RUS
+  // labels grid every 30 lon/lat — soft
+  ctx.font = '10px JetBrains Mono';
+  ctx.fillStyle = 'rgba(255,32,128,0.15)';
+  for (let lon=-180; lon<=180; lon+=30) ctx.fillText(`${lon}°`, ((lon+180)/360)*W, H-6);
+
+  // dots
+  const total = s2dCountries.length; // 64
+  const showT = clamp((t - 0.9) / 4, 0, 1);
+  const target = Math.floor(showT * Math.min(total, 64));
+  document.getElementById('s2d-cnt').textContent = String(target).padStart(2,'0');
+  for (let i = 0; i < target; i++) {
+    const c = s2dCountries[i];
+    const x = c[0] * W, y = c[1] * H;
+    const tIn = clamp((t - 0.9) - (i / total) * 4, 0, 0.6) / 0.6;
+    const r = lerp(0, 7, tIn);
+    const pulse = (Math.sin(t*4 + i*0.7) + 1) * 0.5;
+    // ring
+    ctx.beginPath(); ctx.arc(x,y,r + pulse*5,0,Math.PI*2);
+    ctx.fillStyle = `rgba(255,32,128,${0.35 - pulse*0.18})`;
+    ctx.fill();
+    // dot
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle = '#ff2080'; ctx.fill();
+    // line to recent ones
+    if (i > 0 && i < target && tIn > 0.5) {
+      const c0 = s2dCountries[i-1];
+      ctx.strokeStyle = 'rgba(255,32,128,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(c0[0]*W, c0[1]*H);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+  }
+}
+
+// ---- 3DE bars (merged QuickJS detail + comparison) ----
+let s3eInited = false;
+subInit.s3de = function(){ s3eInited = true; ['s3e-b1','s3e-b2','s3e-b3'].forEach(id=>document.getElementById(id).style.width='0%'); };
+function s3deFrame(t){
+  if (!s3eInited) return;
+  const max = 58;
+  // bars only kick in around t=4 (after detail content has shown)
+  const a = clamp((t-4.2)/1, 0, 1);
+  const b = clamp((t-4.6)/1, 0, 1);
+  const c = clamp((t-5.0)/1, 0, 1);
+  document.getElementById('s3e-b1').style.width = (a*58/max*100) + '%';
+  document.getElementById('s3e-b2').style.width = (b*32/max*100) + '%';
+  document.getElementById('s3e-b3').style.width = (c*0.4/max*100) + '%';
+}
+
+// ---- 3FG size compare (merged Micro QJS + embedded) ----
+let s3gInited = false;
+subInit.s3fg = function(){ s3gInited = true; ['s3g-v1','s3g-v2','s3g-v3'].forEach(id=>document.getElementById(id).style.width='0%'); };
+function s3fgFrame(t){
+  if (!s3gInited) return;
+  const a = clamp((t-3.7)/1.2, 0, 1);
+  const b = clamp((t-4.2)/1.2, 0, 1);
+  const c = clamp((t-4.7)/1.2, 0, 1);
+  document.getElementById('s3g-v1').style.width = (a * (10/10240)*100) + '%';
+  document.getElementById('s3g-v2').style.width = (b * (70/10240)*100) + '%';
+  document.getElementById('s3g-v3').style.width = (c * 100) + '%';
+}
+
+// ---- 5B bars ----
+let s5bInited = false;
+subInit.s5b = function(){ s5bInited = true; ['s5b-bar-tsac','s5b-bar-opus','s5b-bar-mp3low','s5b-bar-mp3hi'].forEach(id=>document.getElementById(id).style.width='0%'); };
+function s5bFrame(t){
+  if (!s5bInited) return;
+  const max = 320;
+  const phases = [
+    { id:'s5b-bar-tsac',   v:7.5,   d:0.9 },
+    { id:'s5b-bar-opus',   v:32,    d:1.3 },
+    { id:'s5b-bar-mp3low', v:128,   d:1.7 },
+    { id:'s5b-bar-mp3hi',  v:320,   d:2.1 }
+  ];
+  phases.forEach(p=>{
+    const f = clamp((t - p.d) / 1.2, 0, 1);
+    document.getElementById(p.id).style.width = (smoothstep(f) * (p.v/max) * 100) + '%';
+  });
+}
+
+// =================== BACKGROUND CANVAS (subtle scan) ===================
+const bgcanvas = document.getElementById('bgcanvas');
+const bgctx = bgcanvas.getContext('2d');
+function drawBG(t){
+  bgctx.clearRect(0,0,2560,1440);
+  // light scanning beam — only on dark scenes
+  const beamY = (t * 200) % 1600 - 80;
+  const grad = bgctx.createLinearGradient(0, beamY-50, 0, beamY+50);
+  grad.addColorStop(0,'rgba(255,255,255,0)');
+  grad.addColorStop(0.5,'rgba(255,255,255,0.025)');
+  grad.addColorStop(1,'rgba(255,255,255,0)');
+  bgctx.fillStyle = grad;
+  bgctx.fillRect(0,beamY-50,2560,100);
+}
+
+// =================== SCENE 6 — code rain ===================
+let s6Cols = [];
+function initS6(){
+  s6Cols = [];
+  const W = 2560;
+  const codeLines = [
+    'static int x86_decode_modrm(CPU_X86 *cpu, int op) {',
+    '    int mod, reg, rm; uint8_t b = ld_8(cpu->eip);',
+    '    cpu->eip = (cpu->eip + 1) & 0xffffffff;',
+    '    mod = (b >> 6) & 3; reg = (b >> 3) & 7; rm = b & 7;',
+    '    if (mod == 3) return cpu->regs[rm];',
+    '    return mem_read(cpu, segment_translation(cpu, mod, rm));',
+    '}',
+    'static void ffmpeg_decode(AVCodecContext *avctx) {',
+    '    int i, ret; AVPacket pkt; AVFrame *f = av_frame_alloc();',
+    '    while ((ret = av_read_frame(avctx, &pkt)) >= 0) {',
+    '        ret = avcodec_send_packet(avctx, &pkt);',
+    '        if (ret < 0) break;',
+    '        while (avcodec_receive_frame(avctx, f) == 0)',
+    '            process_frame(f);',
+    '    }',
+    '}',
+    'JSValue *quickjs_eval(const char *src) {',
+    '    JSContext *ctx = JS_NewContext(rt);',
+    '    return JS_Eval(ctx, src, strlen(src), "<input>", JS_EVAL_TYPE_GLOBAL);',
+    '}',
+    'static int nncp_predict_byte(NNState *s, uint8_t *ctx, int ctx_len) {',
+    '    float *logits = transformer_forward(s, ctx, ctx_len);',
+    '    softmax(logits, 256);',
+    '    return arithmetic_encode(s->ac, logits, ctx[ctx_len]);',
+    '}',
+    'int main(int argc, char **argv) {',
+    '    fprintf(stderr, "tcc -- TinyCC v0.9.27\\n");',
+    '    return tcc_compile(argv[1]);',
+    '}',
+    'void tsac_encode(float *audio, int n_samples) {',
+    '    /* transformer-based stereo audio codec */',
+    '    quantize_residual(audio, predicted, codebook);',
+    '}',
+    'static int amarisoft_lte_phy(struct enb *enb, int sf) {',
+    '    schedule_dl(enb, sf); fft_ofdm(enb->iq, 2048);',
+    '    return mac_tx(enb->mac, enb->ue_list);',
+    '}',
+  ];
+  for (let c = 0; c < 14; c++){
+    s6Cols.push({
+      x: c * (W/14) + 20,
+      y: rand(-2000, 0),
+      speed: rand(40, 90),
+      lines: codeLines.slice()
+    });
+  }
+}
+function drawS6Rain(canvas, dimFactor){
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,2560,1440);
+  ctx.font = '14px "JetBrains Mono"';
+  ctx.textBaseline = 'top';
+  for (const col of s6Cols){
+    col.y += col.speed * 0.016;
+    if (col.y > 1500) col.y = -2000;
+    for (let i = 0; i < col.lines.length; i++) {
+      const yy = col.y + i * 22;
+      if (yy < -20 || yy > 1460) continue;
+      const dist = Math.abs(yy - 720) / 720;
+      const alpha = (0.04 + (1-dist) * 0.18) * dimFactor;
+      ctx.fillStyle = `rgba(244,241,232,${alpha})`;
+      ctx.fillText(col.lines[i].slice(0, 80), col.x, yy);
+    }
+  }
+}
+function s6Frame(t){ drawS6Rain(document.getElementById('s6canvas'), 0.55); }
+
+// =================== MAIN LOOP ===================
+function fmtTime(t){
+  const m = Math.floor(t/60).toString().padStart(2,'0');
+  const s = (t%60).toFixed(1).padStart(4,'0');
+  return m + ':' + s;
+}
+let lastT = 0;
+function loop(now){
+  if (running){
+    if (!startTime) startTime = now;
+    elapsed = (now - startTime) / 1000;
+    const dt = Math.min(0.05, (now - lastT)/1000 || 0.016);
+    lastT = now;
+    if (elapsed > TOTAL){ elapsed = TOTAL; running = false; }
+
+    // pick sub
+    let cur = null;
+    for (const s of subs) {
+      if (elapsed >= s.start && elapsed < s.end) { cur = s; break; }
+    }
+    if (!cur && elapsed >= TOTAL) cur = subs[subs.length-1];
+
+    if (cur) {
+      activateSub(cur.id);
+      const localT = elapsed - cur.start;
+      // dispatch frame
+      if (cur.id === 's1c') s1cFrame(localT);
+      else if (cur.id === 's2ab') s2abFrame(localT);
+      else if (cur.id === 's2c') s2cFrame(localT);
+      else if (cur.id === 's2d') s2dFrame(localT);
+      else if (cur.id === 's3de') s3deFrame(localT);
+      else if (cur.id === 's3fg') s3fgFrame(localT);
+      else if (cur.id === 's5b') s5bFrame(localT);
+      else if (cur.id === 's6')   s6Frame(localT);
+      // tag
+      document.getElementById('sctag').textContent = cur.name;
+    }
+    document.getElementById('tc').textContent = fmtTime(elapsed);
+    drawBG(elapsed);
+  }
+  bpmFrame(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// =================== RESET ===================
+function reset(){
+  startTime = 0; elapsed = 0; currentSubId = null;
+  // reset per-sub state
+  s1cInited = false; s1cLine = 0;
+  document.getElementById('s1c-boot').innerHTML = '';
+  s2bInited = false;
+  document.getElementById('s2ab-rackcont').innerHTML = '';
+  s2cInited = false; s2cLineN = 0;
+  document.getElementById('s2c-pclog').innerHTML = '';
+  s2dInited = false;
+  s3eInited = false; ['s3e-b1','s3e-b2','s3e-b3'].forEach(id=>document.getElementById(id).style.width='0%');
+  s3gInited = false; ['s3g-v1','s3g-v2','s3g-v3'].forEach(id=>document.getElementById(id).style.width='0%');
+  s5bInited = false; ['s5b-bar-tsac','s5b-bar-opus','s5b-bar-mp3low','s5b-bar-mp3hi'].forEach(id=>document.getElementById(id).style.width='0%');
+  initS6();
+  document.querySelectorAll('.sub').forEach(el=>el.classList.remove('on'));
+  document.getElementById('intro').classList.add('hidden');
+  running = true;
+}
+
+// init s6 cols once
+initS6();
+
+// =================== BPM PULSE — global --pulse ===================
+const root = document.documentElement;
+let bpm = 120;
+let bpmOn = false;
+let bpmStartTime = performance.now();
+let currentFx = 'warm';
+document.body.classList.add('fx-warm');
+
+const bpmToggle = document.getElementById('bpmToggle');
+const bpmSlider = document.getElementById('bpmSlider');
+const bpmVal = document.getElementById('bpmVal');
+const bpmTap = document.getElementById('bpmTap');
+
+bpmToggle.addEventListener('click', () => {
+  bpmOn = !bpmOn;
+  bpmToggle.classList.toggle('on', bpmOn);
+  bpmToggle.textContent = bpmOn ? 'ON' : 'OFF';
+  document.body.classList.toggle('bpm-on', bpmOn);
+  if (bpmOn) bpmStartTime = performance.now();
+  if (!bpmOn) root.style.setProperty('--pulse', '0');
+});
+bpmSlider.addEventListener('input', () => {
+  bpm = parseInt(bpmSlider.value, 10);
+  bpmVal.textContent = bpm;
+  bpmStartTime = performance.now();
+});
+
+// tap-tempo
+let tapTimes = [];
+bpmTap.addEventListener('click', () => {
+  const now = performance.now();
+  tapTimes.push(now);
+  while (tapTimes.length > 0 && now - tapTimes[0] > 3000) tapTimes.shift();
+  if (tapTimes.length >= 2) {
+    const intervals = [];
+    for (let i = 1; i < tapTimes.length; i++) intervals.push(tapTimes[i] - tapTimes[i-1]);
+    const avg = intervals.reduce((a,b)=>a+b,0) / intervals.length;
+    const newBpm = Math.round(60000 / avg);
+    if (newBpm >= 40 && newBpm <= 240) {
+      bpm = newBpm;
+      bpmSlider.value = bpm;
+      bpmVal.textContent = bpm;
+      bpmStartTime = now;
+    }
+  }
+});
+
+// FX selection
+document.querySelectorAll('#ctrl .ctrl-btn.fx').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#ctrl .ctrl-btn.fx').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.body.classList.remove('fx-warm','fx-cool','fx-accent');
+    currentFx = btn.dataset.fx;
+    document.body.classList.add('fx-' + currentFx);
+  });
+});
+
+// Pulse curve: smooth attack, exponential decay each beat
+function bpmFrame(now){
+  if (!bpmOn) return;
+  const beatMs = 60000 / bpm;
+  const phase = ((now - bpmStartTime) % beatMs) / beatMs;
+  let p;
+  if (phase < 0.10) {
+    p = phase / 0.10;
+    p = p*p*(3-2*p);
+  } else {
+    const x = (phase - 0.10) / 0.90;
+    p = Math.exp(-3.5 * x);
+  }
+  root.style.setProperty('--pulse', p.toFixed(4));
+}
+
+// =================== EVENTS ===================
+document.addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  if (k === 'r' || k === 'к') reset();
+  else if (e.key === 'Tab') { e.preventDefault(); document.body.classList.toggle('hide-ui'); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The RealJukeBox Monitoring System</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@400;700&family=Exo+2:wght@700;900&family=Jura:wght@600;700&family=Raleway:wght@800;900&family=Montserrat:wght@700;800;900&family=Unbounded:wght@700;900&family=Chakra+Petch:wght@600;700&family=Russo+One&family=Play:wght@700&family=Cuprum:wght@700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* ── Размер текста — меняй здесь ── */
+    --text-size: 16px;
+    --text-size-sm: 14.5px;   /* колонки */
+    --text-size-code: 13px;   /* код */
+
+    --bg:         #000;
+    --fg:         #e0d8cc;       /* единый цвет для EN и RU */
+    --dim:        #555;
+    --mid:        #888;
+    --white:      #f2ede4;
+    --yellow:     #f5ec00;
+    --yellow-dim: #7a7200;
+    --red:        #d4003f;
+    --mono:       'Share Tech Mono', monospace;
+    --sans:       'PT Sans', sans-serif;
+    --cond:       'Barlow Condensed', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: var(--bg); overflow-x: hidden; }
+  body { overflow-x: hidden; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-weight: 400;
+    font-size: var(--text-size);
+    line-height: 1.75;
+    position: relative;
+  }
+
+  /* ══════════════════════════════════════════
+     EFFECTS — управляются классами на <body class="hf-barlow-condensed">
+  ══════════════════════════════════════════ */
+
+  /* 1. Scanlines */
+  body.fx-scanlines::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none; z-index: 9997;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 3px,
+      rgba(255,255,255,0.025) 3px, rgba(255,255,255,0.025) 4px
+    );
+  }
+
+  /* 2. Scan beam */
+  .scanner {
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%, rgba(255,255,255,0.0) 15%,
+      rgba(255,255,255,0.25) 50%,
+      rgba(255,255,255,0.0) 85%, transparent 100%);
+    pointer-events: none; z-index: 9998; display: none;
+  }
+  body.fx-beam .scanner { display: block; animation: scan-down 10s linear infinite; }
+
+  /* 3. Flicker */
+  body.fx-flicker .page { animation: flicker-hard 5s infinite; }
+
+  /* 4. Glitch */
+  body.fx-glitch .page { animation: glitch-page 6s infinite; }
+  body.fx-glitch h1::after { animation: glitch-clip 3s infinite 0.5s !important; }
+
+  /* 5. Chromatic aberration */
+  body.fx-chroma .dual-en p,
+  body.fx-chroma .dual-ru p,
+  body.fx-chroma .pull-col {
+    text-shadow: 2px 0 rgba(220,0,60,0.4), -2px 0 rgba(0,210,255,0.4);
+  }
+  body.fx-chroma .page { animation: chroma-flicker 5s infinite; }
+
+  /* 6. VHS noise */
+  body.fx-vhs::after {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+    opacity: 0.06;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='250'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='250' height='250' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+    animation: vhs-roll 0.25s steps(4) infinite;
+    mix-blend-mode: screen;
+  }
+
+  /* Keyframes */
+  @keyframes scan-down { from{top:-2px} to{top:100%} }
+  @keyframes reveal { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  @keyframes flicker-hard {
+    0%,100%{opacity:1}
+    8%{opacity:1} 9%{opacity:.55} 10%{opacity:1}
+    42%{opacity:1} 43%{opacity:.75} 44%{opacity:1}
+    68%{opacity:1} 69%{opacity:.35} 70%{opacity:.9} 71%{opacity:1}
+  }
+    5%{opacity:1}  6%{opacity:.3}  7%{opacity:1}   8%{opacity:.7}  9%{opacity:1}
+    30%{opacity:1} 31%{opacity:.1} 32%{opacity:.9} 33%{opacity:.5} 34%{opacity:1}
+    60%{opacity:1} 61%{opacity:.5} 62%{opacity:1}
+    75%{opacity:1} 76%{opacity:.2} 77%{opacity:1} 78%{opacity:.8} 79%{opacity:1}
+    92%{opacity:1} 93%{opacity:.4} 94%{opacity:1}
+  }
+  @keyframes glitch-clip {
+    0%,88%,100%{clip-path:inset(0 0 100% 0);transform:translateX(0)}
+    90%{clip-path:inset(15% 0 62% 0);transform:translateX(-7px)}
+    92%{clip-path:inset(50% 0 24% 0);transform:translateX(6px)}
+    94%{clip-path:inset(80% 0 4% 0);transform:translateX(-3px)}
+  }
+  @keyframes glitch-page {
+    0%,93%,100%{transform:none;filter:none}
+    94%{transform:translate(-4px,0);filter:brightness(1.15)}
+    95%{transform:translate(4px,0);filter:hue-rotate(80deg) brightness(0.85)}
+    96%{transform:translate(-2px,1px)}
+    97%{transform:none;filter:none}
+    98%{transform:translate(2px,-1px);filter:brightness(1.05)}
+    99%{transform:none}
+  }
+    81%{transform:translate(-8px,0);filter:brightness(1.3)}
+    82%{transform:translate(8px,0);filter:hue-rotate(90deg) brightness(0.7);clip-path:inset(20% 0 30% 0)}
+    83%{transform:translate(-4px,2px);filter:saturate(3)}
+    84%{transform:none;filter:none;clip-path:none}
+    88%{transform:none}
+    89%{transform:translate(6px,0);filter:hue-rotate(180deg)}
+    90%{transform:translate(-6px,0);filter:brightness(1.5)}
+    91%{transform:none;filter:none}
+  }
+  @keyframes chroma-flicker {
+    0%,82%,100%{filter:none}
+    83%{filter:hue-rotate(10deg) saturate(1.3)}
+    85%{filter:hue-rotate(-8deg)}
+    87%{filter:none}
+  }
+    71%{filter:hue-rotate(20deg) saturate(2) brightness(1.2)}
+    73%{filter:hue-rotate(-15deg) saturate(3)}
+    75%{filter:none}
+    85%{filter:hue-rotate(30deg)}
+    87%{filter:none}
+  }
+  @keyframes vhs-roll {
+    0%{background-position:0 0}
+    25%{background-position:12px 55px}
+    50%{background-position:-9px 110px}
+    75%{background-position:6px 165px}
+    100%{background-position:-3px 220px}
+  }
+    20% {background-position:20px 44px; opacity:0.18}
+    40% {background-position:-14px 88px;opacity:0.08}
+    60% {background-position:8px 132px; opacity:0.20}
+    80% {background-position:-6px 176px;opacity:0.10}
+    100%{background-position:4px 220px; opacity:0.14}
+  }
+
+  /* ══════════════════════════════════════════
+     FX PANEL
+  ══════════════════════════════════════════ */
+  .fx-panel {
+    position: fixed;
+    bottom: 28px; right: 28px;
+    z-index: 10000;
+    font-family: var(--mono);
+  }
+  .fx-toggle-btn {
+    display: flex; align-items: center; gap: 8px;
+    justify-content: flex-end;
+    cursor: pointer; margin-bottom: 8px;
+    font-size: 0.62rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--yellow-dim); transition: color 0.15s;
+    user-select: none;
+    background: rgba(0,0,0,0.85);
+    border: 1px solid #2a2a00;
+    padding: 5px 10px;
+  }
+  .fx-toggle-btn:hover { color: var(--yellow); border-color: var(--yellow-dim); }
+  .fx-toggle-btn .pdot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--yellow); animation: blink 1.8s infinite;
+  }
+  .fx-body {
+    background: rgba(2,2,0,0.95);
+    border: 1px solid #282800;
+    padding: 14px 16px;
+    display: none; flex-direction: column; gap: 9px;
+    min-width: 188px;
+    backdrop-filter: blur(4px);
+  }
+  .fx-body.open { display: flex; }
+  .fx-head {
+    font-size: 0.44rem; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--yellow-dim); padding-bottom: 8px;
+    border-bottom: 1px solid #1c1c00;
+  }
+  .fx-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; cursor: pointer;
+  }
+  .fx-row:hover .fx-label { color: var(--white); }
+  .fx-label {
+    font-size: 0.54rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--dim); transition: color 0.12s; user-select: none;
+  }
+  .fx-sw {
+    width: 30px; height: 15px;
+    border: 1px solid #252500; background: #080800;
+    position: relative; flex-shrink: 0; transition: border-color 0.15s;
+  }
+  .fx-sw::after {
+    content: '';
+    position: absolute; top: 2px; left: 2px;
+    width: 9px; height: 9px;
+    background: #2a2a00; transition: transform 0.15s, background 0.15s;
+  }
+  .fx-row.on .fx-sw { border-color: var(--yellow-dim); }
+  .fx-row.on .fx-sw::after { transform: translateX(15px); background: var(--yellow); }
+  .fx-row.on .fx-label { color: var(--yellow); }
+
+  /* ══════════════════════════════════════════
+     LAYOUT
+  ══════════════════════════════════════════ */
+  .page {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 72px 56px 140px;
+  }
+
+  .site-header {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #1a1a00;
+    padding-bottom: 20px; margin-bottom: 60px;
+    flex-wrap: wrap; gap: 12px;
+  }
+  .site-id {
+    font-family: var(--mono); font-size: 0.74rem;
+    color: var(--dim); letter-spacing: 0.22em; text-transform: uppercase;
+  }
+  .site-id span { color: var(--yellow); }
+
+  .site-status {
+    font-family: var(--mono); font-size: 0.72rem;
+    color: var(--dim); letter-spacing: 0.15em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sdot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--yellow); animation: blink 1.8s infinite;
+  }
+
+  .article-meta {
+    font-family: var(--mono); font-size: 0.82rem;
+    color: var(--dim); letter-spacing: 0.22em; text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;
+  }
+  .article-meta .tag {
+    color: #000; background: var(--yellow);
+    padding: 3px 10px; font-weight: bold; font-size: 0.86rem;
+  }
+
+  h1 {
+    font-family: var(--cond);
+    font-size: clamp(3rem, 7.5vw, 9.2rem);
+    font-weight: 400; line-height: 0.92;
+    letter-spacing: 0.04em;
+    color: var(--white); text-transform: uppercase;
+    margin-bottom: 8px; position: relative;
+    animation: reveal 0.5s ease both;
+  }
+  h1 .accent { color: var(--yellow); }
+  h1::after {
+    content: attr(data-text);
+    position: absolute; top: 0; left: 0;
+    color: var(--yellow); opacity: 0.5;
+    clip-path: inset(0 0 100% 0);
+    pointer-events: none;
+  }
+
+  .author-line {
+    font-family: var(--mono); font-size: 0.82rem;
+    color: var(--dim); margin-top: 20px; margin-bottom: 52px;
+    padding-top: 20px; border-top: 1px solid #141400;
+    display: flex; gap: 2.5rem; flex-wrap: wrap; align-items: center;
+  }
+  .author-tag { color: var(--yellow-dim); font-size: 0.72rem; letter-spacing: 0.18em; }
+
+  /* ── DUAL GRID ───────────────────────────── */
+  .dual {
+    display: grid; grid-template-columns: 1fr 1fr;
+    border: 1px solid #1c1c00;
+    margin-bottom: 1.8em;
+  }
+  .dual-en {
+    padding: 18px 22px;
+    border-right: 1px solid #1c1c00;
+    position: relative;
+  }
+  .dual-ru {
+    padding: 18px 22px;
+    background: #030300;
+    position: relative;
+  }
+  .dual-en::before {
+    content: 'EN'; position: absolute; top: 8px; right: 12px;
+    font-family: var(--mono); font-size: 0.42rem;
+    color: #2e2e00; letter-spacing: 0.2em;
+  }
+  .dual-ru::before {
+    content: 'RU'; position: absolute; top: 8px; right: 12px;
+    font-family: var(--mono); font-size: 0.42rem;
+    color: var(--yellow-dim); letter-spacing: 0.2em;
+  }
+  /* PT Sans — одинаковый для обеих колонок, одинаковый цвет */
+  .dual-en p,
+  .dual-ru p {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: var(--text-size-sm);
+    line-height: 1.78;
+    color: var(--fg);
+  }
+  .dual-en a {
+    color: var(--mid); text-decoration: none;
+    border-bottom: 1px solid #282800; transition: color 0.15s;
+  }
+  .dual-en a:hover { color: var(--yellow); }
+
+  .hy { color: var(--yellow); }
+  .hr { color: var(--red); }
+
+  /* ── PULL QUOTE ──────────────────────────── */
+  .pull-dual {
+    display: grid; grid-template-columns: 1fr 1fr;
+    margin: 3.2em 0;
+    border-left: 3px solid var(--yellow);
+    background: #060500;
+  }
+  .pull-col {
+    padding: 26px 30px;
+    font-family: var(--cond);
+    font-size: 1.55rem; font-weight: 400;
+    line-height: 1.28; color: var(--white);
+    text-transform: uppercase; letter-spacing: 0.025em;
+  }
+  .pull-col.ru-col {
+    border-left: 1px solid #222200;
+    color: var(--white);
+  }
+  .pull-label {
+    font-family: var(--mono); font-size: 0.68rem;
+    letter-spacing: 0.22em; display: block; margin-bottom: 12px;
+  }
+  .pull-label.en { color: var(--yellow); }
+  .pull-label.ru { color: var(--yellow-dim); }
+
+  /* ── SECTION MARKERS ─────────────────────── */
+  .section-marker {
+    font-family: var(--mono); font-size: 0.72rem;
+    color: var(--dim); letter-spacing: 0.25em; text-transform: uppercase;
+    margin: 3.8em 0 0.6em;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .section-marker::before { content: '//'; color: var(--yellow); margin-right: 2px; }
+  .section-marker::after { content: ''; flex: 1; height: 1px; background: #141400; }
+  .sm-ru {
+    color: var(--yellow-dim);
+    border-left: 1px solid #1e1e00;
+    padding-left: 14px; white-space: nowrap;
+  }
+
+  /* ── CODE BLOCKS ─────────────────────────── */
+  .code-wrap { margin: 0.6em 0 1.8em; border: 1px solid #1c1c00; }
+  .code-label {
+    font-family: var(--mono); font-size: 0.54rem;
+    color: var(--dim); letter-spacing: 0.2em; text-transform: uppercase;
+    padding: 7px 16px; background: #040400;
+    border-bottom: 1px solid #141400;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .cl-tag {
+    color: var(--yellow); border: 1px solid var(--yellow-dim);
+    padding: 1px 7px; font-size: 0.48rem;
+  }
+  pre { margin: 0; padding: 20px 24px; background: #020200; overflow-x: auto; max-width: 100%; }
+  pre code {
+    font-family: var(--mono); font-size: var(--text-size-code);
+    line-height: 1.75; color: #888500; white-space: pre;
+  }
+  pre code .key  { color: #bbb; }
+  pre code .guid { color: #8c8400; background: #0d0d00; padding: 0 4px; }
+  pre code .warn { color: #7a3a00; }
+
+  /* ── DATA TABLE ──────────────────────────── */
+  .data-block { margin: 0.6em 0 1.8em; border: 1px solid #181800; }
+  .data-block-header {
+    font-family: var(--mono); font-size: 0.54rem;
+    color: var(--dim); letter-spacing: 0.25em; text-transform: uppercase;
+    padding: 8px 16px; background: #040400;
+    border-bottom: 1px solid #111100;
+    display: flex; justify-content: space-between;
+  }
+  .data-block-header span { color: #666200; }
+  .data-row {
+    display: flex; border-bottom: 1px solid #0d0d00;
+    font-family: var(--mono); font-size: 0.72rem;
+  }
+  .data-row:last-child { border-bottom: none; }
+  .data-row-idx {
+    padding: 7px 16px; color: #1e1d00;
+    border-right: 1px solid #0f0f00; min-width: 46px;
+    text-align: right; background: #030300; flex-shrink: 0;
+  }
+  .data-row-val { padding: 7px 18px; color: #756f00; }
+  .data-row-val a, .data-row-val a:visited { color: inherit !important; text-decoration: none !important; }
+  .data-row-val.hi  { color: #8c8400; }
+  .data-row-val.red { color: #8f6400; }
+
+  /* ── ADDENDUM ────────────────────────────── */
+  .addendum { margin-top: 4.5em; border: 1px solid #181800; }
+  .addendum-header {
+    padding: 12px 22px; background: #050400;
+    border-bottom: 1px solid #1c1900;
+    font-family: var(--mono); font-size: 0.58rem;
+    color: var(--dim); letter-spacing: 0.2em; text-transform: uppercase;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 8px;
+  }
+  .addendum-header .ru { color: var(--yellow-dim); }
+  .addendum-body {
+    padding: 24px 28px;
+    font-family: var(--mono); font-size: var(--text-size-code);
+    line-height: 1.88;
+  }
+  .addendum-body p { margin-bottom: 1em; color: #7a7600; }
+  .addendum-body p.ru { color: #7a7600; font-style: italic; }
+
+  /* ── FOOTER ──────────────────────────────── */
+  .article-footer {
+    margin-top: 5em; padding-top: 2em;
+    border-top: 1px solid #141400;
+    font-family: var(--mono); font-size: 0.80rem;
+    color: var(--dim); letter-spacing: 0.12em;
+    display: flex; justify-content: space-between;
+  }
+  .eof { color: var(--yellow); }
+
+  hr { border: none; border-top: 1px solid #141400; margin: 3em 0; }
+
+  /* ── SIZE SLIDER ─────────────────────────── */
+  .size-control {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 0.52rem;
+    letter-spacing: 0.15em; color: var(--dim);
+  }
+  .size-control input[type=range] {
+    -webkit-appearance: none;
+    width: 80px; height: 2px;
+    background: #1e1e00; outline: none; cursor: pointer;
+  }
+  .size-control input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px; height: 10px;
+    background: var(--yellow); border-radius: 0;
+    cursor: pointer;
+  }
+  .size-control input[type=range]::-moz-range-thumb {
+    width: 10px; height: 10px;
+    background: var(--yellow); border-radius: 0; border: none;
+    cursor: pointer;
+  }
+  .size-val { color: var(--yellow); min-width: 2.5em; text-align: right; }
+
+  @media (max-width: 900px) {
+    .page { padding: 44px 20px 90px; }
+    .dual, .pull-dual { grid-template-columns: 1fr; }
+    .dual-en { border-right: none; border-bottom: 1px solid #1c1c00; }
+    .pull-col.ru-col { border-left: none; border-top: 1px solid #222200; }
+    h1 { font-size: 2.6rem; }
+    .sm-ru { display: none; }
+    .fx-panel { bottom: 16px; right: 16px; }
+  }
+
+  body.hf-barlow-condensed h1,
+  body.hf-barlow-condensed .pull-col {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+  }
+  body.hf-exo-2 h1,
+  body.hf-exo-2 .pull-col {
+    font-family: 'Exo 2', sans-serif;
+    font-weight: 900;
+  }
+  body.hf-jura h1,
+  body.hf-jura .pull-col {
+    font-family: 'Jura', sans-serif;
+    font-weight: 700;
+  }
+  body.hf-raleway h1,
+  body.hf-raleway .pull-col {
+    font-family: 'Raleway', sans-serif;
+    font-weight: 900;
+  }
+  body.hf-montserrat h1,
+  body.hf-montserrat .pull-col {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 900;
+  }
+  body.hf-unbounded h1,
+  body.hf-unbounded .pull-col {
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 900;
+  }
+  body.hf-chakra-petch h1,
+  body.hf-chakra-petch .pull-col {
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: 700;
+  }
+  body.hf-russo-one h1,
+  body.hf-russo-one .pull-col {
+    font-family: 'Russo One', sans-serif;
+    font-weight: 400;
+  }
+  body.hf-play h1,
+  body.hf-play .pull-col {
+    font-family: 'Play', sans-serif;
+    font-weight: 700;
+  }
+  body.hf-cuprum h1,
+  body.hf-cuprum .pull-col {
+    font-family: 'Cuprum', sans-serif;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body class="hf-barlow-condensed">
+<div class="scanner"></div>
+
+<!-- FX PANEL -->
+<div class="fx-panel">
+  <div class="fx-toggle-btn" id="fxToggleBtn">
+    <span>FX</span><div class="pdot"></div>
+  </div>
+  <div class="fx-body" id="fxBody">
+    <div class="fx-head">// visual effects</div>
+    <div class="fx-row" id="fx-scanlines" data-fx="scanlines">
+      <span class="fx-label">Scanlines</span><div class="fx-sw"></div>
+    </div>
+    <div class="fx-row" id="fx-beam" data-fx="beam">
+      <span class="fx-label">Scan Beam</span><div class="fx-sw"></div>
+    </div>
+    <div class="fx-row" id="fx-flicker" data-fx="flicker">
+      <span class="fx-label">Flicker</span><div class="fx-sw"></div>
+    </div>
+    <div class="fx-row" id="fx-glitch" data-fx="glitch">
+      <span class="fx-label">Glitch</span><div class="fx-sw"></div>
+    </div>
+    <div class="fx-row" id="fx-chroma" data-fx="chroma">
+      <span class="fx-label">Chromatic</span><div class="fx-sw"></div>
+    </div>
+    <div class="fx-row" id="fx-vhs" data-fx="vhs">
+      <span class="fx-label">VHS Noise</span><div class="fx-sw"></div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <header class="site-header">
+    <div class="site-id">computerbytesman.com / <span>privacy</span></div>
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.15em;color:var(--dim);">
+        <span>FONT</span>
+        <select id="fontSelect" style="background:#080800;color:var(--yellow);border:1px solid #2a2a00;font-family:var(--mono);font-size:0.5rem;letter-spacing:0.1em;padding:3px 6px;outline:none;cursor:pointer;">
+          <option value="barlow-condensed">Barlow Condensed</option>
+          <option value="exo-2">Exo 2</option>
+          <option value="jura">Jura</option>
+          <option value="raleway">Raleway</option>
+          <option value="montserrat">Montserrat</option>
+          <option value="unbounded">Unbounded</option>
+          <option value="chakra-petch">Chakra Petch</option>
+          <option value="russo-one">Russo One</option>
+          <option value="play">Play</option>
+          <option value="cuprum">Cuprum</option>
+          </select>
+      </div>
+      <div class="size-control">
+        <span>SIZE</span>
+        <input type="range" id="sizeSlider" min="12" max="22" value="16" step="1">
+        <span class="size-val" id="sizeVal">16px</span>
+      </div>
+      <div class="site-status">
+        <div class="sdot"></div>
+        ARCHIVED 2007.02.03 &nbsp;//&nbsp; ДВУЯЗЫЧНЫЙ РЕЖИМ
+      </div>
+    </div>
+  </header>
+
+  <div class="article-meta">
+    <span class="tag">INVESTIGATION</span>
+    <span>PRIVACY</span>
+    <span>1999.10.31</span>
+  </div>
+
+  <h1 data-text="Monitoring System">The RealJukeBox<br><span class="accent">Monitoring System</span></h1>
+
+  <div class="author-line">
+    <span>Richard M. Smith</span>
+    <span>October 31, 1999</span>
+    <span class="author-tag">перевод: claude sonnet 4.6</span>
+  </div>
+
+  <div class="pull-dual">
+    <div class="pull-col">
+      <span class="pull-label en">// KEY FINDING</span>
+      The software is sending information to RealNetworks about what music CDs I listen to — along with a <span class="hr">unique player ID</span> that identifies who I am.
+    </div>
+    <div class="pull-col ru-col">
+      <span class="pull-label ru">// КЛЮЧЕВОЕ ОТКРЫТИЕ</span>
+      Программа отправляет в RealNetworks данные о прослушиваемых CD — вместе с <span class="hr">уникальным идентификатором</span>, позволяющим установить личность пользователя.
+    </div>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>Recently, I downloaded and installed the RealJukeBox player software on my Windows 98 laptop. The player is available at no charge from RealNetworks at <a href="#">http://www.real.com</a>. It can be used to play music CDs, as well as record them to music files on a hard disk for future playback. Since its release in the summer of 1999, <span class="hy">more than 12 million copies</span> of the software have been downloaded.</p></div>
+    <div class="dual-ru"><p>Недавно я загрузил и установил музыкальный плеер RealJukeBox на свой ноутбук с Windows&nbsp;98. Плеер доступен бесплатно от RealNetworks на сайте http://www.real.com. Его можно использовать для воспроизведения компакт-дисков и записи треков на жёсткий диск. С момента выхода летом 1999 года программа была скачана <span class="hy">более 12 миллионов раз</span>.</p></div>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>Unfortunately, I quickly discovered that the RealJukeBox software is <span class="hr">sending off information to RealNetworks about what music CDs I listen to</span>, along with a unique player ID number that identifies who I am. I also found that the RealJukeBox sends back to RealNetworks, <span class="hr">on a daily basis</span>, information on how I am using the product. It reports things like how many songs I have recorded on my hard drive, the type of portable MP3 player I own, and my music preferences.</p></div>
+    <div class="dual-ru"><p>К сожалению, я быстро обнаружил, что RealJukeBox <span class="hr">отправляет в RealNetworks данные о прослушиваемых компакт-дисках</span>, а также уникальный идентификатор плеера. Кроме того, программа <span class="hr">ежедневно</span> отсылает отчёт: сколько треков записано, какой портативный MP3-плеер подключён, каковы музыкальные предпочтения.</p></div>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>This monitoring system, built into the RealJukeBox software, has the potential for being used as a <span class="hy">powerful profiling system</span> to help market new CDs and related products at the expense of personal privacy. The remainder of this write-up documents how the monitoring system is implemented and some of its potential uses and/or misuses.</p></div>
+    <div class="dual-ru"><p>Эта система слежки может применяться как <span class="hy">мощный инструмент профилирования</span> для маркетинга — в ущерб личной приватности. Далее описывается, как реализована система и каковы возможные способы её использования.</p></div>
+  </div>
+
+  <div class="section-marker">
+    <span>HTTP REQUEST ANALYSIS</span>
+    <span class="sm-ru">АНАЛИЗ HTTP-ЗАПРОСОВ</span>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>I decided to put a packet sniffer on the RealJukeBox player to see exactly what information is being transmitted. Much to my dismay, I found that in the HTTP GET request for the CD information, the player is including a <span class="hr">unique GUID serial number</span> for my copy of the software.</p></div>
+    <div class="dual-ru"><p>Я решил поставить анализатор пакетов, чтобы точно видеть, какие данные передаются. К моему ужасу, в HTTP GET-запросе на получение информации о диске обнаружился <span class="hr">уникальный GUID-серийный номер</span> моей копии программы.</p></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">HTTP GET — cdinfo.real.com <span class="cl-tag">CAPTURED</span></div>
+    <pre><code>   GET /query.html?cmd=cddb+query+6f0fe407+7+150+74670+107840+146875+
+   196050+215005+256182+4068&hello=realuser+real.com+
+   "RealNetworks+RealJukebox"+1.0&proto=4 HTTP/1.0
+   Accept: text/html
+   user-agent: RealNetworks RealJukebox
+   host: cdinfo.real.com
+   <span class="key">X-Taiko-AppGUID:    </span> <span class="guid">3d7460c0-83b6-11d3-a67f-444553540000</span>
+   <span class="key">X-Taiko-AppVersion: </span> 1.0.0.438
+   <span class="key">X-Taiko-AppDistCode:</span> RJ04
+   <span class="key">X-Taiko-AppBuildType:</span>FREE</code></pre>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>The music CD I am listening to is identified by TOC numbers passed in the query string. My unique player ID number is sent in the <code style="color:#999;font-size:0.85em">X-Taiko-AppGUID</code> HTTP header of <span class="hy">every GET request</span>.</p></div>
+    <div class="dual-ru"><p>Компакт-диск идентифицируется по числам TOC в строке запроса. Уникальный идентификатор передаётся в HTTP-заголовке <code style="color:#999;font-size:0.85em">X-Taiko-AppGUID</code> при <span class="hy">каждом запросе</span>.</p></div>
+  </div>
+
+  <div class="section-marker">
+    <span>REGISTRATION DATA — DECRYPTED</span>
+    <span class="sm-ru">ДАННЫЕ РЕГИСТРАЦИИ — РАСШИФРОВАНО</span>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>Checking in the Windows 98 registry, I found the registration URL used by RealJukeBox. The entry was <span class="hr">encrypted</span> — however, computer consultant Geoff Chappell from Australia volunteered to decrypt it. With a few hours of work, he found the following registration data being sent to RealNetworks:</p></div>
+    <div class="dual-ru"><p>В реестре Windows&nbsp;98 я нашёл URL для регистрации. Запись была <span class="hr">зашифрована</span> — однако австралийский консультант Джефф Чапелл вызвался её расшифровать. Через несколько часов работы он установил, какие данные отправляются в RealNetworks:</p></div>
+  </div>
+
+  <div class="data-block">
+    <div class="data-block-header">registration payload — decrypted <span>GEOFF CHAPPELL</span></div>
+    <div class="data-row"><div class="data-row-idx">01</div><div class="data-row-val">RealJukebox</div></div>
+    <div class="data-row"><div class="data-row-idx">02</div><div class="data-row-val" style="color:#7a5500">[email protected]</div></div>
+    <div class="data-row"><div class="data-row-idx">03</div><div class="data-row-val">United States / 02446</div></div>
+    <div class="data-row"><div class="data-row-idx">04</div><div class="data-row-val">000000000000100001B6000500007FF7FF00</div></div>
+    <div class="data-row"><div class="data-row-idx">05</div><div class="data-row-val">RJ04 / Win98 / 586 / English / 1.0.0.438</div></div>
+    <div class="data-row"><div class="data-row-idx">06</div><div class="data-row-val hi">3d7460c0-83b6-11d3-a67f-444553540000</div></div>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>It is very unclear to me why all of this secrecy is needed on my own computer. Because the same GUID is sent to RealNetworks both at registration time and when I play an audio CD — <span class="hr">in theory, they know exactly what CDs I am listening to</span>. They could be creating a list of all my CDs tied to my Email address in a database.</p></div>
+    <div class="dual-ru"><p>Мне непонятно, зачем вся эта секретность на моём собственном компьютере. Поскольку один и тот же GUID отправляется и при регистрации, и при воспроизведении — <span class="hr">теоретически компания знает, какие именно диски я слушаю</span>. Они могут вести список моих дисков, привязанный к email-адресу в базе данных.</p></div>
+  </div>
+
+  <div class="section-marker">
+    <span>DAILY STATUS REPORT</span>
+    <span class="sm-ru">ЕЖЕДНЕВНЫЙ ОТЧЁТ О СТАТУСЕ</span>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>Another discovery: every morning, the player sends out an information report about my product usage to RealNetworks — including <span class="hy">how many songs I have recorded, what brand of portable MP3 player I own, and my music preferences</span>. My GUID is sent along with all of this.</p></div>
+    <div class="dual-ru"><p>Ещё одно открытие: каждое утро плеер отправляет в RealNetworks отчёт об использовании — <span class="hy">сколько треков записано, какой портативный плеер подключён, каковы музыкальные предпочтения</span>. GUID прикладывается ко всему этому.</p></div>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-label">HTTP GET — getmusic.real.com — morning report <span class="cl-tag">CAPTURED</span></div>
+    <pre><code>   GET /getmusic/msearch.rmp HTTP/1.0
+   user-agent: RealNetworks RealJukebox
+   host: getmusic.real.com
+   <span class="key">X-Taiko-AppGUID:         </span><span class="guid">3d7460c0-83b6-11d3-a67f-444553540000</span>
+   <span class="key">X-Taiko-AppDistCode:     </span>RJ04
+   <span class="key">X-Taiko-AppVersion:      </span>1.0.0.438
+   <span class="key">X-Taiko-AppBuildType:    </span>FREE
+   <span class="key">X-Taiko-GenrePreference: </span>New Music
+   <span class="key">X-Taiko-BackWebInstalled:</span>0
+   <span class="key">X-Taiko-EncodingOptions: </span>95780 bps G2 - Un-Encrypted
+   <span class="key">X-Taiko-PortableDevices: </span><span class="warn">[none reported]</span>
+   <span class="key">X-Taiko-TotalTracks:     </span>11
+   <span class="key">X-Taiko-EncodedTracks:   </span>12</code></pre>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>This information can be used for both market research and <span class="hy">one-on-one advertising targeting</span>. Like the GUID and CD tracking, there is <span class="hr">no mention of this status report feature anywhere</span> in the RealJukeBox documentation.</p></div>
+    <div class="dual-ru"><p>Эта информация может использоваться как для маркетинговых исследований, так и для <span class="hy">адресной рекламы на уровне конкретного пользователя</span>. Как и в случае с GUID-трекингом, в документации к программе <span class="hr">нет ни слова об этой функции</span>.</p></div>
+  </div>
+
+  <div class="section-marker">
+    <span>REALNETWORKS RESPONSE</span>
+    <span class="sm-ru">ОТВЕТ REALNETWORKS</span>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>I got in touch with RealNetworks and received verification that the RealJukeBox player software is indeed doing all the things I saw with my packet sniffer. However, I was told that their servers <span class="hy">do not log what CDs individual customers are listening to</span>. The person I spoke to agreed that such logging would be technically possible — the only changes required would be server-side.</p></div>
+    <div class="dual-ru"><p>Я связался с RealNetworks и получил подтверждение: программа действительно делает всё, что я наблюдал через анализатор пакетов. Однако мне сказали, что серверы <span class="hy">не ведут журнал прослушиваемых дисков</span>. Собеседник признал, что такое логирование было бы технически возможным — потребовались бы только серверные изменения.</p></div>
+  </div>
+
+  <div class="pull-dual">
+    <div class="pull-col">
+      <span class="pull-label en">// CONCLUSION</span>
+      The RealJukeBox software does <span class="hr">entirely too much tracking</span>. I only hope it does not represent a Brave New World of consumer devices which report what music we listen to, what DVDs we watch, what TV stations we tune into.
+    </div>
+    <div class="pull-col ru-col">
+      <span class="pull-label ru">// ВЫВОД</span>
+      RealJukeBox ведёт <span class="hr">слежку в недопустимых масштабах</span>. Я лишь надеюсь, что это не предвестник «дивного нового мира» потребительских устройств — которые докладывают, какую музыку мы слушаем, какие DVD смотрим, какие каналы включаем.
+    </div>
+  </div>
+
+  <div class="dual">
+    <div class="dual-en"><p>Going forward, I hope to see RealNetworks immediately <span class="hy">remove the player GUID from the software</span>. This one small change will eliminate most of the tracking possibilities. The daily status report also needs to be stopped. For current users, RealNetworks should notify them via Email and offer a downloadable patch to fix the problems.</p></div>
+    <div class="dual-ru"><p>В дальнейшем я надеюсь, что RealNetworks немедленно <span class="hy">удалит GUID из программы</span>. Это одно небольшое изменение устранит большинство возможностей для слежки. Необходимо также прекратить отправку ежедневных отчётов. Текущим пользователям RealNetworks должна разослать уведомления по email и предоставить патч.</p></div>
+  </div>
+
+  <p style="margin-top:1.8em"><em style="color:var(--dim);font-family:var(--mono);font-size:0.86rem">Copyright (C) 1999 Richard M. Smith</em></p>
+
+  <hr>
+
+  <div class="addendum">
+    <div class="addendum-header">
+      <span>Appendix — RealNetworks privacy policy update</span>
+      <span class="ru">Приложение — обновление политики конфиденциальности</span>
+      <span>1999.10.30</span>
+    </div>
+    <div class="addendum-body">
+      <p>Language added to the RealNetworks privacy policy on October 30, 1999 about the use of GUIDs in RealNetworks software products.</p>
+      <p class="ru">Текст, добавленный в политику конфиденциальности RealNetworks 30 октября 1999 года об использовании GUID в программных продуктах компании.</p>
+      <p>"A Globally Unique Identifier (GUID) is an alpha-numeric identifier that is randomly generated by a RealNetworks consumer application during installation. A GUID does not contain or identify any personal information such as your name or email. RealNetworks uses GUIDs for statistical purposes and to personalize the services that are offered within our products. GUIDs also allow us to monitor the growth of the number of users of our products and to predict and plan for future capacity needs."</p>
+      <p class="ru">«Глобально уникальный идентификатор (GUID) — это буквенно-цифровой идентификатор, случайно генерируемый приложением RealNetworks при установке. GUID не содержит и не идентифицирует личную информацию, такую как имя или email. RealNetworks использует GUID в статистических целях и для персонализации сервисов. GUID также позволяет отслеживать рост числа пользователей и планировать будущие потребности в инфраструктуре.»</p>
+    </div>
+  </div>
+
+  <div class="article-footer">
+    <span>computerbytesman.com // privacy</span>
+    <span class="eof">EOF</span>
+  </div>
+
+</div>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+  document.addEventListener('DOMContentLoaded', function() {
+
+    // Size slider
+    var slider = document.getElementById('sizeSlider');
+    var sizeVal = document.getElementById('sizeVal');
+    if (slider) {
+      slider.addEventListener('input', function() {
+        var v = parseInt(this.value);
+        document.documentElement.style.setProperty('--text-size', v + 'px');
+        document.documentElement.style.setProperty('--text-size-sm', (v - 1.5) + 'px');
+        document.documentElement.style.setProperty('--text-size-code', (v - 3) + 'px');
+        sizeVal.textContent = v + 'px';
+      });
+    }
+
+    // Font selector
+    var fontSelect = document.getElementById('fontSelect');
+    var allFontClasses = ['hf-barlow-condensed', 'hf-exo-2', 'hf-jura', 'hf-raleway', 'hf-montserrat', 'hf-unbounded', 'hf-chakra-petch', 'hf-russo-one', 'hf-play', 'hf-cuprum'];
+    if (fontSelect) {
+      fontSelect.addEventListener('change', function() {
+        allFontClasses.forEach(function(cls) { document.body.classList.remove(cls); });
+        if (this.value) document.body.classList.add('hf-' + this.value);
+      });
+    }
+
+    // FX panel toggle
+    var panelOpen = false;
+    var fxToggleBtn = document.getElementById('fxToggleBtn');
+    var fxBody = document.getElementById('fxBody');
+
+    if (fxToggleBtn) {
+      fxToggleBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        panelOpen = !panelOpen;
+        fxBody.classList.toggle('open', panelOpen);
+      });
+    }
+
+    // FX row toggles
+    document.querySelectorAll('[data-fx]').forEach(function(row) {
+      row.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var name = this.getAttribute('data-fx');
+        var on = this.classList.toggle('on');
+        document.body.classList.toggle('fx-' + name, on);
+      });
+    });
+
+    // Close panel on outside click
+    document.addEventListener('click', function(e) {
+      var panel = document.querySelector('.fx-panel');
+      if (panelOpen && panel && !panel.contains(e.target)) {
+        panelOpen = false;
+        fxBody.classList.remove('open');
+      }
+    });
+
+  });
+</script>

@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Barlow+Condensed:wght@300;400;700;900&display=swap" rel="stylesheet">
+<style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;overflow:hidden;width:2560px;height:1440px;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const CV = document.getElementById('c');
+const X  = CV.getContext('2d');
+const W = 2560, H = 1440;
+const MONO    = '"JetBrains Mono", monospace';
+const DISPLAY = '"Barlow Condensed", sans-serif';
+
+const BLUE = '#00D4FF';
+const RED  = '#FF3B5C';
+
+const K = {
+  bg:    '#000000',
+  white: '#F0F0F0',
+  ctx:   '#b0b0b0',
+  del:   '#ff4455',
+  delBg: 'rgba(255,68,85,0.06)',
+  hdr:   '#505050',
+  kw:    '#d0d0d0',
+  type_: '#ebebeb',
+  fn_:   '#cccccc',
+  str_:  '#777777',
+  cmt:   '#464646',
+  num_:  '#cccccc',
+  plain: '#aaaaaa',
+  lnum:  '#282828',
+};
+
+// ─── PATCHES ─────────────────────────────────────────────────────────────────
+// FFmpeg (Niedermayer ports TO here) — left panel, blue
+// Libav (where it appeared first)   — right panel, red
+// Sequence: Libav shows the change first → FFmpeg adopts + extends it
+
+const PATCHES = [
+{
+  desc: 'av_rescale_q_rnd',
+  file: 'libavutil/mathematics.c',
+  // RIGHT panel: Libav original — appears first
+  libav: [
+    {t:'ctx', s:'diff --git a/libavutil/mathematics.c b/libavutil/mathematics.c'},
+    {t:'ctx', s:'index 4bc21e7..9de3f01 100644'},
+    {t:'ctx', s:'--- a/libavutil/mathematics.c'},
+    {t:'ctx', s:'+++ b/libavutil/mathematics.c'},
+    {t:'ctx', s:'@@ -55,16 +55,52 @@ int64_t av_rescale(int64_t a, int64_t b, int64_t c)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     return av_rescale_rnd(a, b, c, AV_ROUND_NEAR_INF);'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'add', s:'+int64_t av_rescale_q_rnd(int64_t a, AVRational bq, AVRational cq,'},
+    {t:'add', s:'+                         enum AVRounding rnd)'},
+    {t:'add', s:'+{'},
+    {t:'add', s:'+    int64_t b = bq.num * (int64_t)cq.den;'},
+    {t:'add', s:'+    int64_t c = cq.num * (int64_t)bq.den;'},
+    {t:'add', s:'+    return av_rescale_rnd(a, b, c, rnd);'},
+    {t:'add', s:'+}'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' int64_t av_rescale_q(int64_t a, AVRational bq, AVRational cq)'},
+    {t:'ctx', s:' {'},
+    {t:'del', s:'-    int64_t b = bq.num * (int64_t)cq.den;'},
+    {t:'del', s:'-    int64_t c = cq.num * (int64_t)bq.den;'},
+    {t:'del', s:'-    return av_rescale_rnd(a, b, c, AV_ROUND_NEAR_INF);'},
+    {t:'add', s:'+    return av_rescale_q_rnd(a, bq, cq, AV_ROUND_NEAR_INF);'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' int av_compare_ts(int64_t ts_a, AVRational tb_a,'},
+    {t:'ctx', s:'                   int64_t ts_b, AVRational tb_b)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     int64_t a = av_rescale_q(ts_a, tb_a, AV_TIME_BASE_Q);'},
+    {t:'ctx', s:'     int64_t b = av_rescale_q(ts_b, tb_b, AV_TIME_BASE_Q);'},
+    {t:'ctx', s:'     if (a < b) return -1;'},
+    {t:'ctx', s:'     if (a > b) return  1;'},
+    {t:'ctx', s:'     return 0;'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' int64_t av_compare_mod(uint64_t a, uint64_t b, uint64_t mod)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     return (a & (mod - 1)) - (b & (mod - 1));'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'add', s:'+int64_t av_add_stable(AVRational ts_tb, int64_t ts,'},
+    {t:'add', s:'+                     AVRational inc_tb, int64_t inc)'},
+    {t:'add', s:'+{'},
+    {t:'add', s:'+    int64_t m = av_rescale_q(1, inc_tb, ts_tb);'},
+    {t:'add', s:'+    int64_t lim;'},
+    {t:'add', s:'+    if (m == 1)'},
+    {t:'add', s:'+        return ts + inc;'},
+    {t:'add', s:'+    lim = INT64_MAX - inc * m;'},
+    {t:'add', s:'+    if (lim < 0 || ts < lim)'},
+    {t:'add', s:'+        return ts + inc * m;'},
+    {t:'add', s:'+    return INT64_MAX;'},
+    {t:'add', s:'+}'},
+  ],
+  // LEFT panel: FFmpeg — appears after, with additions
+  ffmpeg: [
+    {t:'ctx', s:'diff --git a/libavutil/mathematics.c b/libavutil/mathematics.c'},
+    {t:'ctx', s:'index 4bc21e7..c1d88f2 100644'},
+    {t:'ctx', s:'--- a/libavutil/mathematics.c'},
+    {t:'ctx', s:'+++ b/libavutil/mathematics.c'},
+    {t:'ctx', s:'@@ -55,16 +55,60 @@ int64_t av_rescale(int64_t a, int64_t b, int64_t c)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     return av_rescale_rnd(a, b, c, AV_ROUND_NEAR_INF);'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'add', s:'+int64_t av_rescale_q_rnd(int64_t a, AVRational bq, AVRational cq,'},
+    {t:'add', s:'+                         enum AVRounding rnd)'},
+    {t:'add', s:'+{'},
+    {t:'add', s:'+    int64_t b = bq.num * (int64_t)cq.den;'},
+    {t:'add', s:'+    int64_t c = cq.num * (int64_t)bq.den;'},
+    {t:'add', s:'+    /* extra guard: zero denominator = broken timebase */'},
+    {t:'add', s:'+    if (!b || !c) {'},
+    {t:'add', s:'+        av_log(NULL, AV_LOG_WARNING,'},
+    {t:'add', s:'+               "av_rescale_q_rnd passed 0 timebase\\n");'},
+    {t:'add', s:'+        return INT64_MIN;'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    return av_rescale_rnd(a, b, c, rnd);'},
+    {t:'add', s:'+}'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' int64_t av_rescale_q(int64_t a, AVRational bq, AVRational cq)'},
+    {t:'ctx', s:' {'},
+    {t:'del', s:'-    int64_t b = bq.num * (int64_t)cq.den;'},
+    {t:'del', s:'-    int64_t c = cq.num * (int64_t)bq.den;'},
+    {t:'del', s:'-    return av_rescale_rnd(a, b, c, AV_ROUND_NEAR_INF);'},
+    {t:'add', s:'+    return av_rescale_q_rnd(a, bq, cq, AV_ROUND_NEAR_INF);'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' int av_compare_ts(int64_t ts_a, AVRational tb_a,'},
+    {t:'ctx', s:'                   int64_t ts_b, AVRational tb_b)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     int64_t a = av_rescale_q(ts_a, tb_a, AV_TIME_BASE_Q);'},
+    {t:'ctx', s:'     int64_t b = av_rescale_q(ts_b, tb_b, AV_TIME_BASE_Q);'},
+    {t:'ctx', s:'     if (a < b) return -1;'},
+    {t:'ctx', s:'     if (a > b) return  1;'},
+    {t:'ctx', s:'     return 0;'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'ctx', s:' int64_t av_compare_mod(uint64_t a, uint64_t b, uint64_t mod)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     return (a & (mod - 1)) - (b & (mod - 1));'},
+    {t:'ctx', s:' }'},
+    {t:'ctx', s:''},
+    {t:'add', s:'+int64_t av_add_stable(AVRational ts_tb, int64_t ts,'},
+    {t:'add', s:'+                     AVRational inc_tb, int64_t inc)'},
+    {t:'add', s:'+{'},
+    {t:'add', s:'+    int64_t m = av_rescale_q(1, inc_tb, ts_tb);'},
+    {t:'add', s:'+    int64_t lim;'},
+    {t:'add', s:'+    if (m == 1)'},
+    {t:'add', s:'+        return ts + inc;'},
+    {t:'add', s:'+    lim = INT64_MAX - inc * m;'},
+    {t:'add', s:'+    if (lim >= 0 && ts < lim)'},
+    {t:'add', s:'+        return ts + inc * m;'},
+    {t:'add', s:'+    /* overflow: return clamped value */'},
+    {t:'add', s:'+    return lim >= 0 ? INT64_MAX : INT64_MIN;'},
+    {t:'add', s:'+}'},
+  ],
+},
+{
+  desc: 'vp9: frame header + superframe',
+  file: 'libavcodec/vp9.c',
+  libav: [
+    {t:'ctx', s:'diff --git a/libavcodec/vp9.c b/libavcodec/vp9.c'},
+    {t:'ctx', s:'--- a/libavcodec/vp9.c'},
+    {t:'ctx', s:'+++ b/libavcodec/vp9.c'},
+    {t:'ctx', s:'@@ -0,0 +1,74 @@'},
+    {t:'add', s:'+/*'},
+    {t:'add', s:'+* VP9 decoder'},
+    {t:'add', s:'+* Copyright (c) 2013 Ronald S. Bultje <rsbultje@gmail.com>'},
+    {t:'add', s:'+* Copyright (c) 2013 Clément Bœsch <u@pkh.me>'},
+    {t:'add', s:'+*/'},
+    {t:'add', s:'+#include "avcodec.h"'},
+    {t:'add', s:'+#include "get_bits.h"'},
+    {t:'add', s:'+#include "vp9.h"'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+static int vp9_decode_frame_header(AVCodecContext *avctx,'},
+    {t:'add', s:'+                                   VP9Context *s,'},
+    {t:'add', s:'+                                   const uint8_t *buf, int size)'},
+    {t:'add', s:'+{'},
+    {t:'add', s:'+    GetBitContext gb;'},
+    {t:'add', s:'+    int ret, last_invisible;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    if ((ret = init_get_bits8(&gb, buf, size)) < 0)'},
+    {t:'add', s:'+        return ret;'},
+    {t:'add', s:'+    if (get_bits(&gb, 2) != 0x2) {'},
+    {t:'add', s:'+        av_log(avctx, AV_LOG_ERROR, "invalid frame marker\\n");'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    s->profile  = get_bits1(&gb);'},
+    {t:'add', s:'+    s->profile |= get_bits1(&gb) << 1;'},
+    {t:'add', s:'+    if (s->profile == 3) skip_bits1(&gb);'},
+    {t:'add', s:'+    last_invisible = s->invisible;'},
+    {t:'add', s:'+    s->show_existing_frame = get_bits1(&gb);'},
+    {t:'add', s:'+    if (s->show_existing_frame) {'},
+    {t:'add', s:'+        s->show_ref_idx = get_bits(&gb, 3);'},
+    {t:'add', s:'+        return 0;'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    s->keyframe  = !get_bits1(&gb);'},
+    {t:'add', s:'+    s->invisible = !get_bits1(&gb);'},
+    {t:'add', s:'+    s->errorres  =  get_bits1(&gb);'},
+    {t:'add', s:'+    s->use_last_frame_mvs = !s->errorres && !last_invisible;'},
+    {t:'add', s:'+    if (s->keyframe) {'},
+    {t:'add', s:'+        if (get_bits(&gb, 24) != VP9_SYNCCODE) {'},
+    {t:'add', s:'+            av_log(avctx, AV_LOG_ERROR, "invalid sync code\\n");'},
+    {t:'add', s:'+            return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        if ((ret = vp9_parse_colorspace(s, &gb)) < 0)'},
+    {t:'add', s:'+            return ret;'},
+    {t:'add', s:'+        s->refreshctx      = 0xff;'},
+    {t:'add', s:'+        s->refidx[0]       = 0;'},
+    {t:'add', s:'+        s->refidx[1]       = 1;'},
+    {t:'add', s:'+        s->refidx[2]       = 2;'},
+    {t:'add', s:'+        s->signbias[0]     = 0;'},
+    {t:'add', s:'+        s->signbias[1]     = 0;'},
+    {t:'add', s:'+        s->signbias[2]     = 0;'},
+    {t:'add', s:'+    } else {'},
+    {t:'add', s:'+        s->intraonly = s->invisible ? get_bits1(&gb) : 0;'},
+    {t:'add', s:'+        s->resetctx  = s->errorres ? 0 : get_bits(&gb, 2);'},
+    {t:'add', s:'+        if (!s->intraonly) {'},
+    {t:'add', s:'+            for (int i = 0; i < 3; i++) {'},
+    {t:'add', s:'+                s->refidx[i]   = get_bits(&gb, 3);'},
+    {t:'add', s:'+                s->signbias[i] = get_bits1(&gb);'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    return 0;'},
+    {t:'add', s:'+}'},
+  ],
+  ffmpeg: [
+    {t:'ctx', s:'diff --git a/libavcodec/vp9.c b/libavcodec/vp9.c'},
+    {t:'ctx', s:'--- a/libavcodec/vp9.c'},
+    {t:'ctx', s:'+++ b/libavcodec/vp9.c'},
+    {t:'ctx', s:'@@ -0,0 +1,82 @@'},
+    {t:'add', s:'+/*'},
+    {t:'add', s:'+* VP9 decoder - adapted from libav'},
+    {t:'add', s:'+* Original: Ronald S. Bultje, Clément Bœsch'},
+    {t:'add', s:'+* FFmpeg port: Michael Niedermayer <michaelni@gmx.at>'},
+    {t:'add', s:'+*/'},
+    {t:'add', s:'+#include "avcodec.h"'},
+    {t:'add', s:'+#include "get_bits.h"'},
+    {t:'add', s:'+#include "internal.h"'},
+    {t:'add', s:'+#include "vp9.h"'},
+    {t:'add', s:'+#include "vp9data.h"'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+static int vp9_decode_frame_header(AVCodecContext *avctx,'},
+    {t:'add', s:'+                                   VP9Context *s,'},
+    {t:'add', s:'+                                   const uint8_t *buf, int size)'},
+    {t:'add', s:'+{'},
+    {t:'add', s:'+    GetBitContext gb;'},
+    {t:'add', s:'+    int ret, last_invisible;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    if ((ret = init_get_bits8(&gb, buf, size)) < 0)'},
+    {t:'add', s:'+        return ret;'},
+    {t:'add', s:'+    /* VP9 spec 6.2: frame_marker must be 0b10 */'},
+    {t:'add', s:'+    if (get_bits(&gb, 2) != 0x2) {'},
+    {t:'add', s:'+        av_log(avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+               "invalid frame marker 0x%x\\n", show_bits(&gb, 2));'},
+    {t:'add', s:'+        return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    s->profile  = get_bits1(&gb);'},
+    {t:'add', s:'+    s->profile |= get_bits1(&gb) << 1;'},
+    {t:'add', s:'+    if (s->profile == 3) {'},
+    {t:'add', s:'+        skip_bits1(&gb); /* reserved_zero */'},
+    {t:'add', s:'+        if (s->profile > 3) {'},
+    {t:'add', s:'+            av_log(avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+                   "unknown VP9 profile %d\\n", s->profile);'},
+    {t:'add', s:'+            return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    last_invisible = s->invisible;'},
+    {t:'add', s:'+    s->show_existing_frame = get_bits1(&gb);'},
+    {t:'add', s:'+    if (s->show_existing_frame) {'},
+    {t:'add', s:'+        s->show_ref_idx = get_bits(&gb, 3);'},
+    {t:'add', s:'+        return 0;'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    s->keyframe  = !get_bits1(&gb);'},
+    {t:'add', s:'+    s->invisible = !get_bits1(&gb);'},
+    {t:'add', s:'+    s->errorres  =  get_bits1(&gb);'},
+    {t:'add', s:'+    s->use_last_frame_mvs = !s->errorres && !last_invisible;'},
+    {t:'add', s:'+    if (s->keyframe) {'},
+    {t:'add', s:'+        if (get_bits(&gb, 24) != VP9_SYNCCODE) {'},
+    {t:'add', s:'+            av_log(avctx, AV_LOG_ERROR,'},
+    {t:'add', s:'+                   "invalid VP9 sync code 0x%06x\\n",'},
+    {t:'add', s:'+                   show_bits_long(&gb, 24));'},
+    {t:'add', s:'+            return AVERROR_INVALIDDATA;'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+        if ((ret = vp9_parse_colorspace(s, &gb)) < 0)'},
+    {t:'add', s:'+            return ret;'},
+    {t:'add', s:'+        s->refreshctx  = 0xff;'},
+    {t:'add', s:'+        memset(s->refidx,   0, sizeof(s->refidx));'},
+    {t:'add', s:'+        memset(s->signbias, 0, sizeof(s->signbias));'},
+    {t:'add', s:'+    } else {'},
+    {t:'add', s:'+        s->intraonly = s->invisible ? get_bits1(&gb) : 0;'},
+    {t:'add', s:'+        s->resetctx  = s->errorres  ? 0 : get_bits(&gb, 2);'},
+    {t:'add', s:'+        if (!s->intraonly) {'},
+    {t:'add', s:'+            for (int i = 0; i < 3; i++) {'},
+    {t:'add', s:'+                s->refidx[i]   = get_bits(&gb, 3);'},
+    {t:'add', s:'+                s->signbias[i] = get_bits1(&gb);'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'add', s:'+    return 0;'},
+    {t:'add', s:'+}'},
+  ],
+},
+{
+  desc: 'hevc: tile + slice threading',
+  file: 'libavcodec/hevcdec.c',
+  libav: [
+    {t:'ctx', s:'diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c'},
+    {t:'ctx', s:'--- a/libavcodec/hevcdec.c'},
+    {t:'ctx', s:'+++ b/libavcodec/hevcdec.c'},
+    {t:'ctx', s:'@@ -2340,28 +2340,68 @@ static int hevc_decode_slice(HEVCContext *s)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     int ctb_x, ctb_y;'},
+    {t:'ctx', s:'     int more_data = 1;'},
+    {t:'del', s:'-    for (ctb_y = 0; ctb_y < s->sps->ctb_height; ctb_y++) {'},
+    {t:'del', s:'-        for (ctb_x = 0; ctb_x < s->sps->ctb_width; ctb_x++) {'},
+    {t:'del', s:'-            more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'del', s:'-            if (!more_data)'},
+    {t:'del', s:'-                goto done;'},
+    {t:'del', s:'-        }'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    int tile_x, tile_y;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    if (s->pps->tiles_enabled_flag) {'},
+    {t:'add', s:'+        for (tile_y = 0; tile_y < s->pps->num_tile_rows; tile_y++) {'},
+    {t:'add', s:'+            for (tile_x = 0; tile_x < s->pps->num_tile_columns; tile_x++) {'},
+    {t:'add', s:'+                int x0 = s->pps->column_bd[tile_x];'},
+    {t:'add', s:'+                int y0 = s->pps->row_bd[tile_y];'},
+    {t:'add', s:'+                int x1 = s->pps->column_bd[tile_x + 1];'},
+    {t:'add', s:'+                int y1 = s->pps->row_bd[tile_y + 1];'},
+    {t:'add', s:'+                for (ctb_y = y0; ctb_y < y1; ctb_y++) {'},
+    {t:'add', s:'+                    for (ctb_x = x0; ctb_x < x1; ctb_x++) {'},
+    {t:'add', s:'+                        more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'add', s:'+                        if (!more_data) goto done;'},
+    {t:'add', s:'+                    }'},
+    {t:'add', s:'+                    if (ctb_x == x1 - 1 && ctb_y < y1 - 1)'},
+    {t:'add', s:'+                        ff_hevc_cabac_init(s, ctb_y + 1);'},
+    {t:'add', s:'+                }'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    } else if (s->pps->entropy_coding_sync_enabled_flag) {'},
+    {t:'add', s:'+        for (ctb_y = 0; ctb_y < s->sps->ctb_height; ctb_y++) {'},
+    {t:'add', s:'+            /* WPP: reload CABAC state from row above */'},
+    {t:'add', s:'+            if (ctb_y > 0 && s->sps->ctb_width > 1)'},
+    {t:'add', s:'+                ff_hevc_cabac_init_wpp(s, ctb_y);'},
+    {t:'add', s:'+            for (ctb_x = 0; ctb_x < s->sps->ctb_width; ctb_x++) {'},
+    {t:'add', s:'+                more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'add', s:'+                if (!more_data) goto done;'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    } else {'},
+    {t:'add', s:'+        for (ctb_y = 0; ctb_y < s->sps->ctb_height; ctb_y++) {'},
+    {t:'add', s:'+            for (ctb_x = 0; ctb_x < s->sps->ctb_width; ctb_x++) {'},
+    {t:'add', s:'+                more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'add', s:'+                if (!more_data) goto done;'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:' done:'},
+    {t:'ctx', s:'     return 0;'},
+    {t:'ctx', s:' }'},
+  ],
+  ffmpeg: [
+    {t:'ctx', s:'diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c'},
+    {t:'ctx', s:'--- a/libavcodec/hevcdec.c'},
+    {t:'ctx', s:'+++ b/libavcodec/hevcdec.c'},
+    {t:'ctx', s:'@@ -2340,28 +2340,74 @@ static int hevc_decode_slice(HEVCContext *s)'},
+    {t:'ctx', s:' {'},
+    {t:'ctx', s:'     int ctb_x, ctb_y;'},
+    {t:'ctx', s:'     int more_data = 1;'},
+    {t:'del', s:'-    for (ctb_y = 0; ctb_y < s->sps->ctb_height; ctb_y++) {'},
+    {t:'del', s:'-        for (ctb_x = 0; ctb_x < s->sps->ctb_width; ctb_x++) {'},
+    {t:'del', s:'-            more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'del', s:'-            if (!more_data)'},
+    {t:'del', s:'-                goto done;'},
+    {t:'del', s:'-        }'},
+    {t:'del', s:'-    }'},
+    {t:'add', s:'+    int tile_x, tile_y, ret = 0;'},
+    {t:'add', s:'+'},
+    {t:'add', s:'+    if (s->pps->tiles_enabled_flag) {'},
+    {t:'add', s:'+        for (tile_y = 0; tile_y < s->pps->num_tile_rows; tile_y++) {'},
+    {t:'add', s:'+            for (tile_x = 0; tile_x < s->pps->num_tile_columns; tile_x++) {'},
+    {t:'add', s:'+                int x0 = s->pps->column_bd[tile_x];'},
+    {t:'add', s:'+                int y0 = s->pps->row_bd[tile_y];'},
+    {t:'add', s:'+                int x1 = s->pps->column_bd[tile_x + 1];'},
+    {t:'add', s:'+                int y1 = s->pps->row_bd[tile_y + 1];'},
+    {t:'add', s:'+                /* parallel tile decode via slice threading */'},
+    {t:'add', s:'+                if (avctx->active_thread_type & FF_THREAD_SLICE)'},
+    {t:'add', s:'+                    ff_thread_once(&s->context_initialized,'},
+    {t:'add', s:'+                                   hevc_init_context);'},
+    {t:'add', s:'+                for (ctb_y = y0; ctb_y < y1; ctb_y++) {'},
+    {t:'add', s:'+                    for (ctb_x = x0; ctb_x < x1; ctb_x++) {'},
+    {t:'add', s:'+                        more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'add', s:'+                        if (!more_data) goto done;'},
+    {t:'add', s:'+                    }'},
+    {t:'add', s:'+                    if (ctb_x == x1 - 1 && ctb_y < y1 - 1)'},
+    {t:'add', s:'+                        ff_hevc_cabac_init(s, ctb_y + 1);'},
+    {t:'add', s:'+                }'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    } else if (s->pps->entropy_coding_sync_enabled_flag) {'},
+    {t:'add', s:'+        /* WPP: wavefront parallel processing */'},
+    {t:'add', s:'+        for (ctb_y = 0; ctb_y < s->sps->ctb_height; ctb_y++) {'},
+    {t:'add', s:'+            if (ctb_y > 0 && s->sps->ctb_width > 1)'},
+    {t:'add', s:'+                ff_hevc_cabac_init_wpp(s, ctb_y);'},
+    {t:'add', s:'+            for (ctb_x = 0; ctb_x < s->sps->ctb_width; ctb_x++) {'},
+    {t:'add', s:'+                more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'add', s:'+                if (!more_data) goto done;'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    } else {'},
+    {t:'add', s:'+        for (ctb_y = 0; ctb_y < s->sps->ctb_height; ctb_y++) {'},
+    {t:'add', s:'+            for (ctb_x = 0; ctb_x < s->sps->ctb_width; ctb_x++) {'},
+    {t:'add', s:'+                more_data = hevc_decode_ctb(s, ctb_x, ctb_y);'},
+    {t:'add', s:'+                if (!more_data) goto done;'},
+    {t:'add', s:'+            }'},
+    {t:'add', s:'+        }'},
+    {t:'add', s:'+    }'},
+    {t:'ctx', s:' done:'},
+    {t:'ctx', s:'     return ret;'},
+    {t:'ctx', s:' }'},
+  ],
+},
+{
+  desc: 'AVStream.avg_frame_rate',
+  file: 'libavformat/avformat.h',
+  libav: [
+    {t:'ctx', s:'diff --git a/libavformat/avformat.h b/libavformat/avformat.h'},
+    {t:'ctx', s:'--- a/libavformat/avformat.h'},
+    {t:'ctx', s:'+++ b/libavformat/avformat.h'},
+    {t:'ctx', s:'@@ -802,9 +802,32 @@ typedef struct AVStream {'},
+    {t:'ctx', s:'     int64_t  start_time;'},
+    {t:'ctx', s:'     int64_t  duration;'},
+    {t:'ctx', s:'     int64_t  nb_frames;'},
+    {t:'del', s:'-    AVRational r_frame_rate;'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * Average framerate.'},
+    {t:'add', s:'+     * - demuxing: set by libavformat'},
+    {t:'add', s:'+     * - muxing: set by the caller'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    AVRational avg_frame_rate;'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * Real base framerate: lowest framerate at which all'},
+    {t:'add', s:'+     * timestamps are representable. This is just a guess.'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    AVRational r_frame_rate;'},
+    {t:'ctx', s:'     void      *priv_data;'},
+    {t:'ctx', s:'     int       pts_wrap_bits;'},
+    {t:'ctx', s:'     int64_t   first_dts;'},
+    {t:'ctx', s:'     int64_t   cur_dts;'},
+    {t:'ctx', s:'     int64_t   last_IP_pts;'},
+    {t:'ctx', s:'     int       last_IP_duration;'},
+    {t:'ctx', s:'     int       probe_packets;'},
+    {t:'ctx', s:'     /**'},
+    {t:'ctx', s:'      * Number of frames that have been demuxed during avformat_find_stream_info()'},
+    {t:'ctx', s:'      */'},
+    {t:'ctx', s:'     int       codec_info_nb_frames;'},
+    {t:'ctx', s:'     enum AVStreamParseType need_parsing;'},
+    {t:'ctx', s:'     struct AVCodecParserContext *parser;'},
+    {t:'ctx', s:'     struct AVPacketList *last_in_packet_buffer;'},
+    {t:'ctx', s:'     AVProbeData probe_data;'},
+    {t:'ctx', s:'     int64_t    pts_buffer[MAX_REORDER_DELAY+1];'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * Stream Identifier'},
+    {t:'add', s:'+     * This is the MPEG-TS stream identifier +1'},
+    {t:'add', s:'+     * 0 means unknown'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    int        stream_identifier;'},
+    {t:'add', s:'+    int64_t    interleaver_chunk_size;'},
+    {t:'add', s:'+    int64_t    interleaver_chunk_duration;'},
+    {t:'add', s:'+    int        request_probe;'},
+    {t:'add', s:'+    int        skip_to_keyframe;'},
+    {t:'add', s:'+    int        skip_samples;'},
+    {t:'add', s:'+    int64_t    start_skip_samples;'},
+    {t:'add', s:'+    int64_t    first_discard_sample;'},
+    {t:'add', s:'+    int64_t    last_discard_sample;'},
+    {t:'add', s:'+    int        nb_decoded_frames;'},
+  ],
+  ffmpeg: [
+    {t:'ctx', s:'diff --git a/libavformat/avformat.h b/libavformat/avformat.h'},
+    {t:'ctx', s:'--- a/libavformat/avformat.h'},
+    {t:'ctx', s:'+++ b/libavformat/avformat.h'},
+    {t:'ctx', s:'@@ -802,9 +802,36 @@ typedef struct AVStream {'},
+    {t:'ctx', s:'     int64_t  start_time;'},
+    {t:'ctx', s:'     int64_t  duration;'},
+    {t:'ctx', s:'     int64_t  nb_frames;'},
+    {t:'del', s:'-    AVRational r_frame_rate;'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * Average framerate.'},
+    {t:'add', s:'+     *'},
+    {t:'add', s:'+     * - demuxing: May be set by libavformat when creating the stream or in'},
+    {t:'add', s:'+     *             avformat_find_stream_info().'},
+    {t:'add', s:'+     * - muxing:   May be set by the caller before avformat_write_header().'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    AVRational avg_frame_rate;'},
+    {t:'add', s:'+    /**'},
+    {t:'add', s:'+     * Real base framerate of the container stream.'},
+    {t:'add', s:'+     * This is the lowest framerate with which all timestamps can be'},
+    {t:'add', s:'+     * represented accurately (it is the least common multiple of all'},
+    {t:'add', s:'+     * framerates in the stream). Note, this value is just a guess!'},
+    {t:'add', s:'+     * For streams where this is not possible (variable fps, etc),'},
+    {t:'add', s:'+     * this is set to 1/0.'},
+    {t:'add', s:'+     */'},
+    {t:'add', s:'+    AVRational r_frame_rate;'},
+    {t:'ctx', s:'     void      *priv_data;'},
+    {t:'ctx', s:'     int       pts_wrap_bits;'},
+    {t:'ctx', s:'     int64_t   first_dts;'},
+    {t:'ctx', s:'     int64_t   cur_dts;'},
+    {t:'ctx', s:'     int64_t   last_IP_pts;'},
+    {t:'ctx', s:'     int       last_IP_duration;'},
+    {t:'ctx', s:'     int       probe_packets;'},
+    {t:'ctx', s:'     int       codec_info_nb_frames;'},
+    {t:'ctx', s:'     enum AVStreamParseType need_parsing;'},
+    {t:'ctx', s:'     struct AVCodecParserContext *parser;'},
+    {t:'ctx', s:'     struct AVPacketList *last_in_packet_buffer;'},
+    {t:'ctx', s:'     AVProbeData probe_data;'},
+    {t:'ctx', s:'     int64_t    pts_buffer[MAX_REORDER_DELAY+1];'},
+    {t:'add', s:'+    int        stream_identifier;'},
+    {t:'add', s:'+    int64_t    interleaver_chunk_size;'},
+    {t:'add', s:'+    int64_t    interleaver_chunk_duration;'},
+    {t:'add', s:'+    int        request_probe;'},
+    {t:'add', s:'+    int        skip_to_keyframe;'},
+    {t:'add', s:'+    int        skip_samples;'},
+    {t:'add', s:'+    int64_t    start_skip_samples;'},
+    {t:'add', s:'+    int64_t    first_discard_sample;'},
+    {t:'add', s:'+    int64_t    last_discard_sample;'},
+    {t:'add', s:'+    int        nb_decoded_frames;'},
+    {t:'add', s:'+    int64_t    mux_ts_offset;'},
+    {t:'add', s:'+#if FF_API_LAVF_AVCTX'},
+    {t:'add', s:'+    attribute_deprecated AVCodecContext *codec;'},
+    {t:'add', s:'+#endif'},
+  ],
+},
+];
+
+const DUR      = 30;
+const PATCH_DUR = DUR / PATCHES.length;
+
+// Layout
+const HALF    = W / 2;
+const TAB_H   = 88;   // taller header so labels breathe
+const STAT_H  = 36;
+const CODE_Y  = TAB_H;
+const CODE_H  = H - TAB_H - STAT_H;
+const LINE_H  = 33;
+const FSIZE   = 20;
+const MAX_VIS = Math.floor(CODE_H / LINE_H);
+const GUT_W   = 60;
+
+let running = false, t0 = 0, raf = null;
+
+// Grain
+const GR = document.createElement('canvas');
+GR.width = 512; GR.height = 512;
+const GX = GR.getContext('2d');
+function mkGrain(){
+  const id=GX.createImageData(512,512);
+  for(let i=0;i<id.data.length;i+=4){const v=Math.random()*14|0;id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=255;}
+  GX.putImageData(id,0,0);
+}
+
+// Syntax
+const KW_RE  = /\b(static|int|void|const|char|unsigned|return|if|else|for|while|struct|typedef|sizeof|NULL|uint8_t|uint32_t|int64_t|uint64_t|float|double|short|do|break|switch|case|default|goto|enum|int8_t)\b/g;
+const TYPE_RE= /\b(AVRational|AVCodecContext|AVFormatContext|AVStream|AVPacket|AVBufferRef|AVDictionary|AVFrame|HEVCContext|VP9Context|GetBitContext|MpegEncContext|AVMediaType|AVCodecParserContext|AVStreamParseType|AVProbeData)\b/g;
+const STR_RE = /"[^"]*"/g;
+const CMT_RE = /\/\*.*?\*\/|\/\/.*/g;
+const NUM_RE = /\b(0x[0-9a-fA-F]+|[0-9]+U?)\b/g;
+const FN_RE  = /\b([a-z_][a-z0-9_]*)\s*(?=\()/g;
+
+function tokenize(raw, lineType, accent) {
+  const isHdr = raw.trimStart().startsWith('diff') || raw.trimStart().startsWith('---')
+             || raw.trimStart().startsWith('+++') || raw.trimStart().startsWith('@@');
+  const baseColor = lineType==='add' ? accent
+                  : lineType==='del' ? K.del
+                  : isHdr ? K.hdr : K.ctx;
+  if (!raw.replace(/^[+\- ]/,'').trim()) return [{text:raw, color:baseColor}];
+  const marks=[];let m;
+  for(const[re,col] of [[CMT_RE,K.cmt],[STR_RE,K.str_],[TYPE_RE,K.type_],[KW_RE,K.kw],[FN_RE,K.fn_],[NUM_RE,K.num_]]){
+    re.lastIndex=0;
+    while((m=re.exec(raw))!==null)marks.push({s:m.index,e:m.index+m[0].length,color:col,text:m[0]});
+  }
+  marks.sort((a,b)=>a.s-b.s);
+  const clean=[];
+  for(const mk of marks){if(clean.some(u=>mk.s<u.e&&mk.e>u.s))continue;clean.push(mk);}
+  clean.sort((a,b)=>a.s-b.s);
+  const tokens=[];let pos=0;
+  for(const mk of clean){
+    if(mk.s>pos)tokens.push({text:raw.slice(pos,mk.s),color:baseColor});
+    tokens.push({text:mk.text,color:mk.color});pos=mk.e;
+  }
+  if(pos<raw.length)tokens.push({text:raw.slice(pos),color:baseColor});
+  return tokens;
+}
+
+function dPanel(ox, accent, repoName, authorLine, lines, revealed, ts, isTyping) {
+  // BG
+  X.fillStyle = '#000';
+  X.fillRect(ox, 0, HALF, H);
+
+  // Header bar — tall, prominent
+  X.fillStyle = '#050505';
+  X.fillRect(ox, 0, HALF, TAB_H);
+  // Accent stripe — full width, thick
+  X.fillStyle = accent;
+  X.fillRect(ox, 0, HALF, 3);
+  // Bottom border of header
+  X.fillStyle = '#141414';
+  X.fillRect(ox, TAB_H - 1, HALF, 1);
+
+  // Repo name — big
+  X.font = `900 52px ${DISPLAY}`;
+  X.letterSpacing = '2px';
+  X.fillStyle = accent;
+  X.textAlign = 'left'; X.textBaseline = 'middle';
+  X.fillText(repoName, ox + GUT_W + 14, TAB_H * 0.42);
+  X.letterSpacing = '0px';
+
+  // Author line — small, under name
+  X.font = `300 20px ${MONO}`;
+  X.fillStyle = '#3a3a3a';
+  X.fillText(authorLine, ox + GUT_W + 16, TAB_H * 0.78);
+
+  // File name right side of header
+  const fn = lines && lines[0] ? (lines[0].s.match(/\+\+\+ b\/(.+)/)?.[1] || '') : '';
+  X.font = `400 19px ${MONO}`;
+  X.fillStyle = '#333';
+  X.textAlign = 'right';
+  X.fillText(fn, ox + HALF - 20, TAB_H / 2);
+
+  // Diff stats
+  if (lines) {
+    const adds = lines.filter(l=>l.t==='add').length;
+    const dels = lines.filter(l=>l.t==='del').length;
+    X.font = `500 20px ${MONO}`;
+    X.fillStyle = accent; X.textAlign = 'left';
+    X.fillText('+'+adds, ox + HALF - 160, TAB_H / 2);
+    X.fillStyle = K.del;
+    X.fillText('-'+dels, ox + HALF - 90,  TAB_H / 2);
+  }
+
+  // Gutter
+  X.fillStyle = '#030303';
+  X.fillRect(ox, CODE_Y, GUT_W, CODE_H);
+  X.fillStyle = '#111';
+  X.fillRect(ox + GUT_W - 1, CODE_Y, 1, CODE_H);
+
+  // Status bar
+  const sy = H - STAT_H;
+  X.fillStyle = '#040404'; X.fillRect(ox, sy, HALF, STAT_H);
+  X.fillStyle = '#111';    X.fillRect(ox, sy, HALF, 1);
+  X.fillStyle = accent;    X.fillRect(ox, sy, 130,  STAT_H);
+  X.font = `700 16px ${MONO}`; X.fillStyle = '#000';
+  X.textBaseline = 'middle'; X.textAlign = 'left';
+  X.fillText('⎇  master', ox + 10, sy + STAT_H / 2);
+  X.font = `300 16px ${MONO}`; X.fillStyle = '#383838';
+  X.textAlign = 'right';
+  X.fillText(fn, ox + HALF - 14, sy + STAT_H / 2);
+
+  if (!lines) return;
+
+  // Code clip
+  X.save();
+  X.beginPath(); X.rect(ox + GUT_W, CODE_Y, HALF - GUT_W, CODE_H); X.clip();
+  X.font = `400 ${FSIZE}px ${MONO}`;
+  X.textBaseline = 'middle'; X.textAlign = 'left';
+
+  const total = Math.min(Math.floor(revealed), lines.length);
+  const start = Math.max(0, total - MAX_VIS);
+
+  for (let vi = 0; vi < Math.min(total - start, MAX_VIS); vi++) {
+    const li = start + vi;
+    if (li >= lines.length) break;
+    const line = lines[li];
+    const y = CODE_Y + vi * LINE_H + LINE_H / 2;
+
+    if (line.t === 'add') {
+      X.fillStyle = ox === 0 ? 'rgba(0,212,255,0.055)' : 'rgba(255,59,92,0.055)';
+      X.fillRect(ox + GUT_W, y - LINE_H/2, HALF - GUT_W, LINE_H);
+    } else if (line.t === 'del') {
+      X.fillStyle = K.delBg;
+      X.fillRect(ox + GUT_W, y - LINE_H/2, HALF - GUT_W, LINE_H);
+    }
+
+    const isCur = isTyping && li === total - 1;
+    const frac  = isCur ? (revealed - Math.floor(revealed)) : 1;
+    const text  = line.s.slice(0, isCur ? Math.floor(frac * line.s.length) : line.s.length);
+    const tok   = tokenize(text, line.t, accent);
+
+    let tx = ox + GUT_W + 14;
+    for (const t of tok) {
+      X.fillStyle = t.color;
+      X.fillText(t.text, tx, y);
+      tx += X.measureText(t.text).width;
+    }
+    if (isCur && Math.floor(ts / 480) % 2 === 0) {
+      X.fillStyle = accent;
+      X.fillRect(tx + 1, y - 10, 2, 20);
+    }
+  }
+  X.restore();
+
+  // Gutter numbers
+  X.font = `300 ${FSIZE * 0.68}px ${MONO}`;
+  X.textAlign = 'right'; X.textBaseline = 'middle';
+  const total2 = Math.min(Math.floor(revealed), lines.length);
+  const start2 = Math.max(0, total2 - MAX_VIS);
+  for (let vi = 0; vi < Math.min(total2 - start2, MAX_VIS); vi++) {
+    const li = start2 + vi;
+    if (li >= lines.length) break;
+    const line = lines[li];
+    const y = CODE_Y + vi * LINE_H + LINE_H / 2;
+    X.fillStyle = line.t==='add' ? (ox===0 ? '#004a5a' : '#5a1020')
+                : line.t==='del' ? '#440010' : K.lnum;
+    X.fillText(String(li+1), ox + GUT_W - 8, y);
+  }
+}
+
+// Center divider + animated copy arrow
+function dCenter(anim, desc) {
+  // Divider line
+  X.fillStyle = '#161616';
+  X.fillRect(HALF - 1, 0, 2, H);
+
+  // Arrows pointing LEFT (Libav → FFmpeg, i.e. right panel → left panel)
+  const cx = HALF;
+  const cy = H / 2;
+
+  for (let i = 0; i < 4; i++) {
+    const phase = ((anim + i * 0.25) % 1);
+    const alpha = Math.sin(phase * Math.PI);
+    const dx    = (0.5 - phase) * 80; // travels left
+    const sz    = 16;
+
+    X.globalAlpha = alpha * 0.65;
+    X.strokeStyle = BLUE;
+    X.lineWidth   = 2.5;
+    X.beginPath();
+    X.moveTo(cx + sz + dx, cy - sz);
+    X.lineTo(cx      + dx, cy);
+    X.lineTo(cx + sz + dx, cy + sz);
+    X.stroke();
+  }
+  X.globalAlpha = 1; X.lineWidth = 1;
+
+  // Patch label below arrows
+  X.font = `600 22px ${MONO}`;
+  X.fillStyle = '#1e1e1e';
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.fillText(desc, cx, cy + 55);
+  X.fillStyle = '#2e2e2e';
+  X.fillText(desc, cx, cy + 54);
+}
+
+function dGrain(el) {
+  mkGrain();
+  X.globalAlpha = 0.02 + 0.007*Math.sin(el*13);
+  X.globalCompositeOperation = 'screen';
+  for(let tx=0;tx<W;tx+=512)for(let ty=0;ty<H;ty+=512)X.drawImage(GR,0,0,512,512,tx,ty,512,512);
+  X.globalAlpha=1; X.globalCompositeOperation='source-over';
+}
+
+// ─── LOOP ──────────────────────────────────────────────────────────────────
+
+function frame(ts) {
+  if (!running) return;
+  const elapsed = (ts - t0) / 1000;
+  const prog    = Math.min(elapsed / DUR, 1);
+  const pi      = Math.min(Math.floor(elapsed / PATCH_DUR), PATCHES.length - 1);
+  const patch   = PATCHES[pi];
+  if (!patch) { raf = requestAnimationFrame(frame); return; }
+
+  const wp = elapsed - pi * PATCH_DUR;
+  const t  = Math.min(wp / PATCH_DUR, 1);
+
+  const lLines = patch.libav.length;
+  const fLines = patch.ffmpeg.length;
+
+  // Libav types full window 0→1
+  const libavRev = t * lLines;
+
+  // FFmpeg starts when Libav is 30% done, both finish at t=1
+  const FFMPEG_START = 0.30;
+  const ffmpegT  = Math.max(0, (t - FFMPEG_START) / (1.0 - FFMPEG_START));
+  const ffmpegRev = ffmpegT * fLines;
+
+  const isLibavTyping  = t < 1;
+  const isFfmpegTyping = t > FFMPEG_START && t < 1;
+  const anim = (elapsed * 1.1) % 1;
+
+  X.fillStyle = '#000'; X.fillRect(0,0,W,H);
+
+  // LEFT = FFmpeg (blue), RIGHT = Libav (red)
+  dPanel(0,    BLUE, 'FFmpeg', 'Michael Niedermayer', patch.ffmpeg, ffmpegRev, ts, isFfmpegTyping);
+  dPanel(HALF, RED,  'Libav',  'Ronald S. Bultje et al.', patch.libav, libavRev, ts, isLibavTyping);
+  dCenter(anim, patch.desc);
+  dGrain(elapsed);
+
+  if (prog < 1) raf = requestAnimationFrame(frame);
+}
+
+function reset() {
+  if (raf) cancelAnimationFrame(raf);
+  running = false;
+  const p = PATCHES[0];
+  X.fillStyle = '#000'; X.fillRect(0,0,W,H);
+  dPanel(0,    BLUE, 'FFmpeg', 'Michael Niedermayer',    p.ffmpeg, 0, 0, false);
+  dPanel(HALF, RED,  'Libav',  'Ronald S. Bultje et al.', p.libav,  0, 0, false);
+  dCenter(0, p.desc);
+}
+
+function start() {
+  reset(); running = true; t0 = performance.now();
+  raf = requestAnimationFrame(frame);
+}
+
+document.addEventListener('keydown', e => {
+  if (['r','R','к','К'].includes(e.key)) start();
+});
+document.fonts.ready.then(reset);
+</script>
+</body>
+</html>

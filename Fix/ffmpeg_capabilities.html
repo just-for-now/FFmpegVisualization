@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>FFmpeg — Возможности</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;700&family=Oswald:wght@700&family=Barlow:wght@100;400;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    color: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    overflow: hidden;
+    width: 2560px;
+    height: 1440px;
+    position: relative;
+  }
+
+  canvas#bg-noise {
+    position: fixed;
+    top: 0; left: 0;
+    width: 2560px; height: 1440px;
+    opacity: 0.07;
+    pointer-events: none;
+    z-index: 100;
+    image-rendering: pixelated;
+  }
+
+  #glitch-overlay {
+    position: fixed; inset: 0;
+    pointer-events: none; z-index: 999; overflow: hidden;
+  }
+  .glitch-bar {
+    position: absolute; left: 0; right: 0;
+    background: #fff; mix-blend-mode: difference;
+  }
+
+  /* flash removed */
+
+  #stage {
+    width: 2560px; height: 1440px;
+    position: relative; overflow: hidden;
+  }
+
+  .scene {
+    position: absolute; inset: 0;
+    display: none; flex-direction: column;
+    justify-content: flex-start; align-items: flex-start;
+    padding: 520px 160px 120px;
+  }
+  .scene.active { display: flex; }
+
+  .grid-h { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.06); }
+  .grid-v { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.06); }
+
+  /* INTRO */
+  #s0 { justify-content: center; align-items: center; text-align: center; padding: 120px 160px; }
+  #s0 .q-label {
+    font-family: 'Barlow', sans-serif; font-weight: 100; font-size: 36px;
+    letter-spacing: 0.4em; text-transform: uppercase; color: rgba(255,255,255,0.3);
+    margin-bottom: 60px; opacity: 0; animation: fadeup 0.6s 0.2s forwards;
+  }
+  #s0 .q-main {
+    font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 140px;
+    line-height: 1; letter-spacing: -0.02em; text-transform: uppercase;
+    opacity: 0; animation: fadeup 0.5s 0.5s forwards;
+  }
+  #s0 .q-sub {
+    font-family: 'IBM Plex Mono', monospace; font-size: 28px;
+    color: rgba(255,255,255,0.4); margin-top: 60px; letter-spacing: 0.05em;
+    opacity: 0; animation: fadeup 0.5s 0.9s forwards;
+  }
+
+  /* CMD SCENES */
+  .sc-label {
+    font-family: 'Barlow', sans-serif; font-weight: 100; font-size: 22px;
+    letter-spacing: 0.5em; text-transform: uppercase; color: rgba(255,255,255,0.5);
+    margin-bottom: 70px; opacity: 0; animation: fadein 0.3s 0.05s forwards;
+  }
+  .sc-desc {
+    font-family: 'Barlow', sans-serif; font-weight: 900; font-size: 88px;
+    line-height: 1.05; letter-spacing: -0.02em; text-transform: uppercase;
+    max-width: 2000px; opacity: 0; animation: slideright 0.4s 0.1s forwards;
+    color: #fff;
+  }
+  .sc-cmd {
+    font-family: 'IBM Plex Mono', monospace; font-weight: 400; font-size: 38px;
+    color: rgba(255,255,255,0.8); margin-top: 80px;
+    opacity: 0; animation: fadein 0.4s 0.5s forwards;
+  }
+  .sc-cmd .cmd-prefix { color: rgba(255,255,255,0.35); font-size: 32px; }
+  .sc-cmd .highlight { color: #fff; font-weight: 700; }
+  .sc-cmd .flag { color: rgba(255,255,255,0.6); }
+  .sc-cmd .value { color: rgba(255,255,255,0.95); }
+
+  .sc-note {
+    font-family: 'IBM Plex Mono', monospace; font-size: 24px;
+    color: rgba(255,255,255,0.4); margin-top: 50px; letter-spacing: 0.02em;
+    opacity: 0; animation: fadein 0.4s 0.8s forwards;
+    max-width: 1800px; line-height: 1.6;
+  }
+  .sc-counter {
+    position: absolute; top: 80px; right: 160px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 22px;
+    color: rgba(255,255,255,0.15); letter-spacing: 0.1em;
+  }
+  .sc-bgnum {
+    position: absolute; right: -40px; bottom: -80px;
+    font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 600px;
+    line-height: 1; color: rgba(255,255,255,0.025);
+    pointer-events: none; user-select: none;
+  }
+  .sc-divider {
+    position: absolute; left: 160px; bottom: 200px;
+    width: 0; height: 1px; background: rgba(255,255,255,0.15);
+    animation: lineexpand 0.6s 0.15s forwards;
+  }
+  .sc-ticker {
+    position: absolute; bottom: 80px; left: 0; right: 0; height: 50px;
+    overflow: hidden; display: flex; align-items: center;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .sc-ticker-inner {
+    white-space: nowrap; font-family: 'IBM Plex Mono', monospace;
+    font-size: 20px; color: rgba(255,255,255,0.12); letter-spacing: 0.08em;
+    animation: ticker 20s linear infinite; padding-left: 2560px;
+  }
+
+  /* FOLDER */
+  .folder-grid {
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px;
+    margin-top: 36px; opacity: 0; animation: fadein 0.5s 0.6s forwards;
+    max-width: 2200px;
+  }
+  .folder-item {
+    font-family: 'IBM Plex Mono', monospace; font-size: 17px;
+    color: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.06);
+    padding: 7px 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: color 0.1s, border-color 0.1s, background 0.1s;
+  }
+  .folder-item.converting {
+    color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.04);
+  }
+  .folder-item.done {
+    color: rgba(255,255,255,0.9); border-color: rgba(255,255,255,0.4);
+  }
+  #folder-stats {
+    font-family: 'IBM Plex Mono', monospace; font-size: 25px;
+    color: rgba(255,255,255,0.25); margin-top: 18px; letter-spacing: 0.04em;
+    min-height: 36px;
+  }
+
+  /* REPAIR */
+  .hex-stream {
+    font-family: 'IBM Plex Mono', monospace; font-size: 20px;
+    color: rgba(255,255,255,0.1); line-height: 1.75; margin-top: 44px;
+    opacity: 0; animation: fadein 0.4s 0.5s forwards; letter-spacing: 0.1em;
+  }
+  .hex-stream .corrupt { color: rgba(255,55,55,0.6); }
+  .hex-stream .recovered { color: rgba(255,255,255,0.6); }
+
+  #repair-progress { margin-top: 24px; opacity: 0; animation: fadein 0.3s 1.2s forwards; }
+  #repair-bar-bg {
+    width: 1600px; height: 5px; background: rgba(255,255,255,0.07); border-radius: 3px;
+  }
+  #repair-bar-fill {
+    height: 5px; background: rgba(255,255,255,0.7); border-radius: 3px;
+    width: 0%; transition: width 0.1s linear;
+  }
+  #repair-status {
+    font-family: 'IBM Plex Mono', monospace; font-size: 22px;
+    color: rgba(255,255,255,0.3); margin-top: 10px; letter-spacing: 0.05em;
+    min-height: 30px;
+  }
+
+  /* TWITCH */
+  .stream-viz {
+    display: flex; gap: 46px; margin-top: 44px;
+    opacity: 0; animation: fadein 0.4s 0.6s forwards; align-items: flex-end;
+  }
+  .stream-bar-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .stream-bar { width: 48px; background: rgba(255,255,255,0.55); border-radius: 2px; }
+  .stream-bar-label { font-family:'IBM Plex Mono',monospace; font-size:17px; color:rgba(255,255,255,0.22); }
+  #waveform-canvas { margin-top: 24px; display:block; opacity:0; animation:fadein 0.3s 1s forwards; }
+
+  /* FRAME COUNTER */
+  #frame-counter-viz {
+    margin-top: 36px; opacity: 0; animation: fadein 0.4s 0.7s forwards;
+    font-family: 'IBM Plex Mono', monospace; font-size: 26px;
+    color: rgba(255,255,255,0.22); letter-spacing: 0.05em;
+  }
+  #thumb-strip {
+    display: flex; gap: 5px; margin-top: 16px;
+    opacity: 0; animation: fadein 0.3s 1.1s forwards; flex-wrap: nowrap;
+  }
+  .thumb {
+    width: 75px; height: 42px; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.02);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    color: rgba(255,255,255,0.12); flex-shrink: 0;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .thumb.active {
+    border-color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.6);
+  }
+
+  /* PTS */
+  #pts-viz { margin-top: 50px; opacity:0; animation:fadein 0.4s 0.7s forwards; display:flex; gap:0; align-items:flex-end; }
+  #pts-mode-label {
+    font-family:'Barlow',sans-serif; font-weight:900; font-size:42px;
+    color:rgba(255,255,255,0.18); margin-top:14px; letter-spacing:0.04em; text-transform:uppercase;
+    min-height:52px;
+  }
+
+  /* KEYFRAMES */
+  @keyframes fadeup {
+    from { opacity:0; transform:translateY(40px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  @keyframes fadein { from{opacity:0} to{opacity:1} }
+  @keyframes slideright {
+    from { opacity:0; transform:translateX(-60px); }
+    to   { opacity:1; transform:translateX(0); }
+  }
+  @keyframes lineexpand { from{width:0} to{width:calc(100% - 320px)} }
+  @keyframes ticker {
+    from{transform:translateX(0)} to{transform:translateX(-50%)}
+  }
+  @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+
+  .cursor {
+    display:inline-block; width:3px; height:1em;
+    background:#fff; vertical-align:middle; margin-left:6px;
+    animation:blink 0.8s step-end infinite;
+  }
+
+  #progress {
+    position:fixed; bottom:0; left:0; height:3px;
+    background:rgba(255,255,255,0.3); z-index:200;
+  }
+  #scene-num {
+    position:fixed; top:60px; left:160px;
+    font-family:'IBM Plex Mono',monospace; font-size:20px;
+    color:rgba(255,255,255,0.12); letter-spacing:0.1em; z-index:200;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="bg-noise"></canvas>
+<div id="glitch-overlay"></div>
+
+<div id="progress" style="width:0"></div>
+<div id="scene-num">FFMPEG / CAPABILITIES</div>
+
+<div id="stage">
+
+  <!-- S0 INTRO -->
+  <div class="scene active" id="s0" data-dur="4000">
+    <div class="grid-h" style="top:360px"></div>
+    <div class="grid-h" style="top:720px"></div>
+    <div class="grid-h" style="top:1080px"></div>
+    <div class="grid-v" style="left:640px"></div>
+    <div class="grid-v" style="left:1280px"></div>
+    <div class="grid-v" style="left:1920px"></div>
+    <div class="q-label">FFmpeg — что ещё умеет</div>
+    <div class="q-main">Возможности</div>
+    <div class="q-sub">// блок 5 · практика · команды</div>
+  </div>
+
+  <!-- S1 CUT -->
+  <div class="scene" id="s1" data-dur="9000">
+    <div class="grid-h" style="top:480px"></div>
+    <div class="grid-v" style="left:1800px"></div>
+    <div class="sc-counter">01 / 07</div>
+    <div class="sc-bgnum">1</div>
+    <div class="sc-label">// вырезать фрагмент</div>
+    <div class="sc-desc">Две минуты<br>из двухчасового</div>
+    <div class="sc-cmd">
+      <span class="cmd-prefix">$ </span><span class="highlight">ffmpeg</span>
+      <span class="flag"> -ss</span> <span class="value">00:47:00</span>
+      <span class="flag"> -i</span> <span class="value">input.mp4</span>
+      <span class="flag"> -t</span> <span class="value">00:02:00</span>
+      <span class="flag"> -c copy</span>
+      <span class="value"> clip.mp4</span><span class="cursor"></span>
+    </div>
+    <div class="sc-note">-ss перед -i — прыжок к нужному месту без чтения всего файла · -c copy — не перекодировать · секунды на файле любого размера</div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      ffmpeg -ss 00:47:00 -i input.mp4 -t 00:02:00 -c copy clip.mp4 &nbsp;·&nbsp; ffmpeg -ss 00:47:00 -i input.mp4 -t 00:02:00 -c copy clip.mp4 &nbsp;·&nbsp; ffmpeg -ss 00:47:00 -i input.mp4 -t 00:02:00 -c copy clip.mp4 &nbsp;·&nbsp;
+    </div></div>
+  </div>
+
+  <!-- S2 FOLDER -->
+  <div class="scene" id="s2" data-dur="10000">
+    <div class="grid-h" style="top:310px"></div>
+    <div class="sc-counter">02 / 07</div>
+    <div class="sc-bgnum">2</div>
+    <div class="sc-label">// конвертировать папку целиком</div>
+    <div class="sc-desc">Целая папка. Одна строка.</div>
+    <div class="sc-cmd" style="font-size:31px;">
+      <span class="cmd-prefix">$ </span><span class="highlight">Get-ChildItem</span>
+      <span class="flag"> *.flac</span> <span class="value">|</span>
+      <span class="highlight"> ForEach-Object</span> <span class="value">{</span>
+      <span class="highlight"> ffmpeg</span>
+      <span class="flag"> -i</span> <span class="value">$_.Name</span>
+      <span class="flag"> -b:a</span> <span class="value">320k</span>
+      <span class="value"> ($_.BaseName + '.mp3') }</span><span class="cursor"></span>
+    </div>
+    <div class="folder-grid" id="folder-grid"></div>
+    <div id="folder-stats"></div>
+    <div id="folder-infobox" style="position:absolute;right:160px;top:220px;width:560px;opacity:0;animation:fadein 0.4s 1.5s forwards;">
+      <div style="font-family:'Barlow',sans-serif;font-weight:900;font-size:28px;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.35);margin-bottom:20px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;">FLAC → MP3</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;color:rgba(255,255,255,0.4);line-height:1.9;">
+        FLAC: lossless<br>
+        MP3 320k: ~6% размера FLAC<br>
+        ABX тест: разница не слышна<br>
+        <br>
+        Linux: *.flac → for f ...<br>
+        macOS: find . -name *.flac<br>
+        <br>
+        -b:a 320k — максимальное<br>
+        -b:a 128k — стриминг<br>
+        -q:a 0 — VBR максимум
+      </div>
+    </div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      FLAC → MP3 &nbsp;·&nbsp; MOV → MP4 &nbsp;·&nbsp; WEBM → MKV &nbsp;·&nbsp; AVI → H265 &nbsp;·&nbsp; WAV → AAC &nbsp;·&nbsp; PNG → AVIF &nbsp;·&nbsp; FLAC → MP3 &nbsp;·&nbsp; MOV → MP4 &nbsp;·&nbsp; WEBM → MKV &nbsp;·&nbsp; AVI → H265 &nbsp;·&nbsp; WAV → AAC &nbsp;·&nbsp; PNG → AVIF &nbsp;·&nbsp;
+    </div></div>
+  </div>
+
+  <!-- S3 SPEED -->
+  <div class="scene" id="s3" data-dur="4000">
+    <div class="grid-h" style="top:520px"></div>
+    <div class="sc-counter">03 / 07</div>
+    <div class="sc-bgnum">3</div>
+    <div class="sc-label">// замедление и ускорение</div>
+    <div class="sc-desc">Время<br>под контролем</div>
+    <div class="sc-cmd">
+      <span class="cmd-prefix">$ </span><span class="highlight">ffmpeg</span>
+      <span class="flag"> -i</span> <span class="value">input.mp4</span>
+      <span class="flag"> -vf</span> <span class="value">setpts=0.5*PTS</span>
+      <span class="flag"> -af</span> <span class="value">atempo=2.0</span>
+      <span class="value"> output.mp4</span><span class="cursor"></span>
+    </div>
+    <div id="pts-viz"></div>
+    <div id="pts-mode-label"></div>
+    <div class="sc-note">setpts=0.5*PTS → ×2 · setpts=2.0*PTS → ×0.5 · atempo синхронизирует звук</div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      setpts=0.5*PTS → ×2 ускорение &nbsp;·&nbsp; setpts=2.0*PTS → ×0.5 замедление &nbsp;·&nbsp; atempo=2.0,atempo=2.0 → ×4 &nbsp;·&nbsp; PTS = presentation timestamp &nbsp;·&nbsp;
+    </div></div>
+  </div>
+
+  <!-- S4 GIF -->
+  <div class="scene" id="s4" data-dur="4000">
+    <div class="grid-h" style="top:440px"></div>
+    <div class="sc-counter">04 / 07</div>
+    <div class="sc-bgnum">4</div>
+    <div class="sc-label">// сделать GIF</div>
+    <div class="sc-desc">GIF из видео.<br>Без Photoshop.</div>
+    <div class="sc-cmd">
+      <span class="cmd-prefix">$ </span><span class="highlight">ffmpeg</span>
+      <span class="flag"> -i</span> <span class="value">input.mp4</span>
+      <span class="flag"> -ss</span> <span class="value">00:00:05</span>
+      <span class="flag"> -t</span> <span class="value">3</span>
+      <span class="flag"> -vf</span> <span class="value">"fps=15,scale=480:-1"</span>
+      <span class="value"> output.gif</span><span class="cursor"></span>
+    </div>
+    <div class="sc-note">-ss 00:00:05 — с пятой секунды · -t 3 — три секунды · fps=15 — стандарт для GIF · scale=480:-1 — ширина 480, высота авто</div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      output.gif &nbsp;·&nbsp; fps=15 &nbsp;·&nbsp; scale=480:-1 &nbsp;·&nbsp; -t 3 &nbsp;·&nbsp; -ss 00:00:05 &nbsp;·&nbsp; output.gif &nbsp;·&nbsp; fps=15 &nbsp;·&nbsp; scale=480:-1 &nbsp;·&nbsp; -t 3 &nbsp;·&nbsp;
+    </div></div>
+  </div>
+
+  <!-- S5 PNG SEQUENCE -->
+  <div class="scene" id="s5" data-dur="9000">
+    <div class="grid-h" style="top:380px"></div>
+    <div class="sc-counter">05 / 07</div>
+    <div class="sc-bgnum">5</div>
+    <div class="sc-label">// собрать из кадров</div>
+    <div class="sc-desc">Тысячи PNG.<br>Одно видео.</div>
+    <div class="sc-cmd">
+      <span class="cmd-prefix">$ </span><span class="highlight">ffmpeg</span>
+      <span class="flag"> -framerate</span> <span class="value">24</span>
+      <span class="flag"> -i</span> <span class="value">frame_%04d.png</span>
+      <span class="flag"> -c:v</span> <span class="value">libx264</span>
+      <span class="flag"> -pix_fmt</span> <span class="value">yuv420p</span>
+      <span class="value"> output.mp4</span><span class="cursor"></span>
+    </div>
+    <div id="frame-counter-viz"></div>
+    <div id="thumb-strip"></div>
+    <div id="png-infobox" style="position:absolute;right:160px;top:220px;width:580px;opacity:0;animation:fadein 0.4s 1.8s forwards;">
+      <div style="font-family:'Barlow',sans-serif;font-weight:900;font-size:28px;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.35);margin-bottom:20px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;">PNG SEQUENCE</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;color:rgba(255,255,255,0.4);line-height:1.9;">
+        %04d → 0001, 0002 ...<br>
+        %05d → 00001, 00002 ...<br>
+        <br>
+        -start_number 0 если с нуля<br>
+        -framerate 24 / 30 / 60<br>
+        <br>
+        Blender: render → PNG seq<br>
+        ComfyUI: output_dir/*.png<br>
+        Stable Diffusion: img2img<br>
+        <br>
+        EXR тоже работает:<br>
+        -i frame_%04d.exr
+      </div>
+    </div>
+    <div class="sc-note">%04d — маска: frame_0001.png … · -framerate 24 — кадров в секунду · Blender, нейросети, любой рендерер</div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      frame_0001.png · frame_0002.png · frame_0003.png · frame_0004.png · frame_0005.png · frame_0006.png · frame_0007.png · frame_0008.png · frame_0009.png · frame_0010.png · frame_0011.png · frame_0012.png ·
+    </div></div>
+  </div>
+
+  <!-- S6 REPAIR -->
+  <div class="scene" id="s6" data-dur="13000">
+    <div class="grid-h" style="top:355px"></div>
+    <div class="sc-counter">06 / 07</div>
+    <div class="sc-bgnum">6</div>
+    <div class="sc-label">// починить файл</div>
+    <div class="sc-desc">Телефон сел.<br>Файл не открывается.</div>
+    <div class="sc-cmd">
+      <span class="cmd-prefix">$ </span><span class="highlight">ffmpeg</span>
+      <span class="flag"> -i</span> <span class="value">broken.mp4</span>
+      <span class="flag"> -c copy</span>
+      <span class="value"> fixed.mp4</span><span class="cursor"></span>
+    </div>
+    <div class="hex-stream" id="hex-stream"></div>
+    <div id="repair-progress">
+      <div id="repair-bar-bg"><div id="repair-bar-fill"></div></div>
+      <div id="repair-status">инициализация...</div>
+    </div>
+    <div id="repair-infobox" style="position:absolute;right:160px;top:220px;width:580px;opacity:0;animation:fadein 0.4s 2s forwards;">
+      <div style="font-family:'Barlow',sans-serif;font-weight:900;font-size:28px;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.35);margin-bottom:20px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;">ПОЧЕМУ ЛОМАЕТСЯ</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;color:rgba(255,255,255,0.4);line-height:1.9;">
+        moov atom — заголовок MP4<br>
+        пишется в конец файла<br>
+        если запись прервана —<br>
+        заголовка нет, плеер не знает<br>
+        как читать поток<br>
+        <br>
+        -movflags +faststart<br>
+        переносит moov вперёд<br>
+        → файл стримится сразу<br>
+        → не ломается при обрыве<br>
+        <br>
+        MKV не имеет этой проблемы
+      </div>
+    </div>
+    <div class="sc-note">Читает поток напрямую · минуя повреждённый заголовок · пересобирает контейнер</div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      ERROR: moov atom not found &nbsp;·&nbsp; reading stream directly &nbsp;·&nbsp; rebuilding container &nbsp;·&nbsp; fixed.mp4 &nbsp;·&nbsp; ERROR: moov atom not found &nbsp;·&nbsp; reading stream directly &nbsp;·&nbsp; rebuilding container &nbsp;·&nbsp;
+    </div></div>
+  </div>
+
+  <!-- S7 TWITCH -->
+  <div class="scene" id="s7" data-dur="14000">
+    <div class="grid-h" style="top:375px"></div>
+    <div class="grid-v" style="left:1600px"></div>
+    <div class="sc-counter">07 / 07</div>
+    <div class="sc-bgnum">7</div>
+    <div class="sc-label">// запись экрана · стриминг</div>
+    <div class="sc-desc">Экран. Окно.<br>Прямо на Twitch.</div>
+    <div class="sc-cmd" style="font-size:28px;">
+      <span class="cmd-prefix">$ </span><span class="highlight">ffmpeg</span>
+      <span class="flag"> -f</span> <span class="value">gdigrab</span>
+      <span class="flag"> -framerate</span> <span class="value">30</span>
+      <span class="flag"> -i</span> <span class="value">desktop</span>
+      <span class="flag"> -c:v</span> <span class="value">libx264</span>
+      <span class="flag"> -preset</span> <span class="value">veryfast</span>
+      <span class="flag"> -b:v</span> <span class="value">3000k</span>
+      <span class="flag"> -f</span> <span class="value">flv</span>
+      <span class="value"> rtmp://live.twitch.tv/app/<span style="color:rgba(255,255,255,0.9)">КЛЮЧ</span></span><span class="cursor"></span>
+    </div>
+    <div class="stream-viz" id="stream-bars"></div>
+    <canvas id="waveform-canvas" width="1400" height="80"></canvas>
+    <div id="stream-infobox" style="position:absolute;right:160px;top:220px;width:580px;opacity:0;animation:fadein 0.4s 1.6s forwards;">
+      <div style="font-family:'Barlow',sans-serif;font-weight:900;font-size:28px;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.35);margin-bottom:20px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;">ПАРАМЕТРЫ</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;color:rgba(255,255,255,0.4);line-height:1.9;">
+        Twitch: 3000–6000k / 1080p<br>
+        YouTube: 4500–9000k / 1080p<br>
+        <br>
+        -preset veryfast → ultrafast<br>
+        если CPU не справляется<br>
+        <br>
+        GPU вариант:<br>
+        -c:v h264_nvenc -b:v 6000k<br>
+        <br>
+        захват окна:<br>
+        -i title="Chrome"<br>
+        <br>
+        захват области:<br>
+        -offset_x 0 -offset_y 0<br>
+        -video_size 1920x1080
+      </div>
+    </div>
+    <div class="sc-note">-f gdigrab — захват экрана Windows · -i title="название окна" — конкретное окно · veryfast — кодирование в реальном времени</div>
+    <div class="sc-divider"></div>
+    <div class="sc-ticker"><div class="sc-ticker-inner">
+      LIVE · 3000k bitrate · 30fps · rtmp://live.twitch.tv · gdigrab · veryfast preset · LIVE · 3000k bitrate · 30fps · rtmp://live.twitch.tv · gdigrab · veryfast preset ·
+    </div></div>
+  </div>
+
+</div>
+
+<script>
+// ================================================================
+// NOISE — мелкий тайловый, яркий
+// ================================================================
+const bgNoise = document.getElementById('bg-noise');
+const TW = 128, TH = 128; // маленький тайл
+bgNoise.width = TW; bgNoise.height = TH;
+bgNoise.style.imageRendering = 'pixelated';
+const nctx = bgNoise.getContext('2d');
+const ndata = nctx.createImageData(TW, TH);
+
+// offscreen big canvas for tiled noise
+const bigNoise = document.createElement('canvas');
+bigNoise.width = 2560; bigNoise.height = 1440;
+bigNoise.style.cssText = 'position:fixed;top:0;left:0;width:2560px;height:1440px;opacity:0.15;pointer-events:none;z-index:100;image-rendering:pixelated;';
+document.body.appendChild(bigNoise);
+const bctx = bigNoise.getContext('2d');
+bgNoise.style.display = 'none';
+
+function renderNoise() {
+  const d = ndata.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = Math.random();
+    // high contrast: 90% black, 10% white/gray
+    const v = r > 0.82 ? 255 : r > 0.74 ? Math.floor(100 + Math.random() * 120) : 0;
+    d[i] = d[i+1] = d[i+2] = v;
+    d[i+3] = 255;
+  }
+  nctx.putImageData(ndata, 0, 0);
+  const pat = bctx.createPattern(bgNoise, 'repeat');
+  bctx.fillStyle = pat;
+  bctx.fillRect(0, 0, 2560, 1440);
+  requestAnimationFrame(renderNoise);
+}
+renderNoise();
+
+// ================================================================
+// GLITCH ENGINE
+// ================================================================
+const glitchOverlay = document.getElementById('glitch-overlay');
+
+function doGlitch(intensity, duration) {
+  intensity = intensity || 1;
+  duration  = duration  || 120;
+
+  // horizontal bars only — no flash, no stage displacement
+  const n = Math.floor(2 + Math.random() * 7 * intensity);
+  const created = [];
+  for (let i = 0; i < n; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'glitch-bar';
+    const y = Math.random() * 1440;
+    const h = 1 + Math.random() * 10;
+    bar.style.cssText = `top:${y}px;height:${h}px;opacity:${0.25 + Math.random()*0.5};`;
+    glitchOverlay.appendChild(bar);
+    created.push(bar);
+  }
+
+  setTimeout(() => { created.forEach(b => b.remove()); }, duration);
+}
+
+// ambient random glitches
+function scheduleAmbientGlitch() {
+  const delay = 1800 + Math.random() * 5000;
+  setTimeout(() => {
+    if (running) doGlitch(0.3 + Math.random() * 0.7, 70);
+    scheduleAmbientGlitch();
+  }, delay);
+}
+
+// ================================================================
+// SCENE ENGINE
+// ================================================================
+const scenes = Array.from(document.querySelectorAll('.scene'));
+const SCENE_COUNT = scenes.length;
+let current = 0;
+let autoTimer = null;
+let running = false;
+let cleanupFns = [];
+
+function showScene(idx, withGlitch) {
+  cleanupFns.forEach(fn => { try { fn(); } catch(e){} });
+  cleanupFns = [];
+
+  if (withGlitch) doGlitch(2, 110);
+
+  scenes.forEach(s => s.classList.remove('active'));
+  void scenes[idx].offsetWidth;
+  scenes[idx].classList.add('active');
+
+  document.getElementById('progress').style.width = ((idx+1)/SCENE_COUNT*100) + '%';
+  document.getElementById('progress').style.transition = 'width 0.2s';
+
+  if (idx === 2) initFolderGrid();
+  if (idx === 3) initPTS();
+  if (idx === 5) initFrameCounter();
+  if (idx === 6) initHexStream();
+  if (idx === 7) initStreamBars();
+}
+
+function nextScene() {
+  if (current < SCENE_COUNT - 1) {
+    current++;
+    showScene(current, true);
+    scheduleAuto();
+  }
+}
+
+function scheduleAuto() {
+  clearTimeout(autoTimer);
+  const dur = parseInt(scenes[current].dataset.dur) || 5000;
+  autoTimer = setTimeout(() => { if (current < SCENE_COUNT - 1) nextScene(); }, dur);
+}
+
+function resetSpecials() {
+  document.getElementById('folder-grid').innerHTML = '';
+  document.getElementById('folder-stats').textContent = '';
+  document.getElementById('pts-viz').innerHTML = '';
+  document.getElementById('pts-mode-label').textContent = '';
+  const fc = document.getElementById('frame-counter-viz');
+  if (fc) fc.innerHTML = '';
+  document.getElementById('thumb-strip').innerHTML = '';
+  document.getElementById('hex-stream').innerHTML = '';
+  document.getElementById('repair-bar-fill').style.width = '0%';
+  document.getElementById('repair-status').textContent = 'инициализация...';
+  document.getElementById('stream-bars').innerHTML = '';
+  const wc = document.getElementById('waveform-canvas');
+  if (wc) { wc.getContext('2d').clearRect(0,0,wc.width,wc.height); }
+}
+
+function restart() {
+  clearTimeout(autoTimer);
+  cleanupFns.forEach(fn => { try { fn(); } catch(e){} });
+  cleanupFns = [];
+  current = 0;
+  resetSpecials();
+  doGlitch(3.5, 130);
+  setTimeout(() => { showScene(0, false); scheduleAuto(); }, 100);
+  running = true;
+}
+
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'r' || k === 'к') restart();
+});
+
+// ================================================================
+// S2: FOLDER GRID
+// ================================================================
+function initFolderGrid() {
+  const grid = document.getElementById('folder-grid');
+  grid.innerHTML = '';
+  const stats = document.getElementById('folder-stats');
+  const names = [
+    'track_01','track_02','track_03','track_04','track_05','track_06','track_07','track_08',
+    'album_side_a','album_side_b','live_berlin','live_tokyo','demo_v1','demo_v2','bonus_track','remaster_2024',
+    'radio_edit','acoustic','remix_club','remix_dub','instrumental','intro','outro','interlude'
+  ];
+  const items = [];
+  for (let i = 0; i < 48; i++) {
+    const suffix = i >= names.length ? `_${Math.floor(i/names.length)+1}` : '';
+    const name = names[i % names.length] + suffix + '.flac';
+    const div = document.createElement('div');
+    div.className = 'folder-item';
+    div.textContent = name;
+    grid.appendChild(div);
+    items.push({ el: div, base: (names[i % names.length] + suffix) });
+  }
+
+  let ci = 0, doneCount = 0;
+  const totalSize = (48 * 28.4).toFixed(1);
+
+  function convertNext() {
+    if (ci < items.length) {
+      if (ci > 0) {
+        const prev = items[ci-1];
+        prev.el.classList.remove('converting');
+        prev.el.classList.add('done');
+        prev.el.textContent = prev.base + '.mp3';
+        doneCount++;
+        const saved = (doneCount * 21.6).toFixed(1);
+        stats.textContent = `[${doneCount}/${items.length}] ·  ${saved} MB / ${totalSize} MB`;
+      }
+      items[ci].el.classList.add('converting');
+      ci++;
+      if (ci % 12 === 0) doGlitch(0.25, 55);
+      setTimeout(convertNext, 130);
+    } else {
+      const prev = items[ci-1];
+      prev.el.classList.remove('converting');
+      prev.el.classList.add('done');
+      prev.el.textContent = prev.base + '.mp3';
+      doneCount++;
+      stats.textContent = `[${doneCount}/${items.length}] · готово · ${totalSize} MB → ${(48*6.8).toFixed(1)} MB`;
+      doGlitch(0.5, 80);
+    }
+  }
+  setTimeout(convertNext, 850);
+}
+
+// ================================================================
+// S3: PTS VIZ
+// ================================================================
+function initPTS() {
+  const viz = document.getElementById('pts-viz');
+  const modeLabel = document.getElementById('pts-mode-label');
+  viz.innerHTML = '';
+  const COUNT = 46;
+  const bars = [];
+  for (let i = 0; i < COUNT; i++) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;';
+    const bar = document.createElement('div');
+    bar.style.cssText = 'width:36px;background:rgba(255,255,255,0.4);border-radius:1px;height:50px;';
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'font-family:"IBM Plex Mono",monospace;font-size:12px;color:rgba(255,255,255,0.1);';
+    lbl.textContent = String(i+1).padStart(2,'0');
+    wrap.appendChild(bar); wrap.appendChild(lbl);
+    viz.appendChild(wrap);
+    bars.push(bar);
+  }
+
+  const phases = [
+    { speed: 1.0, label: 'NORMAL  ·  setpts=1.0*PTS' },
+    { speed: 2.8, label: '×2.8 FASTER  ·  setpts=0.36*PTS' },
+    { speed: 0.35, label: '×0.35 SLOWER  ·  setpts=2.8*PTS' },
+  ];
+  let phase = 0, frame = 0;
+  let raf;
+
+  function animate() {
+    frame++;
+    const spd = phases[phase].speed;
+    const pos = (frame * spd * 0.5) % COUNT;
+    bars.forEach((b, i) => {
+      const dist = Math.min(Math.abs(i - pos), COUNT - Math.abs(i - pos));
+      const h = Math.max(4, 115 - dist * 22);
+      b.style.height = h + 'px';
+      b.style.background = dist < 1.5
+        ? 'rgba(255,255,255,0.95)'
+        : `rgba(255,255,255,${Math.max(0.06, 0.45 - dist * 0.09)})`;
+    });
+    if (frame % 85 === 0) {
+      phase = (phase + 1) % phases.length;
+      modeLabel.textContent = phases[phase].label;
+      doGlitch(0.6, 75);
+    }
+    raf = requestAnimationFrame(animate);
+  }
+  modeLabel.textContent = phases[0].label;
+  animate();
+  cleanupFns.push(() => cancelAnimationFrame(raf));
+}
+
+// ================================================================
+// S5: FRAME COUNTER + THUMB STRIP
+// ================================================================
+function initFrameCounter() {
+  const el = document.getElementById('frame-counter-viz');
+  const strip = document.getElementById('thumb-strip');
+  if (!el) return;
+
+  strip.innerHTML = '';
+  const TC = 22;
+  const thumbs = [];
+  for (let i = 0; i < TC; i++) {
+    const t = document.createElement('div');
+    t.className = 'thumb';
+    t.textContent = String(i*57+1).padStart(4,'0');
+    strip.appendChild(t);
+    thumbs.push(t);
+  }
+
+  let n = 0, activeThumb = 0;
+  const target = 1247;
+
+  function step() {
+    n = Math.min(n + Math.ceil(Math.random() * 20 + 10), target);
+    const pct = Math.round(n / target * 100);
+    el.innerHTML = `→ frame_${String(n).padStart(4,'0')}.png &nbsp;&nbsp; [${pct}%] &nbsp;&nbsp; ${n} / ${target}`;
+
+    const ti = Math.min(Math.floor(n / target * TC), TC - 1);
+    if (ti !== activeThumb) {
+      thumbs[activeThumb].classList.remove('active');
+      thumbs[ti].classList.add('active');
+      thumbs[ti].textContent = String(n).padStart(4,'0');
+      activeThumb = ti;
+    }
+
+    if (n < target) {
+      setTimeout(step, 30);
+    } else {
+      el.innerHTML = `✓ ${target} кадров → output.mp4 &nbsp;&nbsp; [100%] &nbsp;&nbsp; готово`;
+      thumbs.forEach(t => t.classList.add('active'));
+      doGlitch(0.7, 100);
+    }
+  }
+  setTimeout(step, 850);
+}
+
+// ================================================================
+// S6: HEX STREAM + REPAIR PROGRESS
+// ================================================================
+function initHexStream() {
+  const el = document.getElementById('hex-stream');
+  el.innerHTML = '';
+  const fill = document.getElementById('repair-bar-fill');
+  const statusEl = document.getElementById('repair-status');
+
+  const ROWS = 7, COLS = 24;
+  const corruptZone = [1, 2, 3, 4];
+  const rowDivs = [];
+
+  for (let r = 0; r < ROWS; r++) {
+    const offset = (r * COLS).toString(16).padStart(8,'0').toUpperCase();
+    const div = document.createElement('div');
+    div.dataset.row = r;
+    div.style.cssText = `opacity:0;animation:fadein 0.12s ${r*110}ms forwards`;
+    el.appendChild(div);
+    rowDivs.push(div);
+  }
+
+  function renderRow(r) {
+    const offset = (r * COLS).toString(16).padStart(8,'0').toUpperCase();
+    let html = `<span style="color:rgba(255,255,255,0.06);margin-right:26px">${offset}</span>`;
+    for (let c = 0; c < COLS; c++) {
+      const byte = Math.floor(Math.random()*256).toString(16).padStart(2,'0').toUpperCase();
+      const inCorrupt = corruptZone.includes(r);
+      const repaired = inCorrupt && c < repairCol;
+      if (inCorrupt && !repaired) {
+        html += `<span class="corrupt">${byte} </span>`;
+      } else if (repaired) {
+        html += `<span class="recovered">${byte} </span>`;
+      } else {
+        html += `${byte} `;
+      }
+    }
+    rowDivs[r].innerHTML = html;
+  }
+
+  let repairCol = 0;
+  rowDivs.forEach((d, r) => { renderRow(r); });
+
+  // progress
+  let pct = 0;
+  const statuses = [
+    [0,  'анализ заголовков...'],
+    [12, 'ERROR: moov atom not found'],
+    [18, 'попытка прямого чтения потока...'],
+    [42, 'восстановление временных меток...'],
+    [68, 'пересборка контейнера...'],
+    [90, 'верификация CRC...'],
+    [100,'✓ fixed.mp4 · готово'],
+  ];
+  let si = 0;
+
+  const timer = setInterval(() => {
+    pct = Math.min(pct + 0.7, 100);
+    fill.style.width = pct + '%';
+
+    while (si < statuses.length && pct >= statuses[si][0]) {
+      statusEl.textContent = statuses[si][1];
+      if (si === 1) doGlitch(1.0, 100);
+      if (si === 6) { doGlitch(0.6, 80); fill.style.background = 'rgba(255,255,255,0.9)'; }
+      si++;
+    }
+
+    // visually repair corrupt bytes as progress grows
+    repairCol = Math.floor((pct / 100) * COLS);
+    corruptZone.forEach(r => renderRow(r));
+
+    if (pct >= 100) clearInterval(timer);
+  }, 85);
+
+  cleanupFns.push(() => clearInterval(timer));
+}
+
+// ================================================================
+// S7: STREAM BARS + WAVEFORM
+// ================================================================
+function initStreamBars() {
+  const el = document.getElementById('stream-bars');
+  el.innerHTML = '';
+
+  const channels = [
+    { label: 'video', freq: 3.1 },
+    { label: 'audio', freq: 4.7 },
+    { label: 'mux',   freq: 2.3 },
+    { label: 'net',   freq: 3.8 },
+    { label: 'enc',   freq: 2.7 },
+    { label: 'buf',   freq: 5.2 },
+  ];
+  const barEls = [];
+
+  channels.forEach((ch, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'stream-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'stream-bar';
+    bar.style.height = '50px';
+    const lbl = document.createElement('div');
+    lbl.className = 'stream-bar-label';
+    lbl.textContent = ch.label;
+    wrap.appendChild(bar); wrap.appendChild(lbl);
+    el.appendChild(wrap);
+    barEls.push({ bar, freq: ch.freq, phase: Math.random() * Math.PI * 2 });
+  });
+
+  // stats panel
+  const bw = document.createElement('div');
+  bw.style.cssText = 'font-family:"IBM Plex Mono",monospace;font-size:22px;color:rgba(255,255,255,0.25);margin-left:50px;align-self:center;line-height:2.1;';
+  bw.innerHTML = '● LIVE<br>3.0 Mbit/s<br>30 fps<br>00:00:00';
+  el.appendChild(bw);
+
+  let sec = 0;
+  const clockTimer = setInterval(() => {
+    sec++;
+    const hh = String(Math.floor(sec/3600)).padStart(2,'0');
+    const mm = String(Math.floor(sec%3600/60)).padStart(2,'0');
+    const ss = String(sec%60).padStart(2,'0');
+    const br = (2.5 + Math.random() * 0.9).toFixed(1);
+    bw.innerHTML = `● LIVE<br>${br} Mbit/s<br>30 fps<br>${hh}:${mm}:${ss}`;
+  }, 1000);
+
+  let t = 0;
+  let rafBars;
+  function animateBars() {
+    t += 0.04;
+    barEls.forEach(({ bar, freq, phase }) => {
+      const h = 28 + Math.abs(Math.sin(t * freq + phase)) * 130 + Math.random() * 15;
+      bar.style.height = h + 'px';
+    });
+    rafBars = requestAnimationFrame(animateBars);
+  }
+  animateBars();
+
+  // waveform
+  const wc = document.getElementById('waveform-canvas');
+  const wctx = wc.getContext('2d');
+  const W = wc.width, H = wc.height;
+  let wt = 0;
+  let rafWave;
+
+  function drawWave() {
+    wctx.clearRect(0, 0, W, H);
+    // grid
+    wctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (let x = 0; x < W; x += 70) wctx.fillRect(x, 0, 1, H);
+    for (let y = 0; y < H; y += H/2) wctx.fillRect(0, y, W, 1);
+
+    // wave
+    wctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    wctx.lineWidth = 1.5;
+    wctx.beginPath();
+    for (let x = 0; x < W; x++) {
+      const y = H/2
+        + Math.sin(x * 0.048 + wt) * 22
+        + Math.sin(x * 0.115 + wt * 1.4) * 13
+        + Math.sin(x * 0.031 + wt * 0.6) * 16
+        + (Math.random() - 0.5) * 3;
+      x === 0 ? wctx.moveTo(x, y) : wctx.lineTo(x, y);
+    }
+    wctx.stroke();
+    wt += 0.09;
+    rafWave = requestAnimationFrame(drawWave);
+  }
+  drawWave();
+
+  cleanupFns.push(() => {
+    clearInterval(clockTimer);
+    cancelAnimationFrame(rafBars);
+    cancelAnimationFrame(rafWave);
+  });
+}
+
+// ================================================================
+// START
+// ================================================================
+scheduleAmbientGlitch();
+restart();
+</script>
+</body>
+</html>

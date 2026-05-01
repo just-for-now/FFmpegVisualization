@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:2560px;height:1440px;overflow:hidden;background:#000;cursor:none;}
+#stage{width:2560px;height:1440px;position:relative;overflow:hidden;}
+
+.tc{position:absolute;inset:0;background:#080808;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:500;}
+.tc.on{display:flex;}
+.tc-name{font-size:148px;font-weight:900;color:#fff;letter-spacing:-4px;line-height:0.92;text-align:center;font-family:'Arial Black',Arial,sans-serif;}
+.tc-sub{font-family:'Courier New',monospace;font-size:34px;color:#444;margin-top:40px;letter-spacing:5px;}
+.scene{position:absolute;inset:0;display:none;}
+.scene.on{display:block;}
+#cur{position:absolute;width:28px;height:28px;pointer-events:none;z-index:9999;}
+
+/* ══ BELLARD TERMINAL STYLE ══ */
+#s1,#s2{background:#0a0a0f;}
+.topbar{position:absolute;top:0;left:0;right:0;height:40px;background:#0d0d12;display:flex;align-items:center;padding:0 16px;gap:2px;z-index:20;border-bottom:1px solid #1a1a28;}
+.tpm{color:#555;font-size:18px;font-family:'DejaVu Sans',Arial,sans-serif;padding:4px 16px;border-radius:3px;cursor:default;}
+.tp-clock{position:absolute;left:50%;transform:translateX(-50%);color:#444;font-family:'Courier New',monospace;font-size:17px;}
+.tp-tray{position:absolute;right:16px;display:flex;align-items:center;gap:16px;color:#444;font-size:16px;}
+
+.term-outer{position:absolute;top:40px;left:0;right:0;bottom:44px;background:#0d0d14;display:flex;flex-direction:column;}
+.term-chrome{height:38px;background:linear-gradient(to bottom,#16161f,#101018);border-bottom:1px solid #1a1a28;display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;}
+.dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;}
+.dot-r{background:#ff5f57;border:1px solid #e0443e;}
+.dot-y{background:#ffbd2e;border:1px solid #dea123;}
+.dot-g{background:#28c941;border:1px solid #1aab29;}
+.tchrome-title{flex:1;text-align:center;font-family:'DejaVu Sans Mono','Courier New',monospace;font-size:16px;color:#2e2e48;}
+
+.term-body{flex:1;overflow:hidden;padding:18px 28px;font-family:'DejaVu Sans Mono','Courier New',monospace;font-size:21px;line-height:1.7;color:#c8c8d8;position:relative;}
+.tl{display:block;}
+.pr{color:#7ec8a0;}.pp{color:#6888c8;}.out{color:#686878;}.hi{color:#e8c86a;}.gr{color:#6ab87e;}.bl{color:#6aa8e8;}.rd{color:#e87878;}.wh{color:#e8e8f0;}.cm{color:#2e2e4a;}
+.who-key{color:#6888c8;}.who-val-name{color:#e8c86a;font-weight:bold;}.who-val{color:#7878a0;}.who-val-red{color:#e87878;}
+.bc{display:inline-block;width:13px;height:23px;background:#c8c8d8;vertical-align:middle;animation:blink 1s step-end infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+.botbar{position:absolute;bottom:0;left:0;right:0;height:44px;background:#0d0d12;border-top:1px solid #1a1a28;display:flex;align-items:center;padding:0 12px;gap:8px;z-index:20;}
+.botbtn{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:#444;font-size:15px;padding:4px 18px;border-radius:3px;font-family:'DejaVu Sans',Arial,sans-serif;height:32px;display:flex;align-items:center;}
+.botbtn.act{background:rgba(255,255,255,0.09);border-color:rgba(255,255,255,0.15);color:#888;}
+.bottray{margin-left:auto;display:flex;align-items:center;gap:18px;color:#444;font-size:16px;font-family:'DejaVu Sans',Arial,sans-serif;padding-right:12px;}
+
+/* ══ SPLIT SCENE ══ */
+.split{position:absolute;top:40px;left:0;right:0;bottom:44px;display:flex;}
+.pane-term{width:820px;flex-shrink:0;background:#0d0d14;border-right:2px solid #1a1a28;display:flex;flex-direction:column;}
+.pane-browser{flex:1;background:#f0f0f0;display:flex;flex-direction:column;}
+
+/* Firefox 3.6 chrome */
+.ff-tbar{height:30px;background:linear-gradient(to bottom,#e8e0d8,#c8bdb0);display:flex;align-items:center;padding:0 8px;gap:8px;border-bottom:1px solid #aaa;flex-shrink:0;}
+.ff-wbtn{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:default;flex-shrink:0;}
+.ff-wclose{background:#cc4444;border:1px solid #aa2222;}.ff-wmin{background:#ccaa00;border:1px solid #aa8800;}.ff-wmax{background:#44aa44;border:1px solid #228822;}
+.ff-wtitle{color:#333;font-size:14px;flex:1;text-align:center;font-family:'DejaVu Sans',Arial,sans-serif;}
+.ff-toolbar{height:36px;background:linear-gradient(to bottom,#d8d0c8,#c0b8b0);display:flex;align-items:center;padding:0 8px;gap:6px;border-bottom:1px solid #999;flex-shrink:0;}
+.ff-navbtn{width:26px;height:26px;background:linear-gradient(to bottom,#e8e0d8,#d0c8c0);border:1px solid #999;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#555;cursor:default;}
+.ff-navbtn.dis{color:#ccc;}
+.ff-urlbar{flex:1;height:26px;background:#fff;border:1px solid #888;border-radius:10px;padding:0 12px;font-size:14px;color:#222;display:flex;align-items:center;gap:6px;font-family:'DejaVu Sans',Arial,sans-serif;position:relative;overflow:hidden;}
+.ff-lbar{position:absolute;bottom:0;left:0;height:2px;background:#3a72c0;width:0%;transition:width 0.5s;}
+.ff-tabs{height:28px;background:linear-gradient(to bottom,#ccc8c0,#bbb5ad);display:flex;align-items:flex-end;padding:0 6px;gap:2px;border-bottom:1px solid #999;flex-shrink:0;}
+.ff-tab{height:24px;padding:0 14px;background:linear-gradient(to bottom,#e8e4e0,#d8d4d0);border:1px solid #999;border-bottom:none;border-radius:3px 3px 0 0;font-size:13px;color:#444;display:flex;align-items:center;font-family:'DejaVu Sans',Arial,sans-serif;}
+.ff-tab.act{background:#f0f0f0;border-bottom:1px solid #f0f0f0;margin-bottom:-1px;z-index:1;color:#111;}
+.ff-page{flex:1;overflow-y:auto;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:14px;}
+.ff-status{height:22px;background:linear-gradient(to bottom,#d8d0c8,#c0b8b0);border-top:1px solid #999;display:flex;align-items:center;padding:0 10px;font-size:12px;color:#555;flex-shrink:0;font-family:'DejaVu Sans',Arial,sans-serif;}
+
+/* ══ SITE CSS — exact copy from v6 ══ */
+.ffwrap{width:100%;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:16px;color:#000;}
+#ff-outer{width:100%;padding:0;}
+#ff-banner{padding:12px 0 0 28px;background:#fff;}
+#ff-logo{display:block;width:440px;height:110px;}
+#ff-navbar{background:#3c6eb4;padding:0 0 0 16px;margin:0;border-top:2px solid #2a5090;}
+#ff-navbar a{display:inline-block;padding:7px 18px;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;}
+#ff-navbar a:hover{background:#2a5090;}
+#ff-layout{width:100%;display:flex;align-items:flex-start;}
+#ff-main{flex:1;padding:12px 24px 12px 36px;min-width:0;}
+#ff-sidebar{width:210px;flex-shrink:0;padding:12px 14px;border-left:1px solid #ddd;background:#f8f8f8;}
+#ff-main h1{font-size:20px;border-bottom:2px solid #3c6eb4;color:#3c6eb4;padding:3px 0;margin:16px 0 10px;}
+#ff-main h3{font-size:16px;font-weight:bold;color:#333;margin:14px 0 5px;}
+#ff-main p{margin-bottom:9px;line-height:1.55;font-size:15px;}
+#ff-main a{color:#00c;}#ff-main b{color:#000;}
+#proj_desc{background:#f8f8ff;border:1px solid #ccd;padding:12px 16px;margin:8px 0 14px;text-align:center;}
+#ff-sidebar h3{font-size:14px;font-weight:bold;color:#3c6eb4;border-bottom:1px solid #ccd;padding-bottom:3px;margin-bottom:8px;}
+#ff-sidebar a{display:block;font-size:14px;color:#00c;margin-bottom:6px;text-decoration:none;}
+#ff-footer{border-top:1px solid #ccc;padding:8px 28px;font-size:13px;color:#888;background:#fff;}
+
+/* libav red */
+#lv-outer{width:100%;padding:0;}
+#lv-banner{padding:12px 0 0 28px;background:#fff;}
+#lv-logo{display:block;width:440px;height:110px;}
+#lv-navbar{background:#b01020;padding:0 0 0 16px;margin:0;border-top:2px solid #800010;}
+#lv-navbar a{display:inline-block;padding:7px 18px;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;}
+#lv-navbar a:hover{background:#800010;}
+#lv-layout{width:100%;display:flex;align-items:flex-start;}
+#lv-main{flex:1;padding:12px 24px 12px 36px;min-width:0;}
+#lv-sidebar{width:210px;flex-shrink:0;padding:12px 14px;border-left:1px solid #f0c0c0;background:#fff8f8;}
+#lv-main h1{font-size:20px;border-bottom:2px solid #b01020;color:#b01020;padding:3px 0;margin:16px 0 10px;}
+#lv-main h3{font-size:16px;font-weight:bold;color:#333;margin:14px 0 5px;}
+#lv-main p{margin-bottom:9px;line-height:1.55;font-size:15px;}
+#lv-main a{color:#b01020;}#lv-main b{color:#000;}
+#lv-desc{background:#fff0f0;border:1px solid #f0c0c0;padding:12px 16px;margin:8px 0 14px;text-align:center;}
+#lv-sidebar h3{font-size:14px;font-weight:bold;color:#b01020;border-bottom:1px solid #f0c0c0;padding-bottom:3px;margin-bottom:8px;}
+#lv-sidebar a{display:block;font-size:14px;color:#b01020;margin-bottom:6px;text-decoration:none;}
+#lv-footer{border-top:1px solid #f0c0c0;padding:8px 28px;font-size:13px;color:#888;background:#fff;}
+
+#ov{position:absolute;inset:0;background:#000;opacity:1;z-index:800;pointer-events:none;transition:opacity 0s;}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- TC1 -->
+<div class="tc on" id="tc1">
+  <div class="tc-name">ФАБРИС<br>БЕЛЛАР</div>
+  <div class="tc-sub">Париж, Франция — 14 марта 2011, 17:02</div>
+</div>
+
+<!-- SCENE 1: Bellard terminal -->
+<div class="scene" id="s1">
+  <div class="topbar">
+    <div class="tpm">File</div><div class="tpm">Edit</div><div class="tpm">View</div><div class="tpm">Terminal</div><div class="tpm">Help</div>
+    <div class="tp-clock">Mon Mar 14, 17:02</div>
+    <div class="tp-tray"><span>◼◼</span><span>EN</span></div>
+  </div>
+  <div class="term-outer">
+    <div class="term-chrome">
+      <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+      <div class="tchrome-title">fabrice@bellard.org: ~ — bash — 210×52</div>
+    </div>
+    <div class="term-body" id="TB1"></div>
+  </div>
+  <div class="botbar">
+    <div class="botbtn act">⬛ fabrice@bellard.org: ~</div>
+    <div class="bottray"><span>Mon Mar 14, 17:02</span></div>
+  </div>
+</div>
+
+<!-- TC2 -->
+<div class="tc" id="tc2">
+  <div class="tc-name">САЙТ<br>ВОССТАНОВЛЕН</div>
+  <div class="tc-sub">14 марта 2011, 17:09</div>
+</div>
+
+<!-- SCENE 2: split — terminal left, ffmpeg.org right -->
+<div class="scene" id="s2">
+  <div class="topbar">
+    <div class="tpm">Applications</div><div class="tpm">Places</div><div class="tpm">System</div>
+    <div class="tp-clock">Mon Mar 14, 17:09</div>
+    <div class="tp-tray"><span>◼◼</span><span>EN</span></div>
+  </div>
+  <div class="split">
+    <div class="pane-term">
+      <div class="term-chrome">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <div class="tchrome-title">fabrice@bellard.org: ~</div>
+      </div>
+      <div class="term-body" id="TB2" style="font-size:19px;padding:14px 22px;"></div>
+    </div>
+    <div class="pane-browser">
+      <div class="ff-tbar">
+        <div class="ff-wclose ff-wbtn">×</div><div class="ff-wmin ff-wbtn">−</div><div class="ff-wmax ff-wbtn">□</div>
+        <div class="ff-wtitle" id="s2-title">FFmpeg — A complete, cross-platform solution — Mozilla Firefox</div>
+      </div>
+      <div class="ff-toolbar">
+        <div class="ff-navbtn dis">◀</div><div class="ff-navbtn dis">▶</div>
+        <div class="ff-navbtn" id="s2-reload">⟳</div><div class="ff-navbtn">🏠</div>
+        <div class="ff-urlbar"><span style="color:#484;font-size:12px;">🔒</span><span id="s2-url">http://ffmpeg.org/</span><div class="ff-lbar" id="s2-lbar"></div></div>
+      </div>
+      <div class="ff-tabs">
+        <div class="ff-tab act" id="s2-tab">🌐 ffmpeg.org</div>
+        <div class="ff-tab" style="font-size:18px;padding:0 10px;color:#888;">+</div>
+      </div>
+      <div class="ff-page" id="s2-page"></div>
+      <div class="ff-status" id="s2-status">Done</div>
+    </div>
+  </div>
+  <div class="botbar">
+    <div class="botbtn act">⬛ fabrice@bellard.org: ~</div>
+    <div class="botbtn" id="s2-taskbtn">🌐 Mozilla Firefox — ffmpeg.org</div>
+    <div class="bottray"><span>Mon Mar 14, 17:09</span></div>
+  </div>
+</div>
+
+<!-- TC3 -->
+<div class="tc" id="tc3">
+  <div class="tc-name">ФОРК<br>LIBAV</div>
+  <div class="tc-sub">14 марта 2011, 17:14</div>
+</div>
+
+<!-- SCENE 3: libav.org -->
+<div class="scene" id="s3">
+  <div class="topbar">
+    <div class="tpm">Applications</div><div class="tpm">Places</div><div class="tpm">System</div>
+    <div class="tp-clock">Mon Mar 14, 17:14</div>
+    <div class="tp-tray"><span>◼◼</span><span>EN</span></div>
+  </div>
+  <div class="split">
+    <div class="pane-term">
+      <div class="term-chrome">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <div class="tchrome-title">michael@localhost: ~/ffmpeg</div>
+      </div>
+      <div class="term-body" id="TB3" style="font-size:19px;padding:14px 22px;"></div>
+    </div>
+    <div class="pane-browser">
+      <div class="ff-tbar">
+        <div class="ff-wclose ff-wbtn">×</div><div class="ff-wmin ff-wbtn">−</div><div class="ff-wmax ff-wbtn">□</div>
+        <div class="ff-wtitle" id="s3-title">Libav — Windows Internet Explorer</div>
+      </div>
+      <div class="ff-toolbar">
+        <div class="ff-navbtn">◀</div><div class="ff-navbtn dis">▶</div>
+        <div class="ff-navbtn" id="s3-reload">⟳</div><div class="ff-navbtn">🏠</div>
+        <div class="ff-urlbar"><span style="color:#484;font-size:12px;">🔒</span><span id="s3-url">http://libav.org/</span><div class="ff-lbar" id="s3-lbar"></div></div>
+      </div>
+      <div class="ff-tabs">
+        <div class="ff-tab act">🌐 libav.org</div>
+        <div class="ff-tab" style="font-size:18px;padding:0 10px;color:#888;">+</div>
+      </div>
+      <div class="ff-page" id="s3-page"></div>
+      <div class="ff-status" id="s3-status">Done</div>
+    </div>
+  </div>
+  <div class="botbar">
+    <div class="botbtn act">⬛ michael@localhost: ~/ffmpeg</div>
+    <div class="botbtn">🌐 libav.org — Mozilla Firefox</div>
+    <div class="bottray"><span>Mon Mar 14, 17:14</span></div>
+  </div>
+</div>
+
+<div id="ov"></div>
+<div id="cur"><svg width="28" height="28" viewBox="0 0 28 28"><path d="M5 2 L5 24 L10 18 L15 26 L18 24.5 L13 16.5 L21 16.5 Z" fill="#fff" stroke="#000" stroke-width="1.5" stroke-linejoin="round"/></svg></div>
+</div>
+
+<script>
+const ov=document.getElementById('ov'),cur=document.getElementById('cur');
+let cx=1280,cy=720,tx=1280,ty=720;
+(function a(){cx+=(tx-cx)*0.09;cy+=(ty-cy)*0.09;cur.style.left=(cx-4)+'px';cur.style.top=(cy-4)+'px';requestAnimationFrame(a);})();
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function moveTo(x,y,d=700){tx=x;ty=y;return wait(d);}
+function fade(o,d=500){ov.style.transition=`opacity ${d}ms`;ov.style.opacity=o;return wait(d+30);}
+function showTC(id){cur.style.display='none';document.querySelectorAll('.tc,.scene').forEach(e=>e.classList.remove('on'));document.getElementById(id).classList.add('on');}
+function showS(id){cur.style.display='block';document.querySelectorAll('.tc,.scene').forEach(e=>e.classList.remove('on'));document.getElementById(id).classList.add('on');}
+
+function mkT(tbId){
+  const TB=document.getElementById(tbId);
+  const mkPR=(u,p)=>`<span class="pr">${u}</span>:<span class="pp">${p}</span>$ `;
+  function addL(h){const d=document.createElement('div');d.className='tl';d.innerHTML=h;TB.appendChild(d);TB.scrollTop=TB.scrollHeight;return d;}
+  async function cmd(prompt,c,spd=52){
+    const d=document.createElement('div');d.className='tl';TB.appendChild(d);
+    let t='';
+    for(let ch of c){await wait(spd+Math.random()*36);t+=ch;d.innerHTML=prompt+t+'<span class="bc"></span>';TB.scrollTop=TB.scrollHeight;}
+    d.innerHTML=prompt+t;await wait(160);
+  }
+  async function out(ls,dl=22){for(let l of ls){addL(l);await wait(dl);TB.scrollTop=TB.scrollHeight;}}
+  return{cmd,out,addL,TB,mkPR};
+}
+
+const FFMPEG_PAGE = `<div class="ffwrap"><div id="ff-outer">
+  <div id="ff-banner"><svg id="ff-logo" viewBox="0 0 440 110" xmlns="http://www.w3.org/2000/svg"><text x="4" y="88" font-family="Arial Black,Arial" font-size="90" font-weight="900" fill="#4a8c2a" letter-spacing="-3">FFmpeg</text></svg></div>
+  <div id="ff-navbar"><a href="#">Home/News</a><a href="#">About</a><a href="#">Download</a><a href="#">Documentation</a><a href="#">Bug Reports</a><a href="#">Contact</a><a href="#">Consulting</a><a href="#">Legal</a></div>
+  <div id="ff-layout">
+    <div id="ff-main">
+      <h1>Project Description</h1>
+      <div id="proj_desc"><p><b>FFmpeg</b> is a complete, cross-platform solution to record, convert and stream audio and video. It includes <b>libavcodec</b> - the leading audio/video codec library. See the <a href="#">documentation</a> for a complete feature list and the <a href="#">Changelog</a> for recent changes.</p></div>
+      <p><b>FFmpeg is free software licensed under the LGPL or GPL</b> depending on your choice of configuration options. If you use FFmpeg or its constituent libraries, you <b>must</b> adhere to the terms of the license in question. You can find basic compliance information and get licensing help on our <a href="#">license and legal considerations page</a>.</p>
+      <p><b>Looking for help?</b> <a href="#">Contact us</a>, but before you report any bugs, read the <a href="#">guidelines</a>.</p>
+      <p><b>Want to participate?</b> Subscribe to <a href="#">ffmpeg-devel and ffmpeg-cvslog</a>.</p>
+      <h1>News</h1>
+      <h3>Oct 18, 2010</h3>
+      <p>We have just pushed the first point release from our 0.6 release branch: <a href="#">FFmpeg 0.6.1</a>. Maintenance-only release addressing bugs and security issues, plus a newer AAC decoder.</p>
+      <h3>June 15, 2010</h3>
+      <p>We are proud to announce a <b>new release: <a href="#">FFmpeg 0.6</a></b> — codenamed "Works with HTML5". H.264 and Theora decoders are now significantly faster.</p>
+      <h3>March 19, 2010</h3><p>FFmpeg accepted into <a href="#">Google Summer of Code 2010</a>.</p>
+      <h3>March 2, 2010</h3><p><a href="#">FFmpeg 0.5.1</a> — security and packaging fixes.</p>
+    </div>
+    <div id="ff-sidebar">
+      <h3>Download</h3><a href="#">FFmpeg 0.6.1</a><a href="#">FFmpeg 0.5.3</a><a href="#">Git snapshot</a><br>
+      <h3>Documentation</h3><a href="#">ffmpeg-doc.html</a><a href="#">Changelog</a><br>
+      <h3>Community</h3><a href="#">Mailing lists</a><a href="#">IRC: #ffmpeg</a><a href="#">Bug tracker</a><br>
+      <h3>Development</h3><a href="#">Browse source</a><a href="#">ffmpeg-devel</a><a href="#">FATE tests</a>
+    </div>
+  </div>
+  <div id="ff-footer"><p>FFmpeg — Free software. LGPL/GPL licensed.</p></div>
+</div></div>`;
+
+const LIBAV_PAGE = `<div class="ffwrap"><div id="lv-outer">
+  <div id="lv-banner"><svg id="lv-logo" viewBox="0 0 440 110" xmlns="http://www.w3.org/2000/svg"><text x="4" y="88" font-family="Arial Black,Arial" font-size="90" font-weight="900" fill="#b01020" letter-spacing="-3">Libav</text></svg></div>
+  <div id="lv-navbar"><a href="#">Home/News</a><a href="#">About</a><a href="#">Download</a><a href="#">Documentation</a><a href="#">Bug Reports</a><a href="#">Contact</a></div>
+  <div id="lv-layout">
+    <div id="lv-main">
+      <h1>Project Description</h1>
+      <div id="lv-desc"><p><b>Libav</b> is a complete, cross-platform solution to record, convert and stream audio and video. It includes <b>libavcodec</b> — the leading audio/video codec library. Libav is the official continuation of the FFmpeg project, established March 14, 2011.</p></div>
+      <p><b>Libav is free software licensed under the LGPL or GPL</b> depending on your choice of configuration options.</p>
+      <p><b>Looking for help?</b> <a href="#">Contact us</a> or join <a href="#">#libav-devel on Freenode</a>.</p>
+      <h1>News</h1>
+      <h3>March 14, 2011</h3>
+      <p>The Libav project has been established as the continuation of FFmpeg under new governance. All development now takes place in the Libav repository. Code review is now mandatory for all commits.</p>
+      <pre style="background:#fff0f0;border:1px solid #e09090;padding:8px 12px;font-size:14px;margin:8px 0;font-family:monospace;">git clone git://git.libav.org/libav.git</pre>
+      <p>Subscribe to mailing lists at <a href="#">lists.libav.org</a>. IRC: <b>#libav-devel</b> on Freenode.</p>
+      <h3>Oct 18, 2010</h3><p><a href="#">Libav 0.6.1</a> — maintenance release with bug and security fixes.</p>
+      <h3>June 15, 2010</h3><p><b>Libav 0.6</b> — codenamed "Works with HTML5". Faster H.264 and Theora.</p>
+    </div>
+    <div id="lv-sidebar">
+      <h3>Download</h3><a href="#">Libav 0.6.1</a><a href="#">Git snapshot</a><br>
+      <h3>Documentation</h3><a href="#">Libav doc</a><a href="#">Changelog</a><br>
+      <h3>Community</h3><a href="#">lists.libav.org</a><a href="#">IRC: #libav-devel</a><a href="#">Bug tracker</a>
+    </div>
+  </div>
+  <div id="lv-footer"><p>Libav — Free software. LGPL/GPL licensed.</p></div>
+</div></div>`;
+
+async function run(){
+  document.getElementById('TB1').innerHTML='';
+  document.getElementById('TB2').innerHTML='';
+  document.getElementById('TB3').innerHTML='';
+  document.getElementById('s2-page').innerHTML='';
+  document.getElementById('s3-page').innerHTML='';
+  ov.style.transition='none';ov.style.opacity='1';
+  await wait(100);
+
+  // ── TC1 ──
+  showTC('tc1');
+  await fade(0,900);await wait(2600);await fade(1,700);await wait(200);
+
+  // ── S1: Bellard ──
+  showS('s1');
+  cx=900;cy=600;tx=900;ty=600;
+  await fade(0,700);await wait(500);
+
+  const t1=mkT('TB1');
+  const PR1=t1.mkPR('fabrice@bellard','~');
+
+  await t1.cmd(PR1,'whois ffmpeg.org',55);
+  await wait(250);
+  await t1.out([
+    `<span class="cm">   Domain Name: FFMPEG.ORG</span>`,
+    `<span class="cm">   Registrar: Gandi SAS</span>`,
+    `<span class="cm">   Creation Date: 2000-12-17T00:00:00Z</span>`,
+    ``,
+    `<span class="who-key">   Registrant Name:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="who-val-name">Fabrice Bellard</span>`,
+    `<span class="who-key">   Registrant Email:&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="who-val">fabrice.bellard@free.fr</span>`,
+    `<span class="who-key">   Registrant Org:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="who-val">—</span>`,
+    ``,
+    `<span class="who-key">   Name Server:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="who-val-red">ns1.mplayerhq.hu</span>`,
+    `<span class="who-key">   Name Server:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="who-val-red">ns2.mplayerhq.hu</span>`,
+    ``,
+  ],20);
+
+  await moveTo(1100,580,700);
+  await wait(400);
+
+  await t1.cmd(PR1,'gandi dns update ffmpeg.org --ns ns1.linode.com --ns ns2.linode.com',48);
+  await wait(350);
+  await t1.out([
+    `<span class="gr">✓  Nameservers updated.</span>`,
+    `<span class="out">   ffmpeg.org → ns1.linode.com, ns2.linode.com</span>`,
+    ``,
+  ],30);
+
+  await t1.cmd(PR1,'dig +short ffmpeg.org A',52);
+  await wait(500);
+  await t1.out([`<span class="hi">85.214.131.22</span>`,``],40);
+
+  await moveTo(800,800,700);
+  await wait(500);
+  await fade(1,700);await wait(200);
+
+  // ── TC2 ──
+  showTC('tc2');
+  await fade(0,800);await wait(2000);await fade(1,600);await wait(200);
+
+  // ── S2: ffmpeg.org restored ──
+  showS('s2');
+  cx=1600;cy=700;tx=1600;ty=700;
+  await fade(0,700);await wait(400);
+
+  const t2=mkT('TB2');
+  const PR2=t2.mkPR('fabrice@bellard','~');
+  const s2st=document.getElementById('s2-status');
+  const s2lb=document.getElementById('s2-lbar');
+
+  // terminal checks
+  await t2.cmd(PR2,'curl -sI http://ffmpeg.org/ | head -3',50);
+  await wait(400);
+  await t2.out([
+    `HTTP/1.1 <span class="gr">200 OK</span>`,
+    `Server: nginx/0.8.54`,
+    `X-Served-By: <span class="hi">ffmpeg-original</span>`,
+    ``,
+  ],28);
+
+  // browser loads simultaneously
+  s2st.textContent='Connecting to ffmpeg.org...';
+  s2lb.style.width='40%';
+  await wait(500);
+  s2lb.style.width='90%';
+  s2st.textContent='Loading ffmpeg.org...';
+  await wait(700);
+  s2lb.style.width='100%';await wait(200);s2lb.style.width='0%';
+  s2st.textContent='Done';
+  document.getElementById('s2-page').innerHTML=FFMPEG_PAGE;
+
+  await moveTo(1500,500,700);await wait(400);
+  await moveTo(1800,650,600);await wait(400);
+  await moveTo(1600,580,500);await wait(500);
+
+  await t2.cmd(PR2,'dig ffmpeg.org NS +short',50);
+  await wait(400);
+  await t2.out([`<span class="gr">ns1.linode.com.</span>`,`<span class="gr">ns2.linode.com.</span>`,``],28);
+
+  await moveTo(1700,700,600);await wait(600);
+  await fade(1,700);await wait(200);
+
+  // ── TC3 ──
+  showTC('tc3');
+  await fade(0,800);await wait(2000);await fade(1,600);await wait(200);
+
+  // ── S3: libav.org fork ──
+  showS('s3');
+  cx=1600;cy=700;tx=1600;ty=700;
+  await fade(0,700);await wait(400);
+
+  const t3=mkT('TB3');
+  const PR3=t3.mkPR('michael@localhost','~/ffmpeg');
+  const s3st=document.getElementById('s3-status');
+  const s3lb=document.getElementById('s3-lbar');
+
+  // Niedermayer opens libav.org
+  s3st.textContent='Connecting to libav.org...';
+  s3lb.style.width='50%';
+  await wait(600);
+  s3lb.style.width='100%';await wait(300);s3lb.style.width='0%';
+  s3st.textContent='Done';
+  document.getElementById('s3-page').innerHTML=LIBAV_PAGE;
+
+  await wait(400);
+  // cursor browses libav
+  await moveTo(1400,450,700);await wait(400);
+  await moveTo(1800,600,600);await wait(400);
+  await moveTo(1600,700,500);await wait(400);
+
+  // terminal — git remote shows the split
+  await t3.cmd(PR3,'git remote -v',52);
+  await wait(300);
+  await t3.out([
+    `<span class="out">origin&nbsp;&nbsp; git://git.ffmpeg.org/ffmpeg.git (fetch)</span>`,
+    `<span class="out">origin&nbsp;&nbsp; git://git.ffmpeg.org/ffmpeg.git (push)</span>`,
+    ``,
+  ],28);
+
+  await t3.cmd(PR3,'git log --oneline -3',50);
+  await wait(300);
+  await t3.out([
+    `<span class="hi">a3f2c91</span> <span class="out">avcodec: add frame_skip_exp option</span>`,
+    `<span class="hi">b8d1e44</span> <span class="out">swscale: fix yuv2rgb_full_X_c_template</span>`,
+    `<span class="hi">c7a9f38</span> <span class="out">lavfi: add removelogo filter support</span>`,
+    ``,
+  ],28);
+
+  await t3.addL(`<span class="cm"># Libav забрали серверы и архивы.</span>`);
+  await wait(200);
+  await t3.addL(`<span class="cm"># FFmpeg продолжает работу с кодом и доменом.</span>`);
+
+  await moveTo(1500,550,600);await wait(500);
+  await moveTo(1700,650,500);await wait(700);
+
+  await fade(1,1200);await wait(500);
+  run();
+}
+
+document.addEventListener('keydown',e=>{'rRкК'.includes(e.key)&&run();});
+run();
+</script>
+</body>
+</html>

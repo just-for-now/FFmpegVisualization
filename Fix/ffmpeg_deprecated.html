@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ffmpeg deprecated — Ubuntu 12.04</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu+Mono:wght@400;700&family=Ubuntu:wght@300;400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 2560px;
+  height: 1440px;
+  overflow: hidden;
+  background: #1a0f2e;
+  font-family: 'Ubuntu', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ubuntu 12.04 Precise Pangolin wallpaper */
+#desktop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 1800px 1000px at 50% 55%,
+    #3a1f52 0%, #1e0f35 55%, #0d0818 100%);
+}
+
+/* ── Desktop icons (Nautilus, Ubuntu 12.04 style) ── */
+.dicon {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+  user-select: none;
+  width: 84px;
+}
+.dicon-img {
+  width: 64px; height: 64px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 44px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.7));
+}
+.dicon-label {
+  color: #ffffff;
+  font-size: 17px;
+  font-family: 'Ubuntu', sans-serif;
+  text-align: center;
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.9), -1px -1px 3px rgba(0,0,0,0.9);
+  line-height: 1.2;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+/* Unity top panel */
+#unity-panel {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 36px;
+  background: rgba(17, 15, 14, 0.94);
+  border-bottom: 1px solid rgba(0,0,0,0.6);
+  display: flex;
+  align-items: stretch;
+  z-index: 200;
+}
+
+#bfb {
+  width: 36px;
+  background: #dd4814;
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 18px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(0,0,0,0.3);
+}
+
+#appmenu { display: flex; align-items: stretch; }
+.am {
+  display: flex; align-items: center;
+  padding: 0 10px;
+  color: rgba(255,255,255,0.88);
+  font-size: 17px;
+  cursor: default;
+}
+.am:hover { background: rgba(255,255,255,0.07); }
+
+#inds { margin-left: auto; display: flex; align-items: stretch; }
+.ind {
+  display: flex; align-items: center;
+  padding: 0 10px;
+  color: rgba(255,255,255,0.88);
+  font-size: 16px;
+  cursor: default; white-space: nowrap;
+}
+.ind:hover { background: rgba(255,255,255,0.07); }
+
+/* Unity Launcher */
+#launcher {
+  position: absolute;
+  top: 36px; left: 0; bottom: 0;
+  width: 62px;
+  background: rgba(8, 6, 12, 0.82);
+  border-right: 1px solid rgba(255,255,255,0.06);
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding-top: 6px; gap: 2px;
+  z-index: 150;
+}
+
+.li {
+  position: relative;
+  width: 50px; height: 50px;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; cursor: default; flex-shrink: 0;
+}
+.li.run::after {
+  content: '';
+  position: absolute;
+  left: -7px; top: 50%; transform: translateY(-50%);
+  width: 4px; height: 10px;
+  background: rgba(255,255,255,0.9);
+  border-radius: 0 2px 2px 0;
+}
+.li.act::after { height: 30px; }
+.ls { width: 38px; height: 1px; background: rgba(255,255,255,0.12); flex-shrink: 0; margin: 2px 0; }
+
+/* Terminal window */
+#terminal {
+  position: absolute;
+  top: 68px; left: 124px;
+  width: 2020px; height: 1110px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.4);
+}
+
+/* Ambiance titlebar */
+#titlebar {
+  height: 38px;
+  background: linear-gradient(180deg, #403c37 0%, #37332e 45%, #2d2a26 100%);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid #1a1714;
+  border-radius: 6px 6px 0 0;
+  display: flex; align-items: center;
+  padding: 0 8px; gap: 7px;
+  flex-shrink: 0; position: relative;
+}
+
+.wb {
+  width: 20px; height: 20px; border-radius: 10px;
+  border: 1px solid rgba(0,0,0,0.4); flex-shrink: 0; cursor: default;
+}
+.wb-c { background: linear-gradient(180deg, #b5795b 0%, #9a5c3f 100%); }
+.wb-m { background: linear-gradient(180deg, #8a7e6f 0%, #6d6256 100%); }
+.wb-x { background: linear-gradient(180deg, #8a7e6f 0%, #6d6256 100%); }
+
+#title-text {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  color: #cec9c3; font-size: 17px; font-weight: 400;
+  font-family: 'Ubuntu', sans-serif;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  pointer-events: none; white-space: nowrap;
+}
+
+/* Terminal body */
+#term-body {
+  flex: 1;
+  background: #300a24;
+  padding: 3px 7px;
+  font-family: 'Ubuntu Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 24px;
+  line-height: 1.5;
+  color: #ffffff;
+  overflow: hidden;
+  /* Critical: wrap long lines like a real terminal */
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Prompt colours */
+.ag { color: #8ae234; font-weight: 700; }
+.ab { color: #729fcf; font-weight: 700; }
+
+/* *** THIS PROGRAM IS DEPRECATED *** — inverted, red bg */
+.deprecated {
+  background: #cc0000;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Blinking block cursor */
+#cur {
+  display: inline-block;
+  width: 14px; height: 26px;
+  background: rgba(255,255,255,0.92);
+  vertical-align: bottom;
+}
+#cur.blink { animation: blink 1.15s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+#cur.off { opacity: 0; animation: none; }
+</style>
+</head>
+<body>
+
+<div id="desktop"></div>
+
+<!-- Desktop icons — right edge, Nautilus Ubuntu 12.04 style -->
+<div class="dicon" style="top: 60px; left: 2440px;">
+  <div class="dicon-img">🗑️</div>
+  <div class="dicon-label">Trash</div>
+</div>
+<div class="dicon" style="top: 180px; left: 2440px;">
+  <div class="dicon-img" style="font-size:52px;">🏠</div>
+  <div class="dicon-label">artem's Home</div>
+</div>
+<div class="dicon" style="top: 310px; left: 2440px;">
+  <!-- Generic hard disk icon approximation -->
+  <div class="dicon-img">💿</div>
+  <div class="dicon-label">62 GB Filesystem</div>
+</div>
+
+<!-- Unity panel -->
+<div id="unity-panel">
+  <div id="bfb">⊞</div>
+  <div id="appmenu">
+    <span class="am">File</span>
+    <span class="am">Edit</span>
+    <span class="am">View</span>
+    <span class="am">Terminal</span>
+    <span class="am">Tabs</span>
+    <span class="am">Help</span>
+  </div>
+  <div id="inds">
+    <span class="ind">▲▼&nbsp;en</span>
+    <span class="ind">🔊</span>
+    <span class="ind">artem ▾</span>
+    <span class="ind" id="clock">Sun 15 Apr, 23:41</span>
+    <span class="ind">⏻</span>
+  </div>
+</div>
+
+<!-- Unity Launcher -->
+<div id="launcher">
+  <div class="li act run" style="background:#dd4814; border-radius:50%; font-size:18px;">⊞</div>
+  <div class="li" style="background:#e8a600; font-size:22px;">📁</div>
+  <div class="li" style="background:#c44; font-size:22px;">🦊</div>
+  <div class="ls"></div>
+  <div class="li" style="background:#1e88c9; font-size:18px; font-family:serif; color:#fff; font-weight:700;">W</div>
+  <div class="li" style="background:#1e9c2e; font-size:18px; font-family:serif; color:#fff; font-weight:700;">C</div>
+  <div class="li" style="background:#d14f00; font-size:18px; font-family:serif; color:#fff; font-weight:700;">I</div>
+  <div class="ls"></div>
+  <div class="li act run" style="background:#3a3a3a; font-size:15px; font-family:'Ubuntu Mono',monospace; color:#4e9a06; font-weight:700;">$_</div>
+  <div style="flex:1"></div>
+  <div class="ls"></div>
+  <div class="li" style="background:#2c2c2c; font-size:18px; margin-bottom:4px; color:#aaa;">⊞</div>
+</div>
+
+<!-- Terminal window -->
+<div id="terminal">
+  <div id="titlebar">
+    <div class="wb wb-c"></div>
+    <div class="wb wb-m"></div>
+    <div class="wb wb-x"></div>
+    <div id="title-text">artem@ubuntu: ~</div>
+  </div>
+  <div id="term-body" id="tb"><div id="out"></div><span id="cur" class="blink"></span></div>
+</div>
+
+<script>
+const out = document.getElementById('out');
+const cur = document.getElementById('cur');
+const tb  = document.querySelector('#term-body');
+let timers = [];
+
+function wait(ms) {
+  return new Promise(r => { timers.push(setTimeout(r, ms)); });
+}
+function killAll() { timers.forEach(clearTimeout); timers = []; }
+
+// Append a line as a div (so each line is its own block — natural wrapping)
+function line(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  out.appendChild(d);
+  tb.scrollTop = 99999;
+}
+
+// Blank line
+function blank() { line('&nbsp;'); }
+
+function prompt() {
+  return '<span class="ag">artem@ubuntu</span><span>:</span><span class="ab">~</span><span>$ </span>';
+}
+
+// Type into a <div> character by character, cursor stays at end
+async function typeInline(str, avg = 90, jitter = 60) {
+  // Create a div for this prompt+command line
+  const d = document.createElement('div');
+  d.innerHTML = prompt();
+  out.appendChild(d);
+  // Move cursor inside this div
+  d.appendChild(cur);
+  tb.scrollTop = 99999;
+
+  for (const ch of str) {
+    const s = document.createElement('span');
+    s.textContent = ch;
+    d.insertBefore(s, cur);
+    tb.scrollTop = 99999;
+    await wait(avg + (Math.random() - 0.5) * jitter);
+  }
+  // Move cursor back to end of out
+  out.appendChild(cur);
+}
+
+async function run() {
+  out.innerHTML = '';
+  out.appendChild(cur);
+  cur.className = 'blink';
+
+  // ── Prior session context ──
+  // Quick ls
+  line(prompt() + 'ls');
+  await wait(90);
+  line('input.mkv');
+  blank();
+  await wait(440);
+
+  // ffprobe command
+  line(prompt() + 'ffprobe -v error -show_entries stream=codec_name input.mkv');
+  await wait(130);
+  line('codec_name=h264');
+  line('codec_name=ac3');
+  blank();
+  await wait(600);
+
+  // ── The main command — typed character by character ──
+  cur.className = '';
+  await wait(480);
+  await typeInline('ffmpeg -i input.mkv', 92, 58);
+
+  // Pause before Enter
+  await wait(740);
+  cur.className = 'off';
+  blank(); // simulates Enter + newline before output
+  await wait(160);
+
+  // ── ffmpeg 0.8.3 output — each line its own div ──
+  line('ffmpeg version 0.8.3-4:0.8.3-0ubuntu0.12.04.1, Copyright (c) 2000-2012 the Libav developers');
+  await wait(25);
+  line('  built on Jun 26 2012 09:26:41 with gcc 4.7.1');
+  await wait(32);
+  blank();
+  await wait(110);
+
+  // *** DEPRECATED — inverted red ***
+  line('<span class="deprecated">*** THIS PROGRAM IS DEPRECATED ***</span>');
+  await wait(20);
+  line('This program is only provided for compatibility and will be removed in a future release.');
+  await wait(18);
+  line('Please use <strong>avconv</strong> instead.');
+  blank();
+  await wait(55);
+
+  // Normal output continues
+  line("Input #0, matroska,webm, from 'input.mkv':");
+  await wait(25);
+  line('  Metadata:');
+  line('    encoder         : libebml v1.2.3 + libmatroska v1.3.0');
+  line('    creation_time   : 2012-04-15 16:22:01');
+  await wait(25);
+  line('  Duration: 02:14:38.12, start: 0.000000, bitrate: 4817 kb/s');
+  line('    Stream #0.0(eng): Video: h264 (High), yuv420p, 1920x1080 [PAR 1:1 DAR 16:9], 23.98 fps, 23.98 tbr, 1k tbn, 47.95 tbc');
+  line('    Stream #0.1(eng): Audio: ac3, 48000 Hz, 5.1, s16, 448 kb/s');
+  await wait(25);
+  line('At least one output file must be specified');
+  blank();
+
+  // New prompt — cursor blinks, user reads
+  const d = document.createElement('div');
+  d.innerHTML = prompt();
+  out.appendChild(d);
+  d.appendChild(cur);
+  cur.className = 'blink';
+  tb.scrollTop = 99999;
+}
+
+function restart() { killAll(); run(); }
+document.addEventListener('keydown', e => {
+  if ('rRкК'.includes(e.key)) restart();
+});
+
+function tick() {
+  const n = new Date();
+  const D = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('clock').textContent =
+    `${D[n.getDay()]} ${n.getDate()} ${M[n.getMonth()]}, ` +
+    `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+}
+tick(); setInterval(tick, 30000);
+run();
+</script>
+</body>
+</html>

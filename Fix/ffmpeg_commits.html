@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Barlow+Condensed:wght@300;400;700;900&display=swap" rel="stylesheet">
+<style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;overflow:hidden;width:2560px;height:1440px;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const CV = document.getElementById('c');
+const X = CV.getContext('2d');
+const W = 2560, H = 1440;
+
+const MONO    = '"JetBrains Mono", monospace';
+const DISPLAY = '"Barlow Condensed", sans-serif';
+
+const K = {
+  bg:      '#000000',
+  panel:   '#050505',
+  border:  '#161616',
+  yellow:  '#FFE033',
+  yDim:    '#7a6510',
+  yMid:    '#a08820',
+  white:   '#F2F2F2',
+  gray:    '#888888',
+  dark:    '#2a2a2a',
+  // syntax
+  kw:      '#FFE033',
+  type:    '#f0f0f0',
+  fn:      '#e0e0e0',
+  str:     '#999999',
+  cmt:     '#505050',
+  num:     '#FFE033',
+  plain:   '#c8c8c8',
+  lnum:    '#383838',
+  cur:     '#0f0f0f',
+};
+
+// ─── REAL FFMPEG CODE (circa 2001-2003) ────────────────────────────────────
+// Drawn from actual FFmpeg git history, early libavcodec sources
+
+const ALL_CODE = `/*
+ * FFmpeg - Fast Forward MPEG
+ * Copyright (c) 2001 Fabrice Bellard
+ *
+ * This library is free software; you can redistribute it
+ * and/or modify it under the terms of the GNU Lesser
+ * General Public License as published by the Free Software
+ * Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ */
+
+#include "avcodec.h"
+#include "dsputil.h"
+#include "mpegvideo.h"
+#include "h263data.h"
+#include "mpeg4data.h"
+
+/* =========================================================
+ * DCT quantization / dequantization
+ * ========================================================= */
+
+static const uint8_t zigzag_direct[64] = {
+     0,  1,  8, 16,  9,  2,  3, 10,
+    17, 24, 32, 25, 18, 11,  4,  5,
+    12, 19, 26, 33, 40, 48, 41, 34,
+    27, 20, 13,  6,  7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36,
+    29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46,
+    53, 60, 61, 54, 47, 55, 62, 63
+};
+
+int ff_dct_quantize_c(MpegEncContext *s,
+                      DCTELEM *block, int n,
+                      int qscale, int *overflow)
+{
+    int i, j, level, last_non_zero, q, start_i;
+    const int *qmat;
+    const uint8_t *scantable = s->intra_scantable.scantable;
+    int bias;
+    int max = 0;
+
+    s->dsp.fdct(block);
+
+    if (s->mb_intra) {
+        if (!s->h263_aic) {
+            if (n < 4)
+                q = s->y_dc_scale;
+            else
+                q = s->c_dc_scale;
+            q = q << 3;
+        } else {
+            q = 1 << 3;
+        }
+        start_i    = 1;
+        last_non_zero = 0;
+        qmat       = s->q_intra_matrix[qscale];
+        bias       = s->intra_quant_bias << (
+                         QUANT_BIAS_SHIFT - QUANT_SCALE_SHIFT - 3);
+    } else {
+        start_i    = 0;
+        last_non_zero = -1;
+        qmat       = s->q_inter_matrix[qscale];
+        bias       = s->inter_quant_bias << (
+                         QUANT_BIAS_SHIFT - QUANT_SCALE_SHIFT - 3);
+    }
+
+    /* for(i=0;i<64;i++) printf("%d %d\\n", i, qmat[i]); */
+    for (i = start_i; i < 64; i++) {
+        j = scantable[i];
+        level = block[j];
+        level = level * qmat[j];
+
+        if (((unsigned)(level + bias)) >= QMAT_SHIFT) {
+            if (level < 0) {
+                level = -level;
+                level = (bias - level) >> QUANT_SCALE_SHIFT;
+                level = -level;
+            } else {
+                level = (level + bias) >> QUANT_SCALE_SHIFT;
+            }
+            max |= level;
+            block[j] = level;
+            last_non_zero = i;
+        } else {
+            block[j] = 0;
+        }
+    }
+    *overflow = s->max_qcoeff < max;
+    return last_non_zero;
+}
+
+/* =========================================================
+ * Motion estimation
+ * ========================================================= */
+
+#define COPY3_IF_LT(x, y, a, b, c, d) \\
+    if ((y) < (x)) {                   \\
+        (x) = (y);                     \\
+        (a) = (b);                     \\
+        (c) = (d);                     \\
+    }
+
+static int epzs_motion_search(MpegEncContext *s,
+                               int *mx_ptr, int *my_ptr,
+                               int P[10][2], int pred_x,
+                               int pred_y, uint8_t *ref_picture,
+                               int16_t (*last_mv)[2],
+                               int ref_mv_scale)
+{
+    int best[2]  = {0, 0};
+    int d, dmin;
+    int src_x = s->mb_x * 16;
+    int src_y = s->mb_y * 16;
+    uint8_t *src = s->new_picture.data[0]
+                 + src_x + src_y * s->linesize;
+    int ref_stride = s->linesize;
+
+    dmin = s->dsp.pix_abs16x16(src,
+               ref_picture + src_x + src_y * ref_stride,
+               ref_stride);
+
+    /* check(0,0) */
+    /* check P[0] (predicted) */
+    d = s->dsp.pix_abs16x16(src,
+            ref_picture
+              + (src_x + P[0][0]) + (src_y + P[0][1]) * ref_stride,
+            ref_stride);
+    COPY3_IF_LT(dmin, d, best[0], P[0][0], best[1], P[0][1]);
+
+    *mx_ptr = best[0];
+    *my_ptr = best[1];
+    return dmin;
+}
+
+/* =========================================================
+ * MP3 / MPEG Audio Layer III decoder
+ * ========================================================= */
+
+typedef struct MPADecodeContext {
+    uint8_t  inbuf1[2][MPA_MAX_CODED_FRAME_SIZE + 512];
+    int      inbuf_index;
+    uint8_t  *inbuf;
+    int      frame_size;
+    int      free_format_frame_size;
+    int      free_format_next_header;
+    int      error_protection;
+    int      layer;
+    int      sample_rate;
+    int      sample_rate_index;
+    int      bit_rate;
+    GetBitContext  gb;
+    int      nb_channels;
+    int      mode;
+    int      mode_ext;
+    int      lsf;
+    INTFLOAT synth_buf[MPA_MAX_CHANNELS][512 * 2];
+    int      synth_buf_offset[MPA_MAX_CHANNELS];
+    INTFLOAT sb_samples[MPA_MAX_CHANNELS][36][SBLIMIT];
+    INTFLOAT mdct_buf[MPA_MAX_CHANNELS][SBLIMIT * 18];
+    GranuleDef granules[2][2];
+    int      adu_mode;
+    int      dither_state;
+    int      discarded_by_sync;
+    AVCodecContext *avctx;
+} MPADecodeContext;
+
+static int mp3_decode_init(AVCodecContext *avctx)
+{
+    MPADecodeContext *s = avctx->priv_data;
+    static int init = 0;
+
+    if (!init) {
+        ff_mpa_init_tables();
+        init = 1;
+    }
+    s->avctx       = avctx;
+    s->inbuf_index = 0;
+    s->inbuf       = &s->inbuf1[0][BACKSTEP_SIZE];
+    avctx->sample_fmt = SAMPLE_FMT_S16;
+    return 0;
+}
+
+static int mp3_decode_frame(AVCodecContext *avctx,
+                            void *data, int *data_size,
+                            const uint8_t *buf, int buf_size)
+{
+    MPADecodeContext *s  = avctx->priv_data;
+    uint32_t header;
+    int out_size;
+    short *out_samples = (short *)data;
+
+    if (buf_size < 4)
+        return -1;
+
+    header = (buf[0] << 24) | (buf[1] << 16) |
+             (buf[2] <<  8) |  buf[3];
+
+    if (ff_mpa_check_header(header) < 0) {
+        /* no header found */
+        av_log(avctx, AV_LOG_ERROR,
+               "Header missing\\n");
+        return -1;
+    }
+
+    out_size = ff_mpa_decode_header(avctx, header,
+                                    &s->sample_rate,
+                                    &s->nb_channels,
+                                    &s->frame_size,
+                                    &s->bit_rate);
+    if (out_size < 0)
+        return -1;
+
+    out_size = mp_decode_frame(s, out_samples,
+                               buf, buf_size);
+    *data_size = out_size;
+    return s->frame_size;
+}
+
+AVCodec mp3_decoder = {
+    .name           = "mp3",
+    .type           = CODEC_TYPE_AUDIO,
+    .id             = CODEC_ID_MP3,
+    .priv_data_size = sizeof(MPADecodeContext),
+    .init           = mp3_decode_init,
+    .decode         = mp3_decode_frame,
+    .long_name      = "MPEG audio layer 2/3",
+};
+
+/* =========================================================
+ * AC-3 / Dolby Digital decoder
+ * ========================================================= */
+
+typedef struct AC3DecodeContext {
+    AVCodecContext  *avctx;
+    GetBitContext    gb;
+    GetBitContext    gbc;
+    uint8_t          input_buffer[AC3_FRAME_BUFFER_SIZE
+                                  + FF_INPUT_BUFFER_PADDING_SIZE];
+    AC3HeaderInfo    hdr;
+    int              channel_mode;
+    int              lfe_on;
+    int              channel_map;
+    int              center_mix_level;
+    int              surround_mix_level;
+    int              eac3;
+    int              num_blocks;
+    int              bitstream_mode;
+    int              num_channels;
+    int              out_channels;
+    int              fbw_channels;
+    int              src_chan_map;
+    int              block_switch[AC3_MAX_CHANNELS];
+    int              dither_flag[AC3_MAX_CHANNELS];
+    AVLFG            dith_state;
+    int              cpl_in_use[AC3_MAX_BLOCKS];
+    int              cpl_start_subband;
+    int              cpl_end_subband;
+    int              cpl_band_struct[AC3_MAX_CPL_BANDS];
+    int              num_cpl_subbands;
+    int              num_cpl_bands;
+    uint8_t          cpl_band_sizes[AC3_MAX_CPL_BANDS];
+    int              firstchincpl;
+    int16_t          cpl_coords[AC3_MAX_CHANNELS]
+                                [AC3_MAX_CPL_BANDS];
+    int16_t          band_psd[AC3_MAX_CHANNELS]
+                              [AC3_MAX_SPECTRAL_PEAKS];
+    int16_t          mask[AC3_MAX_CHANNELS]
+                         [AC3_MAX_SPECTRAL_PEAKS];
+    int              dba_mode[AC3_MAX_CHANNELS];
+    int              dba_nsegs[AC3_MAX_CHANNELS];
+    uint8_t          dba_offsets[AC3_MAX_CHANNELS][8];
+    uint8_t          dba_lengths[AC3_MAX_CHANNELS][8];
+    uint8_t          dba_values[AC3_MAX_CHANNELS][8];
+    int16_t          psd[AC3_MAX_CHANNELS]
+                        [AC3_MAX_SPECTRAL_PEAKS];
+    int16_t          bap[AC3_MAX_CHANNELS]
+                        [AC3_MAX_SPECTRAL_PEAKS];
+    int32_t          mdct_coef[AC3_MAX_BLOCKS]
+                               [AC3_MAX_CHANNELS]
+                               [AC3_MAX_COEFS];
+    uint8_t          exp[AC3_MAX_CHANNELS]
+                        [AC3_MAX_COEFS];
+    int              dexps[AC3_MAX_CHANNELS]
+                          [AC3_MAX_COEFS];
+    int              exp_strategy[AC3_MAX_BLOCKS]
+                                 [AC3_MAX_CHANNELS];
+    int              snr_offset[AC3_MAX_CHANNELS];
+    int              fast_gain[AC3_MAX_CHANNELS];
+    int              slow_gain[AC3_MAX_CHANNELS];
+    int              slow_decay;
+    int              fast_decay;
+    int              db_per_bit;
+    int              floor_level;
+    float            downmix_coeffs[AC3_MAX_CHANNELS][2];
+    float            dynamic_range[2];
+    float            cpl_coords_float[AC3_MAX_CHANNELS]
+                                     [AC3_MAX_CPL_BANDS];
+    DECLARE_ALIGNED(16, float, transform_coeffs)
+                    [AC3_MAX_CHANNELS][AC3_MAX_COEFS];
+    DECLARE_ALIGNED(16, float, delay)
+                    [AC3_MAX_CHANNELS][AC3_BLOCK_SIZE];
+    DECLARE_ALIGNED(16, float, window)[AC3_BLOCK_SIZE];
+    DECLARE_ALIGNED(16, float, tmp_output)[AC3_BLOCK_SIZE*2];
+    DECLARE_ALIGNED(16, float, output)
+                    [AC3_MAX_CHANNELS][AC3_BLOCK_SIZE];
+} AC3DecodeContext;
+
+/* =========================================================
+ * H.263 / MPEG-4 motion vector encoding
+ * ========================================================= */
+
+void ff_h263_encode_motion(MpegEncContext *s, int val, int f_code)
+{
+    int range, l, bit_size, sign, code, bits;
+
+    if (val == 0) {
+        /* zero vector */
+        code = 0;
+        put_bits(&s->pb, mvtab[code][1], mvtab[code][0]);
+    } else {
+        bit_size = f_code - 1;
+        range    = 1 << bit_size;
+        /* modulo encoding */
+        l        = range * 32;
+
+        if (val < -l) {
+            val += 2 * l;
+        } else if (val >= l) {
+            val -= 2 * l;
+        }
+
+        if (val >= 0) {
+            sign = 0;
+        } else {
+            val  = -val;
+            sign = 1;
+        }
+
+        val--;
+        code = (val >> bit_size) + 1;
+        bits = val & (range - 1);
+
+        put_bits(&s->pb, mvtab[code][1] + 1,
+                 (mvtab[code][0] << 1) | sign);
+        if (bit_size > 0)
+            put_bits(&s->pb, bit_size, bits);
+    }
+}
+
+/* =========================================================
+ * MPEG-4 / H.263 VLC tables
+ * ========================================================= */
+
+static RLTable rl_inter = {
+    102,
+    58,
+    inter_vlc,
+    inter_rl_table,
+    inter_level,
+    inter_run,
+};
+
+static RLTable rl_intra = {
+    102,
+    0,
+    intra_vlc,
+    intra_rl_table,
+    intra_level,
+    intra_run,
+};
+
+void h263_encode_init(MpegEncContext *s)
+{
+    static int done = 0;
+
+    if (!done) {
+        done = 1;
+        init_rl(&rl_inter, 1);
+        init_rl(&rl_intra, 1);
+    }
+
+    s->min_qcoeff       = -127;
+    s->max_qcoeff       =  127;
+    s->y_dc_scale_table = uni_DCtab_lum_len;
+    s->c_dc_scale_table = uni_DCtab_chrom_len;
+
+    if (s->h263_aic) {
+        s->intra_ac_vlc_length      =
+            uni_h263_intra_aic_rl_len;
+        s->intra_ac_vlc_last_length =
+            uni_h263_intra_aic_rl_len + 128 * 64;
+    } else {
+        s->intra_ac_vlc_length      =
+            uni_h263_intra_rl_len;
+        s->intra_ac_vlc_last_length =
+            uni_h263_intra_rl_len + 128 * 64;
+    }
+    s->inter_ac_vlc_length      = uni_h263_inter_rl_len;
+    s->inter_ac_vlc_last_length =
+        uni_h263_inter_rl_len + 128 * 64;
+}
+
+/* =========================================================
+ * MPEG-2 / DVD video stream demuxer
+ * ========================================================= */
+
+#define PACK_START_CODE    0x000001ba
+#define SYSTEM_HEADER_CODE 0x000001bb
+#define SEQUENCE_END_CODE  0x000001b7
+#define SEQUENCE_HEADER_CODE 0x000001b3
+
+typedef struct MpegDemuxContext {
+    int      header_state;
+    unsigned char psm_es_type[256];
+    int      pes_header_size;
+    int64_t  pts, dts;
+    int      tid;
+    int      find_next_start_code;
+    int      raw_packet_size;
+    int      dvd;
+} MpegDemuxContext;
+
+static int mpegps_probe(AVProbeData *p)
+{
+    uint32_t code = -1;
+    int sys = 0, pspack = 0, priv1 = 0, vid = 0;
+    int i;
+    int score;
+
+    for (i = 0; i < p->buf_size; i++) {
+        code = (code << 8) + p->buf[i];
+        if ((code & 0xffffff00) == 0x100) {
+            int stream_id = code & 0xff;
+            if      (stream_id == 0xba) pspack++;
+            else if (stream_id == 0xbb) sys++;
+            else if (stream_id == 0xbd) priv1++;
+            else if (stream_id >= 0xe0 &&
+                     stream_id <= 0xef) vid++;
+        }
+    }
+    score = FFMIN(sys,         7) * 20
+          + FFMIN(pspack,      7) * 10
+          + FFMIN(priv1,       7) *  4
+          + FFMIN(vid,         7) *  2;
+    return score;
+}
+
+static int64_t mpegps_read_pes_header(AVFormatContext *s,
+                                       int64_t *ppos,
+                                       int *pstream_type,
+                                       int64_t *ppts,
+                                       int64_t *pdts)
+{
+    MpegDemuxContext *m = s->priv_data;
+    uint32_t start_code;
+    int len, size, startcode;
+    int64_t pts, dts, pos;
+    int header_len;
+    uint8_t has_pts;
+
+redo:
+    pos = url_ftell(&s->pb);
+    start_code = avio_read_marker(&s->pb, &startcode);
+    if (start_code < 0)
+        return start_code;
+    if (startcode == PACK_START_CODE)
+        goto redo;
+    if (startcode == SYSTEM_HEADER_CODE)
+        goto redo;
+    if (startcode < 0x1c0)
+        goto redo;
+    len = avio_rb16(&s->pb);
+    pts = AV_NOPTS_VALUE;
+    dts = AV_NOPTS_VALUE;
+    header_len = 0;
+    has_pts = 0;
+
+    *ppts         = pts;
+    *pdts         = dts;
+    *pstream_type = startcode;
+    *ppos         = pos;
+    return len;
+}
+
+/* =========================================================
+ * WMV2 / Windows Media Video 8
+ * ========================================================= */
+
+static int wmv2_decode_secondary_picture_header(Wmv2Context *w)
+{
+    MpegEncContext *s = &w->s;
+
+    if (IS_SKIP_MB(s)) {
+        if (s->pict_type == FF_P_TYPE) {
+            w->skip_type = get_bits1(&s->gb);
+            if (w->skip_type) {
+                w->skip_type = SKIP_TYPE_MPEG;
+            } else {
+                w->skip_type = SKIP_TYPE_WMV2;
+            }
+        }
+    }
+
+    if (s->pict_type == FF_I_TYPE) {
+        if (w->j_type_bit)
+            w->j_type = get_bits1(&s->gb);
+        if (w->top_left_mv_flag)
+            ff_mpeg4_set_direct_mv(s, 0, 0);
+        if (!w->j_type) {
+            if (w->abt_flag) {
+                w->per_mb_abt =  get_bits1(&s->gb);
+                w->per_mb_abt ^= 1;
+            }
+        }
+        if (w->mspel_bit)
+            s->mspel = get_bits1(&s->gb);
+    }
+    return 0;
+}
+
+static int wmv2_decode_mb(MpegEncContext *s, DCTELEM *block[6])
+{
+    Wmv2Context *w = (Wmv2Context *) s;
+    int cbp, code, i, ret;
+    uint8_t *coded_val;
+
+    if (w->j_type)
+        return ff_wmv2_decode_mb(s, block);
+
+    if (s->pict_type == FF_P_TYPE) {
+        if (IS_SKIP_MB(s)) {
+            /* skip MB */
+            s->mb_skipped = 1;
+            s->current_picture.mb_type[s->mb_x
+                + s->mb_y * s->mb_stride] = MB_TYPE_SKIP
+                                          | MB_TYPE_L0
+                                          | MB_TYPE_16x16;
+            return 0;
+        }
+    }
+
+    ret = ff_msmpeg4_decode_mb(s, block);
+    if (ret < 0)
+        return ret;
+
+    if (w->abt_flag && w->per_mb_abt &&
+        !s->mb_intra && !s->cbp_table[s->mb_x]) {
+        w->abt_type = decode012(&s->gb);
+    }
+    return 0;
+}
+
+/* =========================================================
+ * RealVideo RV10/RV20
+ * ========================================================= */
+
+static int rv10_decode_picture_header(MpegEncContext *s)
+{
+    int mb_count, pb_frame, marker, mb_x, mb_y;
+
+    marker = get_bits1(&s->gb);
+    if (s->rv10_version == 3) {
+        /* RV10 */
+        s->pict_type = get_bits1(&s->gb)
+                       ? AV_PICTURE_TYPE_P
+                       : AV_PICTURE_TYPE_I;
+        if (s->pict_type == AV_PICTURE_TYPE_I)
+            marker = get_bits1(&s->gb);
+        s->qscale = get_bits(&s->gb, 5);
+    } else {
+        /* RV20 */
+        s->pict_type = get_bits1(&s->gb)
+                       ? AV_PICTURE_TYPE_P
+                       : AV_PICTURE_TYPE_I;
+        s->qscale    = get_bits(&s->gb, 5);
+        pb_frame     = get_bits1(&s->gb);
+        marker       = get_bits1(&s->gb);
+        mb_x         = get_bits(&s->gb, 8);
+        mb_y         = get_bits(&s->gb, 8);
+        mb_count     = get_bits(&s->gb, 16);
+    }
+    s->mb_x = s->mb_y = 0;
+    return s->mb_width * s->mb_height;
+}
+
+/* =========================================================
+ * MPEG audio psychoacoustic model (MP2 encoder)
+ * ========================================================= */
+
+void ff_mp2_psychoacoustic(MpegAudioContext *s,
+                            short *samples,
+                            float smr[MPA_MAX_CHANNELS]
+                                      [SBLIMIT],
+                            float ms_smr[MPA_MAX_CHANNELS]
+                                        [SBLIMIT],
+                            int stereo_mode)
+{
+    float sum, max, min, tmp;
+    int i, j, k;
+
+    /* compute filter bank energy */
+    for (j = 0; j < s->nb_channels; j++) {
+        float *p = &s->filter_bank[j][0];
+        for (i = 0; i < SBLIMIT; i++) {
+            sum = 0;
+            for (k = 0; k < WSIZE; k++)
+                sum += p[k] * p[k];
+            s->sb_power[j][i] = sum * (1.0f / WSIZE);
+        }
+    }
+
+    /* spreading function convolution */
+    for (j = 0; j < s->nb_channels; j++) {
+        for (i = 0; i < SBLIMIT; i++) {
+            sum = 0;
+            for (k = 0; k < SBLIMIT; k++)
+                sum += s->sb_power[j][k]
+                     * spreading_function[i][k];
+            s->mask[j][i] = sum;
+        }
+    }
+
+    for (j = 0; j < s->nb_channels; j++) {
+        for (i = 0; i < SBLIMIT; i++) {
+            if (s->sb_power[j][i] > 1e-10f)
+                smr[j][i] = s->sb_power[j][i]
+                           / s->mask[j][i];
+            else
+                smr[j][i] = 0;
+        }
+    }
+}
+
+/* =========================================================
+ * QuickTime / MOV demuxer
+ * ========================================================= */
+
+typedef struct MOVContext {
+    AVFormatContext *fc;
+    int             time_scale;
+    int64_t         duration;
+    int             found_mdat;
+    int             found_moov;
+    int             isom;
+    MOVFragment     fragment;
+    MOVTrackExt    *trex_data;
+    unsigned        trex_count;
+    int             itunes_metadata;
+    int             chapter_track;
+    int             use_absolute_path;
+    int             ignore_editlist;
+    AVPacket        next_pkt;
+} MOVContext;
+
+static int mov_read_mdhd(MOVContext *c, AVIOContext *pb,
+                          MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    int version;
+    char language[4] = { 0 };
+    unsigned lang;
+
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams - 1];
+    sc = st->priv_data;
+
+    version = avio_r8(pb);
+    avio_rb24(pb); /* flags */
+
+    if (version == 1) {
+        avio_rb64(pb); /* creation time */
+        avio_rb64(pb); /* modification time */
+        sc->time_scale = avio_rb32(pb);
+        st->duration   = avio_rb64(pb);
+    } else {
+        avio_rb32(pb); /* creation time */
+        avio_rb32(pb); /* modification time */
+        sc->time_scale = avio_rb32(pb);
+        st->duration   = avio_rb32(pb);
+    }
+
+    lang = avio_rb16(pb);
+    ff_mov_lang_to_iso639(lang, language);
+    av_dict_set(&st->metadata, "language", language, 0);
+    return 0;
+}
+
+static int mov_read_mvhd(MOVContext *c, AVIOContext *pb,
+                          MOVAtom atom)
+{
+    int version = avio_r8(pb);
+    avio_rb24(pb); /* flags */
+
+    if (version == 1) {
+        avio_rb64(pb); /* creation time */
+        avio_rb64(pb); /* modification time */
+        c->time_scale = avio_rb32(pb);
+        c->duration   = avio_rb64(pb);
+    } else {
+        avio_rb32(pb); /* creation time */
+        avio_rb32(pb); /* modification time */
+        c->time_scale = avio_rb32(pb);
+        c->duration   = avio_rb32(pb);
+    }
+    avio_rb32(pb); /* preferred scale */
+    avio_rb16(pb); /* preferred volume */
+    avio_skip(pb, 10); /* reserved */
+    avio_skip(pb, 36); /* display matrix */
+    avio_rb32(pb); /* preview time */
+    avio_rb32(pb); /* preview duration */
+    avio_rb32(pb); /* poster time */
+    avio_rb32(pb); /* selection time */
+    avio_rb32(pb); /* selection duration */
+    avio_rb32(pb); /* current time */
+    avio_rb32(pb); /* next track ID */
+    return 0;
+}
+
+/* =========================================================
+ * codec registration
+ * ========================================================= */
+
+void avcodec_register_all(void)
+{
+    static int initialized;
+    if (initialized)
+        return;
+    initialized = 1;
+
+    /* video codecs */
+    REGISTER_ENCODER(MPEG1VIDEO,  mpeg1video);
+    REGISTER_ENCODER(MPEG2VIDEO,  mpeg2video);
+    REGISTER_CODEC  (H261,        h261);
+    REGISTER_CODEC  (H263,        h263);
+    REGISTER_ENCODER(H263P,       h263p);
+    REGISTER_CODEC  (H264,        h264);
+    REGISTER_CODEC  (MPEG4,       mpeg4);
+    REGISTER_CODEC  (MSMPEG4V1,   msmpeg4v1);
+    REGISTER_CODEC  (MSMPEG4V2,   msmpeg4v2);
+    REGISTER_CODEC  (MSMPEG4V3,   msmpeg4v3);
+    REGISTER_CODEC  (WMV1,        wmv1);
+    REGISTER_CODEC  (WMV2,        wmv2);
+    REGISTER_CODEC  (RV10,        rv10);
+    REGISTER_CODEC  (RV20,        rv20);
+    REGISTER_CODEC  (SVQ1,        svq1);
+    REGISTER_DECODER(SVQ3,        svq3);
+    REGISTER_DECODER(INDEO3,      indeo3);
+    REGISTER_CODEC  (MJPEG,       mjpeg);
+    REGISTER_DECODER(MJPEGB,      mjpegb);
+    REGISTER_DECODER(HUFFYUV,     huffyuv);
+    REGISTER_ENCODER(FFVHUFF,     ffvhuff);
+    REGISTER_CODEC  (DVVIDEO,     dvvideo);
+
+    /* audio codecs */
+    REGISTER_CODEC  (MP2,         mp2);
+    REGISTER_DECODER(MP3,         mp3);
+    REGISTER_DECODER(MP3ADU,      mp3adu);
+    REGISTER_DECODER(MP3ON4,      mp3on4);
+    REGISTER_CODEC  (AC3,         ac3);
+    REGISTER_DECODER(DTS,         dts);
+    REGISTER_CODEC  (VORBIS,      vorbis);
+    REGISTER_CODEC  (AAC,         aac);
+    REGISTER_CODEC  (WMAV1,       wmav1);
+    REGISTER_CODEC  (WMAV2,       wmav2);
+    REGISTER_CODEC  (FLAC,        flac);
+    REGISTER_DECODER(RA_144,      ra_144);
+    REGISTER_DECODER(RA_288,      ra_288);
+    REGISTER_DECODER(COOK,        cook);
+}`;
+
+// Parse into lines
+const LINES = ALL_CODE.split('\n');
+
+// Format events
+const FMT_EVENTS = [
+  { date: new Date(2001,  1, 14), name: 'MP3 decoder',         file: 'mpegaudiodec.c' },
+  { date: new Date(2001,  3,  8), name: 'MPEG-4 encoder',      file: 'mpeg4video.c'   },
+  { date: new Date(2001,  5, 22), name: 'AC3 / Dolby Digital', file: 'ac3dec.c'       },
+  { date: new Date(2001,  8,  3), name: 'RealVideo RV10',       file: 'rv10.c'         },
+  { date: new Date(2001, 10, 17), name: 'WMV2',                file: 'wmv2dec.c'      },
+  { date: new Date(2002,  0, 29), name: 'H.263 encoder',       file: 'h263.c'         },
+  { date: new Date(2002,  2, 11), name: 'QuickTime / MOV',     file: 'mov.c'          },
+  { date: new Date(2002,  4, 19), name: 'AAC decoder',         file: 'faad.c'         },
+  { date: new Date(2002,  6,  5), name: 'Xvid / MPEG-4 ASP',  file: 'xvid.c'         },
+  { date: new Date(2002,  8, 13), name: 'DV encoder',          file: 'dvenc.c'        },
+  { date: new Date(2002, 10, 27), name: 'Ogg Vorbis',          file: 'oggvorbis.c'    },
+  { date: new Date(2003,  0, 14), name: 'FLAC lossless',       file: 'flacdec.c'      },
+  { date: new Date(2003,  2,  2), name: 'RealAudio RA288',     file: 'ra288.c'        },
+  { date: new Date(2003,  4, 18), name: 'ASF / WMA',           file: 'asfdec.c'       },
+  { date: new Date(2003,  6,  9), name: 'MJPEG encoder',       file: 'mjpegenc.c'     },
+  { date: new Date(2003,  8, 25), name: 'H.264 / AVC',         file: 'h264.c'         },
+  { date: new Date(2003, 10, 11), name: 'Matroska / MKV',      file: 'matroska.c'     },
+];
+
+const DATE_START = new Date(2001, 0, 1).getTime();
+const DATE_END   = new Date(2003, 11, 31).getTime();
+const DUR        = 42; // seconds
+
+// Layout
+const TREE_W  = 340;
+const GUT_W   = 88;
+const TAB_H   = 50;
+const STAT_H  = 36;
+const CODE_X  = TREE_W + GUT_W;
+const CODE_W  = W - CODE_X;
+const CODE_Y  = TAB_H;
+const CODE_H  = H - TAB_H - STAT_H;
+const LINE_H  = 40;
+const FSIZE   = 22;
+const VISIBLE = Math.ceil(CODE_H / LINE_H) + 4;
+
+// Typing state
+// We simulate: total chars typed grows linearly with time
+// Map chars → lines + position within current line
+const TOTAL_CHARS = ALL_CODE.length;
+// Chars per second
+const CPS = TOTAL_CHARS / DUR; // fill entire code over duration
+
+// State
+let running = false, t0 = 0, raf = null;
+let lastFmt = -1, fmtList = [];
+
+// Grain
+const GR = document.createElement('canvas');
+GR.width = 512; GR.height = 512;
+const GX = GR.getContext('2d');
+function mkGrain() {
+  const id = GX.createImageData(512,512);
+  for (let i=0;i<id.data.length;i+=4){
+    const v=Math.random()*16|0; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=255;
+  }
+  GX.putImageData(id,0,0);
+}
+
+const MO = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const DW = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+
+function getDate(p) { return new Date(DATE_START + (DATE_END - DATE_START) * p); }
+
+function checkFmt(p) {
+  const t = DATE_START + (DATE_END - DATE_START) * p;
+  const found = [];
+  for (let i = lastFmt+1; i < FMT_EVENTS.length; i++) {
+    if (FMT_EVENTS[i].date.getTime() <= t) { lastFmt = i; found.push(FMT_EVENTS[i]); }
+  }
+  return found;
+}
+
+// ─── SYNTAX ────────────────────────────────────────────────────────────────
+const KW_RE   = /\b(static|int|void|const|char|unsigned|return|if|else|for|while|struct|typedef|sizeof|NULL|uint8_t|uint32_t|uint16_t|int16_t|int32_t|int64_t|float|double|short)\b/g;
+const TYPE_RE = /\b(MpegEncContext|MpegAudioContext|MPADecodeContext|AC3DecodeContext|Wmv2Context|RVDecContext|MOVContext|MOVAtom|MOVStreamContext|AVCodecContext|AVFormatContext|AVStream|AVIOContext|AVProbeData|GetBitContext|RLTable|DCTELEM|AVCodec|AVPacket|AVLFG)\b/g;
+const STR_RE  = /"[^"]*"/g;
+const CMT_RE  = /\/\*[\s\S]*?\*\/|\/\/.*/g;
+const NUM_RE  = /\b(0x[0-9a-fA-F]+|\d+\.\d*f?|\d+)\b/g;
+const FN_RE   = /\b([a-z_][a-z0-9_]*)\s*(?=\()/g;
+const PP_RE   = /^(\s*#[^\n]*)/gm;
+
+function tokenizeLine(raw) {
+  if (!raw.trim()) return [{text: raw, color: K.plain}];
+  const marks = [];
+  let m;
+  const pairs = [
+    [CMT_RE,  K.cmt],
+    [PP_RE,   K.yDim],
+    [STR_RE,  K.str],
+    [TYPE_RE, K.type],
+    [KW_RE,   K.kw],
+    [FN_RE,   K.fn],
+    [NUM_RE,  K.num],
+  ];
+  for (const [re, color] of pairs) {
+    re.lastIndex = 0;
+    while ((m = re.exec(raw)) !== null) {
+      marks.push({s: m.index, e: m.index+m[0].length, color, text: m[0]});
+    }
+  }
+  marks.sort((a,b) => a.s - b.s);
+  const clean = [];
+  for (const mk of marks) {
+    if (clean.some(u => mk.s < u.e && mk.e > u.s)) continue;
+    clean.push(mk);
+  }
+  clean.sort((a,b) => a.s - b.s);
+  const tokens = [];
+  let pos = 0;
+  for (const mk of clean) {
+    if (mk.s > pos) tokens.push({text: raw.slice(pos, mk.s), color: K.plain});
+    tokens.push({text: mk.text, color: mk.color});
+    pos = mk.e;
+  }
+  if (pos < raw.length) tokens.push({text: raw.slice(pos), color: K.plain});
+  return tokens;
+}
+
+// Precompute all line tokens
+const LINE_TOKENS = LINES.map(l => tokenizeLine(l));
+
+// Given typed char count, compute: which line is being typed (curLine),
+// how many chars of that line are revealed (curLineChars),
+// and how many full lines are done (visibleLines)
+function getTypingState(charsTyped) {
+  let remaining = charsTyped;
+  for (let i = 0; i < LINES.length; i++) {
+    const lineLen = LINES[i].length + 1; // +1 for newline
+    if (remaining <= LINES[i].length) {
+      return { firstLine: Math.max(0, i - VISIBLE + 4), curLine: i, curChars: remaining };
+    }
+    remaining -= lineLen;
+    if (remaining < 0) {
+      return { firstLine: Math.max(0, i - VISIBLE + 4), curLine: i, curChars: LINES[i].length };
+    }
+  }
+  return { firstLine: Math.max(0, LINES.length - VISIBLE + 4), curLine: LINES.length - 1, curChars: LINES[LINES.length-1].length };
+}
+
+// ─── DRAW ──────────────────────────────────────────────────────────────────
+
+function dBg() {
+  X.fillStyle = K.bg; X.fillRect(0,0,W,H);
+}
+
+function dCodeArea(state, ts) {
+  const { firstLine, curLine, curChars } = state;
+
+  X.save();
+  X.beginPath(); X.rect(CODE_X, CODE_Y, CODE_W, CODE_H); X.clip();
+
+  X.font = `400 ${FSIZE}px ${MONO}`;
+  X.textBaseline = 'middle';
+  X.textAlign = 'left';
+
+  for (let vi = 0; vi < VISIBLE; vi++) {
+    const li = firstLine + vi;
+    if (li >= LINES.length) break;
+    const y = CODE_Y + vi * LINE_H + LINE_H / 2;
+    if (y < CODE_Y || y > H - STAT_H) continue;
+
+    const isCurrent = li === curLine;
+    const isFullyTyped = li < curLine;
+
+    if (isCurrent) {
+      // current line highlight
+      X.fillStyle = K.cur;
+      X.fillRect(CODE_X, y - LINE_H/2, CODE_W, LINE_H);
+    }
+
+    const rawLine = LINES[li];
+    const tokens = LINE_TOKENS[li];
+
+    if (isFullyTyped) {
+      // draw full line with syntax colors
+      let tx = CODE_X + 20;
+      for (const tok of tokens) {
+        X.fillStyle = tok.color;
+        X.fillText(tok.text, tx, y);
+        tx += X.measureText(tok.text).width;
+      }
+    } else if (isCurrent) {
+      // draw partial line — only curChars revealed
+      const partial = rawLine.slice(0, curChars);
+      const partialTokens = tokenizeLine(partial);
+      let tx = CODE_X + 20;
+      for (const tok of partialTokens) {
+        X.fillStyle = tok.color;
+        X.fillText(tok.text, tx, y);
+        tx += X.measureText(tok.text).width;
+      }
+      // blinking cursor
+      if (Math.floor(ts / 530) % 2 === 0) {
+        X.fillStyle = K.yellow;
+        X.fillRect(tx + 1, y - 14, 2, 28);
+      }
+    }
+    // future lines: nothing
+  }
+  X.restore();
+}
+
+function dGutter(state) {
+  const { firstLine, curLine } = state;
+  X.fillStyle = '#040404';
+  X.fillRect(TREE_W, CODE_Y, GUT_W, CODE_H);
+  X.fillStyle = '#111111';
+  X.fillRect(TREE_W + GUT_W - 1, CODE_Y, 1, CODE_H);
+
+  X.font = `300 ${FSIZE * 0.72}px ${MONO}`;
+  X.textAlign = 'right'; X.textBaseline = 'middle';
+
+  for (let vi = 0; vi < VISIBLE; vi++) {
+    const li = firstLine + vi;
+    if (li >= LINES.length) break;
+    const y = CODE_Y + vi * LINE_H + LINE_H / 2;
+    if (y < CODE_Y || y > H - STAT_H) continue;
+    X.fillStyle = li === curLine ? '#3a3a3a' : K.lnum;
+    X.fillText(String(li + 1), TREE_W + GUT_W - 14, y);
+  }
+}
+
+function dTree(curFile) {
+  // panel
+  X.fillStyle = '#030303';
+  X.fillRect(0, 0, TREE_W, H);
+  X.fillStyle = '#111';
+  X.fillRect(TREE_W - 1, 0, 1, H);
+
+  // top header
+  X.fillStyle = '#060606';
+  X.fillRect(0, 0, TREE_W, TAB_H);
+  X.fillStyle = '#111';
+  X.fillRect(0, TAB_H - 1, TREE_W, 1);
+
+  // Brand
+  X.font = `900 28px ${DISPLAY}`;
+  X.letterSpacing = '1px';
+  X.fillStyle = K.yellow; X.textAlign = 'left'; X.textBaseline = 'middle';
+  X.fillText('FFmpeg', 20, TAB_H / 2);
+  X.letterSpacing = '0px';
+
+  // EXPLORER label
+  X.font = `600 13px ${DISPLAY}`;
+  X.letterSpacing = '3px';
+  X.fillStyle = '#555555';
+  X.fillText('EXPLORER', 20, TAB_H + 22);
+  X.letterSpacing = '0px';
+
+  const tree = [
+    { n: 'Makefile',         d: 0 },
+    { n: 'configure',        d: 0 },
+    { n: '▾ libavcodec',     d: 0, folder: true },
+    { n: 'avcodec.h',        d: 1 },
+    { n: 'avcodec.c',        d: 1, file: 'avcodec.c' },
+    { n: 'mpegvideo.c',      d: 1, file: 'mpegvideo.c' },
+    { n: 'mpegvideo.h',      d: 1 },
+    { n: 'mpegaudiodec.c',   d: 1, file: 'mpegaudiodec.c' },
+    { n: 'ac3dec.c',         d: 1, file: 'ac3dec.c' },
+    { n: 'h263.c',           d: 1, file: 'h263.c' },
+    { n: 'mpeg4video.c',     d: 1, file: 'mpeg4video.c' },
+    { n: 'wmv2dec.c',        d: 1, file: 'wmv2dec.c' },
+    { n: 'rv10.c',           d: 1, file: 'rv10.c' },
+    { n: 'h264.c',           d: 1, file: 'h264.c' },
+    { n: 'faad.c',           d: 1, file: 'faad.c' },
+    { n: 'flacdec.c',        d: 1, file: 'flacdec.c' },
+    { n: '▾ libavformat',    d: 0, folder: true },
+    { n: 'mov.c',            d: 1, file: 'mov.c' },
+    { n: 'asfdec.c',         d: 1, file: 'asfdec.c' },
+    { n: 'matroska.c',       d: 1, file: 'matroska.c' },
+    { n: 'mpegps.c',         d: 1 },
+    { n: '▾ libavutil',      d: 0, folder: true },
+    { n: 'mem.c',            d: 1 },
+    { n: 'log.c',            d: 1 },
+    { n: 'mathematics.c',    d: 1 },
+  ];
+
+  const added = new Set(fmtList.map(f => f.file));
+  const fresh = fmtList.length ? fmtList[fmtList.length - 1].file : null;
+
+  X.font = `400 19px ${MONO}`;
+  X.textBaseline = 'middle';
+  let fy = TAB_H + 44;
+  for (const f of tree) {
+    const fx = 16 + f.d * 18;
+    const isFresh  = f.file === fresh;
+    const isActive = f.file === curFile;
+    const isAdded  = f.file && added.has(f.file);
+
+    if (isActive || isFresh) {
+      X.fillStyle = 'rgba(255,224,51,0.07)';
+      X.fillRect(0, fy - 12, TREE_W, 24);
+    }
+
+    if (f.folder) {
+      X.fillStyle = '#666666';
+    } else if (isActive) {
+      X.fillStyle = K.yellow;
+    } else if (isFresh) {
+      X.fillStyle = '#b0b0b0';
+    } else if (isAdded) {
+      X.fillStyle = '#606060';
+    } else {
+      X.fillStyle = '#3a3a3a';
+    }
+
+    X.textAlign = 'left';
+    X.fillText(f.n, fx, fy);
+    fy += 30;
+    if (fy > H - STAT_H - 140) break;
+  }
+
+  // format list at bottom of panel
+  dFmtList();
+}
+
+function dFmtList() {
+  const show = Math.min(fmtList.length, 11);
+  if (show === 0) return;
+  const lh = 24;
+  const ly0 = H - STAT_H - 12;
+
+  X.font = `300 16px ${MONO}`;
+  X.textBaseline = 'middle';
+  for (let i = 0; i < show; i++) {
+    const f = fmtList[fmtList.length - show + i];
+    const y = ly0 - (show - 1 - i) * lh;
+    const isFresh = i === show - 1;
+    X.textAlign = 'left';
+    if (isFresh) {
+      X.fillStyle = K.yellow;
+      X.fillText('+ ' + f.name, 16, y);
+    } else {
+      X.fillStyle = '#484848';
+      X.fillText('  ' + f.name, 16, y);
+    }
+  }
+}
+
+function dTabs(curFile) {
+  X.fillStyle = '#030303';
+  X.fillRect(TREE_W, 0, W - TREE_W, TAB_H);
+  X.fillStyle = '#101010';
+  X.fillRect(TREE_W, TAB_H - 1, W - TREE_W, 1);
+
+  const tw = 280, tx = TREE_W + 4;
+  X.fillStyle = K.bg;
+  X.fillRect(tx, 0, tw, TAB_H);
+  X.fillStyle = K.yellow;
+  X.fillRect(tx, 0, tw, 2);
+
+  X.font = `400 20px ${MONO}`;
+  X.textBaseline = 'middle'; X.textAlign = 'left';
+  X.fillStyle = K.white;
+  X.fillText(curFile, tx + 16, TAB_H / 2);
+
+  // unsaved dot
+  X.fillStyle = K.yellow;
+  X.beginPath(); X.arc(tx + tw - 14, TAB_H / 2, 4, 0, Math.PI * 2); X.fill();
+
+  // breadcrumb right
+  X.font = `300 17px ${MONO}`;
+  X.fillStyle = '#505050';
+  X.textAlign = 'right';
+  X.fillText('ffmpeg  ›  libavcodec  ›  ' + curFile, W - 32, TAB_H / 2);
+}
+
+function dStatus(date, prog, commits) {
+  const sy = H - STAT_H;
+  X.fillStyle = '#040404';
+  X.fillRect(0, sy, W, STAT_H);
+  X.fillStyle = '#101010';
+  X.fillRect(0, sy, W, 1);
+
+  // yellow branch pill
+  const bw = 170;
+  X.fillStyle = K.yellow;
+  X.fillRect(TREE_W, sy, bw, STAT_H);
+  X.font = `700 17px ${MONO}`;
+  X.fillStyle = '#000';
+  X.textBaseline = 'middle'; X.textAlign = 'left';
+  X.fillText('⎇  main', TREE_W + 12, sy + STAT_H / 2);
+
+  X.font = `300 17px ${MONO}`;
+  X.fillStyle = '#a08820';
+  X.fillText(commits + ' commits', TREE_W + bw + 18, sy + STAT_H / 2);
+
+  X.textAlign = 'right';
+  X.fillStyle = '#555555';
+  X.fillText('Fabrice Bellard  ·  C  ·  UTF-8  ·  LF', W - 28, sy + STAT_H / 2);
+}
+
+function dDate(date, prog) {
+  const bw = 380, bh = 162;
+  const bx = W - bw - 40, by = TAB_H + 24;
+
+  X.fillStyle = 'rgba(0,0,0,0.94)';
+  X.fillRect(bx, by, bw, bh);
+  X.fillStyle = K.yellow;
+  X.fillRect(bx, by, 3, bh);
+
+  X.font = `600 18px ${DISPLAY}`;
+  X.letterSpacing = '4px';
+  X.fillStyle = K.yDim;
+  X.textAlign = 'left'; X.textBaseline = 'alphabetic';
+  X.fillText(DW[date.getDay()], bx + 20, by + 38);
+  X.letterSpacing = '0px';
+
+  X.font = `900 100px ${DISPLAY}`;
+  X.fillStyle = K.white;
+  X.fillText(String(date.getDate()).padStart(2, '0'), bx + 14, by + bh - 14);
+
+  X.font = `300 28px ${DISPLAY}`;
+  X.letterSpacing = '2px';
+  X.fillStyle = K.yellow;
+  X.textAlign = 'right';
+  X.fillText(MO[date.getMonth()], bx + bw - 18, by + 46);
+  X.letterSpacing = '0px';
+
+  X.font = `700 48px ${DISPLAY}`;
+  X.fillStyle = '#2e2e2e';
+  X.fillText(String(date.getFullYear()), bx + bw - 16, by + bh - 14);
+
+  // Progress bar
+  X.fillStyle = '#0c0c0c'; X.fillRect(bx + 3, by + bh - 4, bw - 3, 4);
+  X.fillStyle = K.yellow; X.fillRect(bx + 3, by + bh - 4, (bw - 3) * prog, 4);
+}
+
+function dGrain(elapsed) {
+  mkGrain();
+  X.globalAlpha = 0.022 + 0.008 * Math.sin(elapsed * 11.3);
+  X.globalCompositeOperation = 'screen';
+  for (let tx = 0; tx < W; tx += 512)
+    for (let ty = 0; ty < H; ty += 512)
+      X.drawImage(GR, 0, 0, 512, 512, tx, ty, 512, 512);
+  X.globalAlpha = 1;
+  X.globalCompositeOperation = 'source-over';
+}
+
+function getCurFile(p) {
+  const t = DATE_START + (DATE_END - DATE_START) * p;
+  for (let i = FMT_EVENTS.length - 1; i >= 0; i--)
+    if (FMT_EVENTS[i].date.getTime() <= t) return FMT_EVENTS[i].file;
+  return 'mpegvideo.c';
+}
+
+// ─── MAIN LOOP ──────────────────────────────────────────────────────────────
+
+function frame(ts) {
+  if (!running) return;
+  const elapsed  = (ts - t0) / 1000;
+  const prog     = Math.min(elapsed / DUR, 1);
+  const charsTyped = Math.min(Math.floor(elapsed * CPS), TOTAL_CHARS);
+
+  const newFmts = checkFmt(prog);
+  for (const f of newFmts) fmtList.push(f);
+
+  const state    = getTypingState(charsTyped);
+  const date     = getDate(prog);
+  const commits  = Math.round(prog * 3200);
+  const curFile  = getCurFile(prog);
+
+  dBg();
+  dCodeArea(state, ts);
+  dGutter(state);
+  dTree(curFile);
+  dTabs(curFile);
+  dStatus(date, prog, commits);
+  dDate(date, prog);
+  dGrain(elapsed);
+
+  if (prog < 1) raf = requestAnimationFrame(frame);
+}
+
+function reset() {
+  if (raf) cancelAnimationFrame(raf);
+  running = false; lastFmt = -1; fmtList = [];
+  const state = { firstLine: 0, curLine: 0, curChars: 0 };
+  dBg();
+  dCodeArea(state, 0);
+  dGutter(state);
+  dTree('mpegvideo.c');
+  dTabs('mpegvideo.c');
+  dStatus(getDate(0), 0, 0);
+  dDate(getDate(0), 0);
+}
+
+function start() {
+  reset();
+  running = true; t0 = performance.now();
+  raf = requestAnimationFrame(frame);
+}
+
+document.addEventListener('keydown', e => {
+  if (['r','R','к','К'].includes(e.key)) start();
+});
+
+document.fonts.ready.then(reset);
+</script>
+</body>
+</html>

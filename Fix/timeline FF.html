@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>FFmpeg Timeline</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#08080a;width:2560px;height:1440px;overflow:hidden;font-family:'IBM Plex Mono',monospace;user-select:none}
+canvas{position:absolute;top:0;left:0;width:2560px;height:1440px}
+#filters{position:absolute;top:28px;left:50%;transform:translateX(-50%);display:flex;gap:12px;z-index:20;transition:opacity .4s,transform .4s}
+#filters.hidden{opacity:0;transform:translateX(-50%) translateY(-60px);pointer-events:none}
+.fb{font-family:'Oswald',sans-serif;font-weight:600;font-size:24px;letter-spacing:1.5px;text-transform:uppercase;padding:10px 28px;border:2px solid rgba(255,255,255,.12);background:rgba(255,255,255,.02);color:rgba(255,255,255,.35);cursor:pointer;transition:all .3s}
+.fb:hover{border-color:rgba(255,255,255,.5);color:rgba(255,255,255,.8)}
+.fb.on[data-f="all"]{border-color:#fff;color:#fff;background:rgba(255,255,255,.1);text-shadow:0 0 24px rgba(255,255,255,.6)}
+.fb.on[data-f="patents"]{border-color:#ff4455;color:#fff;background:rgba(255,68,85,.18);text-shadow:0 0 24px #ff4455}
+.fb.on[data-f="bellard"]{border-color:#00ccff;color:#fff;background:rgba(0,204,255,.15);text-shadow:0 0 24px #00ccff}
+.fb.on[data-f="ffmpeg"]{border-color:#44dd66;color:#fff;background:rgba(68,221,102,.15);text-shadow:0 0 24px #44dd66}
+#hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:16px;color:rgba(255,255,255,.18);letter-spacing:2px;z-index:20;white-space:nowrap}
+</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<div id="filters">
+  <button class="fb on" data-f="all">ВСЕ СОБЫТИЯ</button>
+  <button class="fb" data-f="patents">ПАТЕНТНЫЕ ВОЙНЫ</button>
+  <button class="fb" data-f="bellard">БЕЛЛАР</button>
+  <button class="fb" data-f="ffmpeg">ИСТОРИЯ FFMPEG</button>
+</div>
+<div id="hint">ПРОБЕЛ — далее &nbsp;│&nbsp; Q — анимация &nbsp;│&nbsp; F — обзор &nbsp;│&nbsp; TAB — фильтры &nbsp;│&nbsp; R — сброс</div>
+
+<script>
+const EV = [
+  {year:1999,   t:"Трейлер «Скрытой угрозы»",d:"Эксклюзив QuickTime\n1M+ скачиваний за сутки",cat:["patents"],col:"#ff6633"},
+  {year:1999.1, t:"Скандал RealPlayer",       d:"Тайная слежка за пользователями\nПервый крупный скандал эпохи",cat:["patents"],col:"#ff3355"},
+  {year:1999.3, t:"Жером Рота → DivX",        d:"Взлом кодека Microsoft за неделю\nКодек расходится сам",cat:["patents"],col:"#ff6633"},
+  {year:1988,   t:"Основание MPEG",           d:"Кьяриглионе и Ясуда\n15 человек в Оттаве",cat:["patents"],col:"#ff3355"},
+  {year:1993,   t:"MPEG-1",                   d:"CD-ROM, ранний интернет\nПервое сжатие видео+стерео",cat:["patents"],col:"#ff4466"},
+  {year:1995,   t:"MPEG-2",                   d:"DVD, цифровое ТВ, спутник\nФундамент видео на десятилетие",cat:["patents"],col:"#ff4466"},
+  {year:1998,   t:"MPEG-4 / H.264",           d:"Эпоха интернета. MP4\nОснова видео в сети",cat:["patents"],col:"#ff4466"},
+  {year:1987,   t:"CompuServe создаёт GIF",   d:"Алгоритм LZW запатентован Unisys\nНи одна сторона не знает",cat:["patents"],col:"#ff3355"},
+  {year:1999.2, t:"Unisys vs GIF",            d:"$5000 с некоммерческих сайтов\n«Burn All GIFs Day» → PNG",cat:["patents"],col:"#ff3355"},
+  {year:2003,   t:"Патент на GIF истекает",    d:"Никакой победы —\nпросто закончился срок",cat:["patents"],col:"#ff5544"},
+  {year:2002,   t:"Forgent vs JPEG",          d:"Патент пролежал 15 лет\n$105M с 30 компаний",cat:["patents"],col:"#ff3355"},
+  {year:2009,   t:"Microsoft vs патент MP3",  d:"$1.52 млрд за технологию\nза которую уже заплатили",cat:["patents"],col:"#ff3355"},
+  {year:1989,   t:"Беллар пишет LZEXE",       d:"17 лет. Amstrad PC1512\nИгровые компании берут",cat:["bellard"],col:"#00ccff"},
+  {year:1995.1, t:"Формула Беллара",           d:"BBP на 43% быстрее\n2.7 трлн знаков π дома",cat:["bellard"],col:"#00bbee"},
+  {year:2000,   t:"IOCCC — простое число",     d:"Вся программа на одном экране\nМесяцы вычислений",cat:["bellard"],col:"#00ccff"},
+  {year:2001,   t:"IOCCC — TinyCC",            d:"Компилятор C в 3 КБ\nОбычно — мегабайты и годы",cat:["bellard"],col:"#00bbee"},
+  {year:2003.1, t:"QEMU",                      d:"ОС внутри ОС\nФундамент AWS, Google Cloud",cat:["bellard"],col:"#00ccff"},
+  {year:2000.1, t:"Беллар создаёт FFmpeg",     d:"Хочет смотреть ТВ на Linux\nFast Forward MPEG. C + ASM",cat:["bellard","ffmpeg"],col:"#ffcc00"},
+  {year:2000.2, t:"Код на SourceForge",        d:"Декабрь. Псевдоним Gerard Lantau",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2001.1, t:"VLC + FFmpeg",              d:"FFmpeg внутри. Открывает\nвсё без кодек-паков",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2003.2, t:"Xvid — бунт против DivX",  d:"Открытый форк\nDivX продан за $323M",cat:["patents","ffmpeg"],col:"#ff9933"},
+  {year:2004,   t:"Нидермайер — лидер",        d:"Беллар уходит к QEMU\nКод каждый день, без выходных",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2005,   t:"YouTube берёт FFmpeg",      d:"Трое из PayPal\nВсе форматы → единый поток",cat:["ffmpeg"],col:"#55ee77"},
+  {year:2006,   t:"Google Summer of Code",     d:"Студенты всего мира\nДесятки новых форматов",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2008,   t:"Система фильтров",          d:"Обрезка, масштаб, стабилизация\nВсё в одной программе",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2010,   t:"VP8: FFmpeg > Google",       d:"Декодер добровольцев быстрее\nGoogle берёт код FFmpeg",cat:["ffmpeg"],col:"#55ee77"},
+  {year:2011,   t:"Раскол FFmpeg / Libav",     d:"Мятежники захватывают сайт\nБеллар возвращает домен",cat:["ffmpeg"],col:"#ff3355"},
+  {year:2013,   t:"Открытый декодер HEVC",     d:"H.265 — новый стандарт\nРеализован в FFmpeg",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2013.1, t:"Поддержка VP9",             d:"Открытый кодек Google\nАльтернатива HEVC",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2015,   t:"Ubuntu/Debian → FFmpeg",    d:"Возвращаются к оригиналу",cat:["ffmpeg"],col:"#55ee77"},
+  {year:2020,   t:"Libav мёртв",               d:"Официально заброшен",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2015.1, t:"Нидермайер уходит",         d:"14 лет в проекте\n11 лет лидером",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2016,   t:"FFmpeg 3.0 «Эйнштейн»",    d:"",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2018,   t:"Поддержка AV1",             d:"Лучшее качество\nменьший размер",cat:["ffmpeg"],col:"#55ee77"},
+  {year:2021.1, t:"JPEG XL, AVIF",             d:"Новые форматы изображений",cat:["ffmpeg"],col:"#44dd66"},
+  {year:2025,   t:"FFmpeg 8.0 «Хаффман»",      d:"GPU, распознавание речи\n25 лет разработки",cat:["ffmpeg","bellard"],col:"#ffcc00"},
+  {year:2021,   t:"FFmpeg на Марсе",           d:"Perseverance. Код Беллара\nСнимки с другой планеты",cat:["ffmpeg","bellard"],col:"#ffcc00"},
+  {year:2011.1, t:"JSLinux",                   d:"Linux во вкладке браузера\nЭмулятор x86 на JavaScript",cat:["bellard"],col:"#00ccff"},
+  {year:2012,   t:"Amarisoft",                 d:"Базовая станция 4G в софте\n60+ стран",cat:["bellard"],col:"#00bbee"},
+  {year:2019,   t:"QuickJS",                   d:"Движок JS. <400 КБ\n~100% тестов стандарта",cat:["bellard"],col:"#00ccff"},
+  {year:2021.2, t:"NNCP #1",                   d:"Сжатие нейросетями\n1-е место в бенчмарке",cat:["bellard"],col:"#00bbee"},
+  {year:2023,   t:"ts_zip",                    d:"Сжатие текста через LLM",cat:["bellard"],col:"#00ccff"},
+  {year:2024,   t:"TSAC",                      d:"Стерео при 7.5 кбит/с\nMP3: 128–320. В 20–40× сильнее",cat:["bellard"],col:"#00ccff"},
+];
+
+const chronoOrder = EV.map((_,i)=>i).sort((a,b)=>EV[a].year-EV[b].year);
+
+const C = document.getElementById('c');
+const ctx = C.getContext('2d');
+const W = 2560, H = 1440;
+
+// === STATE: Set-based reveal ===
+let revealed = new Set();  // which event indices are visible
+let lastRevealed = -1;     // most recently revealed (for highlight)
+let filter = 'all';
+let sx = 0, tsx = 0;
+let parts = [], glitch = 0, cardAT = {};
+let zoomOut = false, zoomLevel = 0, targetZoomLevel = 0;
+let filtersVis = true;
+let autoplay = false, autoTimer = 0, autoChronoIdx = 0;
+const AUTO_DELAY = 600;
+
+// === NORMAL MODE (1.1x fonts) ===
+const TY = 780, ML = 200, MR = 200, MINY = 1987, MAXY = 2025;
+const CARD_W = 400, CARD_PAD = 16;
+const FY=37, FT=29, FD=19; // 1.1x of 34,26,17
+const TIT_Y=35, DSC_Y=62, DSC_L=24, YW=86; // adjusted for bigger fonts
+function cardH(ev){if(!ev.d)return 52; return DSC_Y+ev.d.split('\n').length*DSC_L+8;}
+
+// === OVERVIEW (1.1x fonts) ===
+const OV_TY=720, OV_ML=180, OV_MR=180, OV_CW=260, OV_PAD=10;
+const OFY=24, OFT=19, OFD=13; // 1.1x of 22,17,12
+const OTY=24, ODY=44, ODL=17, OYW=62;
+function ovH(ev){if(!ev.d)return 34; return ODY+ev.d.split('\n').length*ODL+6;}
+
+const TW=Math.max(W,(MAXY-MINY)*135+ML+MR);
+function yearToX(yr){const b=Math.floor(yr),f=yr-b;return ML+(b-MINY+f*.3)/(MAXY-MINY)*(TW-ML-MR);}
+function ovX(yr){const b=Math.floor(yr),f=yr-b;return OV_ML+(b-MINY+f*.3)/(MAXY-MINY)*(W-OV_ML-OV_MR);}
+
+function getFiltered(){const o=[];revealed.forEach(i=>{if(filter==='all'||EV[i].cat.includes(filter))o.push(i);});return o;}
+
+// === CACHED LAYOUTS ===
+let cache={},cacheP={},ovCa={},ovCaP={};
+function mkC(){cache={};cacheP={};ovCa={};ovCaP={};for(const f of['all','patents','bellard','ffmpeg']){cache[f]={};cacheP[f]=[];ovCa[f]={};ovCaP[f]=[];}}
+mkC();
+
+const AG=32,BG=50,RG=6,hw=CARD_W/2;
+function plN(i,fk){
+  if(cache[fk][i])return;const ev=EV[i],x=yearToX(ev.year),h=cardH(ev),pl=cacheP[fk],cs=[];
+  for(let r=0;r<20;r++){cs.push(-(AG+h+r*(h+RG)));cs.push(BG+r*(h+RG));}
+  let best=cs[0];for(const cy of cs){const t={l:x-hw-4,r:x+hw+4,t:TY+cy-2,b:TY+cy+h+2};if(!pl.some(p=>t.l<p.r&&t.r>p.l&&t.t<p.b&&t.b>p.t)){best=cy;break;}}
+  pl.push({l:x-hw-4,r:x+hw+4,t:TY+best-2,b:TY+best+h+2});cache[fk][i]={x,y:TY+best,h};
+}
+const OA=24,OB=36,OR=4,ohw=OV_CW/2;
+function plO(i,fk){
+  if(ovCa[fk][i])return;const ev=EV[i],x=ovX(ev.year),h=ovH(ev),pl=ovCaP[fk],cs=[];
+  for(let r=0;r<20;r++){cs.push(-(OA+h+r*(h+OR)));cs.push(OB+r*(h+OR));}
+  let best=cs[0];for(const cy of cs){const t={l:x-ohw-3,r:x+ohw+3,t:OV_TY+cy-2,b:OV_TY+cy+h+2};if(!pl.some(p=>t.l<p.r&&t.r>p.l&&t.t<p.b&&t.b>p.t)){best=cy;break;}}
+  pl.push({l:x-ohw-3,r:x+ohw+3,t:OV_TY+best-2,b:OV_TY+best+h+2});ovCa[fk][i]={x,y:OV_TY+best,h};
+}
+function ensureAll(){revealed.forEach(i=>{if(filter==='all'||EV[i].cat.includes(filter)){plN(i,filter);plO(i,filter);}});}
+
+// Grain
+const gC=document.createElement('canvas');gC.width=gC.height=512;const gX=gC.getContext('2d');
+function mkG(){const d=gX.createImageData(512,512);for(let i=0;i<d.data.length;i+=4){const v=Math.random()*30;d.data[i]=d.data[i+1]=d.data[i+2]=v;d.data[i+3]=255;}gX.putImageData(d,0,0);}
+
+function spP(x,y,col,n){for(let i=0;i<n;i++)parts.push({x,y,vx:(Math.random()-.5)*14,vy:(Math.random()-.5)*14,life:1,dec:.005+Math.random()*.015,sz:2+Math.random()*4,col});}
+function tP(){for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vx*=.96;p.vy*=.96;p.life-=p.dec;if(p.life<=0)parts.splice(i,1);}}
+
+function revealEvent(evIdx){
+  revealed.add(evIdx);
+  cardAT[evIdx]=performance.now();
+  lastRevealed=evIdx;
+  ensureAll();
+  const ex=yearToX(EV[evIdx].year);
+  tsx=Math.max(0,Math.min(ex-W/2,TW-W));
+  glitch=8;spP(ex,TY,EV[evIdx].col,60);
+}
+
+// UI
+document.querySelectorAll('.fb').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.fb').forEach(x=>x.classList.remove('on'));b.classList.add('on');filter=b.dataset.f;
+}));
+
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'){
+    e.preventDefault();autoplay=false;if(zoomOut)return;
+    // Find next unrevealed event in text order matching filter
+    for(let i=0;i<EV.length;i++){
+      if(revealed.has(i))continue;
+      if(filter==='all'||EV[i].cat.includes(filter)){revealEvent(i);break;}
+    }
+  }
+  if(e.code==='KeyQ'){
+    e.preventDefault();
+    if(autoplay){autoplay=false;return;}
+    autoplay=true;autoTimer=performance.now();autoChronoIdx=0;
+    // Full reset
+    revealed=new Set();lastRevealed=-1;sx=0;tsx=0;parts=[];glitch=0;cardAT={};mkC();
+  }
+  if(e.code==='KeyF'){zoomOut=!zoomOut;targetZoomLevel=zoomOut?1:0;}
+  if(e.code==='Tab'){e.preventDefault();filtersVis=!filtersVis;document.getElementById('filters').classList.toggle('hidden',!filtersVis);}
+  if(e.code==='KeyR'||e.code==='KeyK'||e.key==='к'||e.key==='К'){
+    revealed=new Set();lastRevealed=-1;sx=0;tsx=0;parts=[];glitch=0;cardAT={};
+    zoomOut=false;targetZoomLevel=0;zoomLevel=0;autoplay=false;mkC();
+  }
+});
+
+function rgb(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)].join(',');}
+function rrect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+
+function drawCards(now,t,posMap,filtered,cw,pad,fYr,fTt,fDs,titY,dscY,dscL,yrW,timeY,isOv){
+  if(filtered.length===0)return;
+  for(let pass=0;pass<2;pass++){
+    for(const fi of filtered){
+      const isNew=fi===lastRevealed&&!zoomOut&&!isOv;
+      if(pass===0&&isNew)continue;if(pass===1&&!isNew)continue;
+      const p=posMap[fi];if(!p)continue;
+      const ev=EV[fi],elapsed=(now-(cardAT[fi]||0))/1000,anim=Math.min(1,elapsed*3.5);
+      if(anim<=0)continue;
+      const dim=isNew?1:.75,a=anim,lx=p.x-cw/2;
+      let ox=0,oy=0;if(isNew&&glitch>0){ox=(Math.random()-.5)*14;oy=(Math.random()-.5)*10;}
+
+      ctx.save();ctx.globalAlpha=.4*a*dim;ctx.strokeStyle=ev.col;ctx.lineWidth=isOv?1:1.5;
+      ctx.setLineDash([4,6]);ctx.beginPath();ctx.moveTo(p.x,timeY);ctx.lineTo(p.x,p.y+(p.y<timeY?p.h:0));ctx.stroke();ctx.setLineDash([]);ctx.restore();
+
+      ctx.beginPath();ctx.arc(p.x,timeY,isNew?8:(isOv?3:5),0,Math.PI*2);
+      ctx.fillStyle=`rgba(${rgb(ev.col)},${a*dim})`;ctx.fill();
+      if(isNew){ctx.beginPath();ctx.arc(p.x,timeY,14+Math.sin(t*5)*3,0,Math.PI*2);ctx.strokeStyle=`rgba(${rgb(ev.col)},.35)`;ctx.lineWidth=2;ctx.stroke();}
+
+      ctx.save();ctx.globalAlpha=a;
+      if(isNew&&anim<1){const s=.82+anim*.18;ctx.translate(p.x+ox,p.y+p.h/2+oy);ctx.scale(s,s);ctx.translate(-(p.x+ox),-(p.y+p.h/2+oy));}
+
+      const[cr,cg,cb]=rgb(ev.col).split(',');
+      ctx.fillStyle=`rgba(${Math.round(cr*.08+10)},${Math.round(cg*.08+10)},${Math.round(cb*.08+14)},${.95*dim})`;
+      ctx.strokeStyle=`rgba(${rgb(ev.col)},${(isNew?.9:.4)*dim})`;ctx.lineWidth=isNew?3:(isOv?1:1.5);
+      rrect(lx+ox,p.y+oy,cw,p.h,isOv?3:4);ctx.fill();ctx.stroke();
+
+      ctx.fillStyle=`rgba(${rgb(ev.col)},${(isNew?1:.6)*dim})`;
+      ctx.fillRect(lx+ox,p.y+oy+(isOv?2:3),isOv?3:4,p.h-(isOv?4:6));
+
+      ctx.font=`700 ${fYr}px "Oswald"`;ctx.fillStyle=ev.col;ctx.globalAlpha=a*dim;ctx.textAlign='left';
+      ctx.fillText(Math.floor(ev.year),lx+pad+ox,p.y+titY+oy);
+
+      ctx.font=`600 ${fTt}px "Oswald"`;ctx.fillStyle='#fff';ctx.globalAlpha=a*dim;
+      let title=ev.t;while(ctx.measureText(title).width>cw-pad*2-yrW&&title.length>5)title=title.slice(0,-1);
+      if(title!==ev.t)title+='…';ctx.fillText(title,lx+pad+yrW+ox,p.y+titY+oy);
+
+      if(ev.d){ctx.font=`400 ${fDs}px "IBM Plex Mono"`;ctx.fillStyle=`rgba(255,255,255,${.55*dim})`;ctx.globalAlpha=a;
+        ev.d.split('\n').forEach((ln,li)=>{ctx.fillText(ln,lx+pad+ox,p.y+dscY+li*dscL+oy);});}
+
+      if(isNew){ctx.save();ctx.shadowColor=ev.col;ctx.shadowBlur=45;ctx.globalAlpha=.2*a;ctx.strokeStyle=ev.col;ctx.lineWidth=2;rrect(lx,p.y,cw,p.h,4);ctx.stroke();ctx.restore();}
+      ctx.restore();
+    }
+  }
+}
+
+let lastT=0,grainT=0;
+
+function draw(now){
+  const dt=Math.min(.05,(now-lastT)/1000);lastT=now;const t=now/1000;
+  sx+=(tsx-sx)*.08;zoomLevel+=(targetZoomLevel-zoomLevel)*.08;
+  tP();grainT+=dt;if(grainT>.07){mkG();grainT=0;}
+
+  // Autoplay
+  if(autoplay&&now-autoTimer>AUTO_DELAY){
+    autoTimer=now;
+    while(autoChronoIdx<chronoOrder.length){
+      const ci=chronoOrder[autoChronoIdx];autoChronoIdx++;
+      if(filter==='all'||EV[ci].cat.includes(filter)){revealEvent(ci);break;}
+    }
+    if(autoChronoIdx>=chronoOrder.length)autoplay=false;
+  }
+
+  ctx.fillStyle='#08080a';ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.globalAlpha=.035;ctx.strokeStyle='#fff';ctx.lineWidth=1;
+  for(let x=-sx%100;x<W;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=100){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  ctx.restore();
+
+  ensureAll();const filtered=getFiltered();const isOv=zoomLevel>.5;
+
+  if(!isOv){
+    ctx.save();ctx.translate(-sx,0);
+    ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.moveTo(ML-100,TY);ctx.lineTo(TW-MR+100,TY);ctx.stroke();
+    ctx.save();ctx.shadowColor='rgba(255,255,255,.15)';ctx.shadowBlur=12;ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=4;
+    ctx.beginPath();ctx.moveTo(ML-100,TY);ctx.lineTo(TW-MR+100,TY);ctx.stroke();ctx.restore();
+    for(let yr=MINY;yr<=MAXY;yr++){
+      const x=yearToX(yr),big=yr%5===0;
+      ctx.strokeStyle=`rgba(255,255,255,${big?.35:.12})`;ctx.lineWidth=big?2:1;
+      ctx.beginPath();ctx.moveTo(x,TY-(big?18:9));ctx.lineTo(x,TY+(big?18:9));ctx.stroke();
+      ctx.fillStyle=`rgba(255,255,255,${big?.4:.22})`;ctx.font=`${big?'600':'400'} ${big?26:19}px "Oswald"`;ctx.textAlign='center';ctx.fillText(yr,x,TY+46);
+    }
+    drawCards(now,t,cache[filter],filtered,CARD_W,CARD_PAD,FY,FT,FD,TIT_Y,DSC_Y,DSC_L,YW,TY,false);
+    ctx.save();for(const p of parts){ctx.globalAlpha=p.life*.85;ctx.fillStyle=p.col;ctx.fillRect(p.x-p.sz/2,p.y-p.sz/2,p.sz,p.sz);}ctx.restore();
+    ctx.restore();
+  }else{
+    ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(OV_ML-40,OV_TY);ctx.lineTo(W-OV_MR+40,OV_TY);ctx.stroke();
+    for(let yr=MINY;yr<=MAXY;yr++){
+      const x=ovX(yr),big=yr%5===0;
+      ctx.strokeStyle=`rgba(255,255,255,${big?.3:.1})`;ctx.lineWidth=big?2:1;
+      ctx.beginPath();ctx.moveTo(x,OV_TY-(big?12:6));ctx.lineTo(x,OV_TY+(big?12:6));ctx.stroke();
+      ctx.fillStyle=`rgba(255,255,255,${big?.35:.18})`;ctx.font=`${big?'600':'400'} ${big?18:13}px "Oswald"`;ctx.textAlign='center';ctx.fillText(yr,x,OV_TY+30);
+    }
+    drawCards(now,t,ovCa[filter],filtered,OV_CW,OV_PAD,OFY,OFT,OFD,OTY,ODY,ODL,OYW,OV_TY,true);
+  }
+
+  ctx.save();ctx.globalAlpha=.05;ctx.globalCompositeOperation='screen';
+  for(let x=0;x<W;x+=512)for(let y=0;y<H;y+=512)ctx.drawImage(gC,x,y);ctx.restore();
+
+  if(glitch>0){glitch--;ctx.save();const sy=Math.random()*H,sh=5+Math.random()*40;ctx.globalCompositeOperation='screen';ctx.globalAlpha=.15;ctx.drawImage(C,0,sy,W,sh,(Math.random()-.5)*10,sy,W,sh);ctx.globalAlpha=.1;ctx.fillStyle='#ff0040';ctx.fillRect(0,sy,W,sh);ctx.restore();}
+
+  ctx.font='400 22px "IBM Plex Mono"';ctx.fillStyle='rgba(255,255,255,.22)';ctx.textAlign='right';
+  const fTot=filter==='all'?EV.length:EV.filter(e=>e.cat.includes(filter)).length;
+  ctx.fillText(`${filtered.length} / ${fTot}`,W-40,H-40);
+  if(autoplay){ctx.font='600 22px "Oswald"';ctx.fillStyle='rgba(255,255,255,.3)';ctx.textAlign='left';ctx.fillText('▶ AUTOPLAY',40,H-40);}
+
+  requestAnimationFrame(draw);
+}
+
+mkG();requestAnimationFrame(draw);
+</script>
+</body>
+</html>

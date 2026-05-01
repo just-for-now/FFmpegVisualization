@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Barlow+Condensed:wght@300;400;700;900&display=swap" rel="stylesheet">
+<style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#000;overflow:hidden;width:2560px;height:1440px;}canvas{display:block;}</style>
+</head>
+<body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<script>
+const CV = document.getElementById('c');
+const X  = CV.getContext('2d');
+const W = 2560, H = 1440;
+const MONO    = '"JetBrains Mono", monospace';
+const DISPLAY = '"Barlow Condensed", sans-serif';
+
+// Each student gets a unique accent colour — muted, not garish
+const STUDENTS = [
+  {
+    name: 'Reimar Döffinger',
+    country: 'Germany',
+    flag: '🇩🇪',
+    accent: '#c8a84b',   // amber
+    file: 'libavcodec/snow.c',
+    year: 2006,
+    code: `/*
+ * Snow wavelet video codec
+ * Copyright (c) 2004-2006 Michael Niedermayer
+ * GSoC 2006: Reimar Döffinger
+ */
+
+#include "avcodec.h"
+#include "snow.h"
+#include "rangecoder.h"
+
+#define QSHIFT 5
+#define QROOT  (1 << QSHIFT)
+#define LOSSLESS_QLOG -128
+
+typedef struct SubBand {
+    int level, stride, width, height;
+    int qlog;
+    DWTELEM *buf, *ibuf;
+    struct SubBand *parent;
+    uint8_t state[7 + 512][32];
+} SubBand;
+
+static av_cold int snow_encode_init(AVCodecContext *avctx)
+{
+    SnowContext *s = avctx->priv_data;
+
+    s->avctx = avctx;
+    s->current_picture.data[0] = NULL;
+
+    if (avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
+        av_log(avctx, AV_LOG_ERROR,
+               "Snow is experimental, add "
+               "'-strict experimental' to enable\\n");
+        return AVERROR(EINVAL);
+    }
+
+    ff_dsputil_init(&s->dsp, avctx);
+    ff_dwt_init(&s->dwt);
+
+    s->max_ref_frames = 1;
+    if (avctx->refs > 0)
+        s->max_ref_frames = FFMIN(avctx->refs, MAX_REF_FRAMES);
+
+    s->spatial_decomposition_type = 2;
+    s->spatial_decomposition_count = 5;
+    s->mv_scale = (avctx->width > 352 || avctx->height > 288) ? 2 : 1;
+    s->block_max_depth = (avctx->width > 352 || avctx->height > 288) ? 1 : 0;
+
+    for (int plane = 0; plane < 3; plane++) {
+        s->plane[plane].diag_mc = 1;
+        s->plane[plane].htaps   = 6;
+        s->plane[plane].hcoeff[0] =  40;
+        s->plane[plane].hcoeff[1] = -10;
+        s->plane[plane].hcoeff[2] =   2;
+        s->plane[plane].fast_mc   = 1;
+    }
+
+    ff_snow_alloc_blocks(s);
+
+    s->version = 0;
+    s->qlog    = -(1 << QSHIFT);
+    s->lambda  = avctx->global_quality * avctx->bit_rate
+                 / (avctx->width * avctx->height * 8.0 * avctx->time_base.num)
+                 / avctx->time_base.den;
+    s->lambda2 = ((int64_t)s->lambda * s->lambda +
+                  FF_LAMBDA_SCALE/2) >> FF_LAMBDA_SHIFT;
+
+    return 0;
+}
+
+static void quantize(SnowContext *s, SubBand *b,
+                     IDWTELEM *dst, DWTELEM *src,
+                     int stride, int bias)
+{
+    const int level  = b->level;
+    const int w      = b->width;
+    const int h      = b->height;
+    const int qlog   = av_clip(QROOT + b->qlog, 0, QROOT * 16);
+    const int qmul   = ff_qexp[qlog & (QROOT - 1)] << (qlog >> QSHIFT);
+    int x, y;
+
+    if (s->qlog == LOSSLESS_QLOG) {
+        for (y = 0; y < h; y++)
+            for (x = 0; x < w; x++)
+                dst[x + y * stride] = src[x + y * stride];
+        return;
+    }
+
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            int v = src[x + y * stride];
+            int d = (v < 0 ? -v : v);
+            int q = (d * (int64_t)QROOT + qmul / 2) / qmul;
+            dst[x + y * stride] = v < 0 ? -q : q;
+        }
+    }
+}
+
+static void dequantize(SnowContext *s, SubBand *b,
+                       IDWTELEM *src, int stride)
+{
+    const int w    = b->width;
+    const int h    = b->height;
+    const int qlog = av_clip(QROOT + b->qlog, 0, QROOT * 16);
+    const int qmul = ff_qexp[qlog & (QROOT-1)] << (qlog >> QSHIFT);
+    const int qadd = (s->qbias * qmul) >> QBIAS_SHIFT;
+    int x, y;
+
+    if (s->qlog == LOSSLESS_QLOG) return;
+
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            int v = src[x + y * stride];
+            if (v > 0)      v = (v * qmul + qadd) >> QSHIFT;
+            else if (v < 0) v = -(((-v) * qmul + qadd) >> QSHIFT);
+            src[x + y * stride] = v;
+        }
+    }
+}`,
+  },
+  {
+    name: 'Aurelien Jacobs',
+    country: 'France',
+    flag: '🇫🇷',
+    accent: '#6ab0d4',   // steel blue
+    file: 'libavformat/matroska.c',
+    year: 2006,
+    code: `/*
+ * Matroska file demuxer
+ * Copyright (c) 2003-2008 The FFmpeg Project
+ * GSoC 2006: Aurelien Jacobs
+ */
+
+#include "avformat.h"
+#include "internal.h"
+#include "avio_internal.h"
+#include "matroska.h"
+
+typedef struct MatroskaTrack {
+    uint64_t     num;
+    uint64_t     uid;
+    uint64_t     type;
+    char        *name;
+    char        *codec_id;
+    EbmlBin      codec_priv;
+    char        *language;
+    double       time_scale;
+    uint64_t     default_duration;
+    uint64_t     flag_default;
+    uint64_t     flag_forced;
+    uint64_t     seek_preroll;
+    MatroskaTrackVideo   video;
+    MatroskaTrackAudio   audio;
+    MatroskaTrackOperation operation;
+    EbmlList     encodings;
+    uint64_t     codec_delay;
+    uint64_t     codec_delay_in_track_tb;
+    AVStream    *stream;
+    int64_t      end_timecode;
+    int          has_palette;
+    uint32_t     palette[AVPALETTE_COUNT];
+    int64_t      last_timecode;
+} MatroskaTrack;
+
+static int matroska_decode_buffer(uint8_t **buf, int *buf_size,
+                                   MatroskaTrack *track)
+{
+    MatroskaTrackEncoding *encodings = track->encodings.elem;
+    int num_encodings = track->encodings.nb_elem;
+    uint8_t *data = *buf;
+    int isize = *buf_size;
+
+    for (int i = num_encodings - 1; i >= 0; i--) {
+        MatroskaTrackEncoding *encoding = &encodings[i];
+
+        if (encoding->type) {
+            /* Encryption not supported */
+            return AVERROR_PATCHWELCOME;
+        }
+
+        switch (encoding->compression.algo) {
+        case MATROSKA_TRACK_ENCODING_COMP_HEADERSTRIP: {
+            int header_size = encoding->compression.settings.size;
+            uint8_t *header = encoding->compression.settings.data;
+
+            if (header_size && !header) {
+                av_log(NULL, AV_LOG_ERROR,
+                       "Compression size but no data\\n");
+                return AVERROR_INVALIDDATA;
+            }
+            if (!header_size) break;
+
+            uint8_t *newdata = av_malloc(isize + header_size);
+            if (!newdata) return AVERROR(ENOMEM);
+            memcpy(newdata, header, header_size);
+            memcpy(newdata + header_size, data, isize);
+            if (data != *buf) av_free(data);
+            data  = newdata;
+            isize += header_size;
+            break;
+        }
+        case MATROSKA_TRACK_ENCODING_COMP_ZLIB: {
+            z_stream zst;
+            int result;
+            uint8_t *temp_buf = NULL;
+            int temp_buf_size = isize * 3 + 256;
+
+            zst.zalloc = Z_NULL;
+            zst.zfree  = Z_NULL;
+            zst.opaque = Z_NULL;
+            if (inflateInit(&zst) != Z_OK)
+                return AVERROR_INVALIDDATA;
+
+            zst.next_in   = data;
+            zst.avail_in  = isize;
+            do {
+                temp_buf = av_realloc(temp_buf, temp_buf_size);
+                if (!temp_buf) { inflateEnd(&zst); return AVERROR(ENOMEM); }
+                zst.next_out  = temp_buf + zst.total_out;
+                zst.avail_out = temp_buf_size - zst.total_out;
+                result = inflate(&zst, Z_NO_FLUSH);
+                temp_buf_size *= 2;
+            } while (result == Z_OK);
+
+            inflateEnd(&zst);
+            if (result != Z_STREAM_END) {
+                av_free(temp_buf);
+                return AVERROR_INVALIDDATA;
+            }
+            if (data != *buf) av_free(data);
+            data  = temp_buf;
+            isize = zst.total_out;
+            break;
+        }
+        }
+    }
+
+    *buf      = data;
+    *buf_size = isize;
+    return 0;
+}`,
+  },
+  {
+    name: 'Ramiro Polla',
+    country: 'Brazil',
+    flag: '🇧🇷',
+    accent: '#5cc86e',   // green
+    file: 'libavcodec/dca.c',
+    year: 2007,
+    code: `/*
+ * DTS Coherent Acoustics decoder
+ * Copyright (C) 2004 Gildas Bazin
+ * Copyright (C) 2007 Ramiro Polla (GSoC)
+ */
+
+#include "avcodec.h"
+#include "get_bits.h"
+#include "dca.h"
+#include "dcadata.h"
+#include "dcahuff.h"
+#include "fft.h"
+
+#define DCA_PRIM_CHANNELS_MAX  (7)
+#define DCA_SUBBANDS           (32)
+#define DCA_ABITS_MAX          (32)
+#define DCA_SUBSUBFRAMES_MAX   (4)
+#define DCA_SUBFRAMES_MAX      (16)
+#define DCA_BLOCKS_MAX         (16)
+#define DCA_LFE_MAX            (3)
+
+typedef struct {
+    AVCodecContext *avctx;
+    GetBitContext   gb;
+    /* Primary audio coding header */
+    int  frame_type;
+    int  samples_deficit;
+    int  crc_present;
+    int  sample_blocks;
+    int  frame_size;
+    int  amode;
+    int  sample_rate;
+    int  bit_rate;
+    int  bit_rate_index;
+    int  downmix;
+    int  dynrange;
+    int  timestamp;
+    int  aux_data;
+    int  hdcd;
+    int  ext_descr;
+    int  ext_coding;
+    int  aspf;
+    int  lfe;
+    int  predictor_history;
+    int  header_crc;
+    int  multirate_inter;
+    int  version;
+    int  copy_history;
+    int  source_pcm_res;
+    int  front_sum;
+    int  surround_sum;
+    int  dialog_norm;
+    /* Primary audio coding side info */
+    int  subframes;
+    int  total_channels;
+    int  prim_channels;
+    int  subband_activity[DCA_PRIM_CHANNELS_MAX];
+    int  vq_start_subband[DCA_PRIM_CHANNELS_MAX];
+    int  joint_intensity[DCA_PRIM_CHANNELS_MAX];
+    int  transient_huffman[DCA_PRIM_CHANNELS_MAX];
+    int  scalefactor_huffman[DCA_PRIM_CHANNELS_MAX];
+    int  bitalloc_huffman[DCA_PRIM_CHANNELS_MAX];
+    int  quant_index_huffman[DCA_PRIM_CHANNELS_MAX][DCA_ABITS_MAX];
+    float scalefactor_adj[DCA_PRIM_CHANNELS_MAX][DCA_ABITS_MAX];
+    /* Primary audio coding data */
+    int  subsubframes[DCA_SUBFRAMES_MAX];
+    int  partial_samples[DCA_SUBFRAMES_MAX];
+    int  prediction_mode[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    int  prediction_vq[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    int  bitalloc[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    int  transition_mode[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    int  scale_factor[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS][2];
+    int  joint_huff[DCA_PRIM_CHANNELS_MAX];
+    int  joint_scale_factor[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    int  downmix_coef[DCA_PRIM_CHANNELS_MAX][2];
+    int  dynrange_coef;
+    int  high_freq_vq[DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    float  lfe_data[2 * DCA_LFE_MAX * (DCA_BLOCKS_MAX + 4)];
+    int  lfe_scale_factor;
+    /* Audio output */
+    int  out_channels;
+    float  history[DCA_PRIM_CHANNELS_MAX][512];
+    float  sub_band_samples[DCA_BLOCKS_MAX][DCA_PRIM_CHANNELS_MAX][DCA_SUBBANDS];
+    float (*samples)[256];
+    const float *bufer;
+} DCAContext;
+
+static int dca_parse_frame_header(DCAContext *s)
+{
+    init_get_bits(&s->gb, s->dca_buffer, s->dca_buffer_size * 8);
+
+    /* Sync code */
+    skip_bits_long(&s->gb, 32);
+
+    /* Frame type */
+    s->frame_type = get_bits(&s->gb, 1);
+
+    /* Samples deficit */
+    s->samples_deficit = get_bits(&s->gb, 5) + 1;
+
+    /* CRC present */
+    s->crc_present = get_bits(&s->gb, 1);
+
+    /* Number of PCM sample blocks */
+    s->sample_blocks = get_bits(&s->gb, 7) + 1;
+
+    /* Primary frame byte size */
+    s->frame_size = get_bits(&s->gb, 14) + 1;
+    if (s->frame_size < 95) {
+        av_log(s->avctx, AV_LOG_ERROR,
+               "frame size too small: %d\\n", s->frame_size);
+        return AVERROR_INVALIDDATA;
+    }
+
+    /* Audio channel arrangement */
+    s->amode = get_bits(&s->gb, 6);
+
+    /* Core audio sampling frequency */
+    s->sample_rate = dca_sample_rates[get_bits(&s->gb, 4)];
+    if (!s->sample_rate) {
+        av_log(s->avctx, AV_LOG_ERROR, "invalid sample rate\\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    /* Transmission bit rate */
+    s->bit_rate_index = get_bits(&s->gb, 5);
+    s->bit_rate       = dca_bit_rates[s->bit_rate_index];
+
+    return 0;
+}`,
+  },
+  {
+    name: 'David Conrad',
+    country: 'USA',
+    flag: '🇺🇸',
+    accent: '#a07bcc',   // purple
+    file: 'libavcodec/vorbisdec.c',
+    year: 2007,
+    code: `/*
+ * Vorbis I decoder
+ * Copyright (c) 2002 Xiphophorus Company
+ * GSoC 2007: David Conrad
+ */
+
+#include "avcodec.h"
+#include "get_bits.h"
+#include "vorbis.h"
+#include "vorbisdsp.h"
+#include "mdct.h"
+
+typedef struct vorbis_floor1_entry {
+    uint16_t x;
+    uint16_t sort;
+    uint16_t low;
+    uint16_t high;
+} vorbis_floor1_entry;
+
+typedef struct vorbis_floor {
+    uint8_t  floor_type;
+    uint32_t id;
+    union {
+        struct {
+            uint8_t   partitions;
+            uint8_t   partition_class[32];
+            uint8_t   class_dimensions[16];
+            uint8_t   class_subclasses[16];
+            uint8_t   class_masterbook[16];
+            int16_t   subclass_books[16][8];
+            uint16_t  multiplier;
+            uint16_t  rangebits;
+            uint16_t  x_list_dim;
+            vorbis_floor1_entry *list;
+        } t1;
+        struct {
+            uint16_t  order;
+            uint16_t  rate;
+            uint16_t  bark_map_size;
+            uint8_t   amplitude_bits;
+            uint8_t   amplitude_offset;
+            uint8_t   num_books;
+            uint8_t   book_list[16];
+        } t0;
+    } data;
+} vorbis_floor;
+
+static int vorbis_floor1_decode(vorbis_context *vc,
+                                 vorbis_floor_data *vfd,
+                                 float *vec)
+{
+    vorbis_floor *vf = &vc->floors[vfd->floor_num];
+    vorbis_floor1 *vf1 = &vf->data.t1;
+    GetBitContext *gb = &vc->gb;
+    uint16_t range_v[4] = { 256, 128, 86, 64 };
+    uint16_t range = range_v[vf1->multiplier - 1];
+    uint16_t floor1_Y[258];
+    uint16_t floor1_flag[258];
+    uint16_t floor1_final_Y[258];
+    int i, j;
+    int nonzero = 0;
+
+    /* Decode the floor */
+    if (!get_bits1(gb)) {
+        /* Unused floor */
+        return 0;
+    }
+    nonzero = 1;
+
+    floor1_Y[0] = get_bits(gb, ilog(range - 1));
+    floor1_Y[1] = get_bits(gb, ilog(range - 1));
+
+    for (i = 0; i < vf1->partitions; i++) {
+        int cls  = vf1->partition_class[i];
+        int cdim = vf1->class_dimensions[cls];
+        int cbits = vf1->class_subclasses[cls];
+        int csub = (1 << cbits) - 1;
+        int cval = 0;
+
+        if (cbits > 0) {
+            if ((cval = get_vlc2(gb,
+                    vc->codebooks[vf1->class_masterbook[cls]].vlc.table,
+                    vc->codebooks[vf1->class_masterbook[cls]].nb_bits,
+                    3)) < 0)
+                return AVERROR_INVALIDDATA;
+        }
+
+        for (j = 0; j < cdim; j++) {
+            int book  = vf1->subclass_books[cls][cval & csub];
+            cval >>= cbits;
+            if (book >= 0) {
+                int temp = get_vlc2(gb,
+                               vc->codebooks[book].vlc.table,
+                               vc->codebooks[book].nb_bits, 3);
+                if (temp < 0) return AVERROR_INVALIDDATA;
+                floor1_Y[2 + vf1->list[2+i*cdim+j].sort] = temp;
+            } else {
+                floor1_Y[2 + vf1->list[2+i*cdim+j].sort] = 0;
+            }
+        }
+    }
+
+    /* Amplitude value synthesis */
+    floor1_final_Y[vf1->list[0].sort] = floor1_Y[0];
+    floor1_final_Y[vf1->list[1].sort] = floor1_Y[1];
+
+    for (i = 2; i < vf1->x_list_dim; i++) {
+        uint16_t lo_neigh  = vf1->list[i].low;
+        uint16_t hi_neigh  = vf1->list[i].high;
+        uint16_t predicted = render_point(
+                                 vf1->list[lo_neigh].x,
+                                 floor1_final_Y[lo_neigh],
+                                 vf1->list[hi_neigh].x,
+                                 floor1_final_Y[hi_neigh],
+                                 vf1->list[i].x);
+        uint16_t val  = floor1_Y[i];
+        uint16_t highroom = range - predicted;
+        uint16_t lowroom  = predicted;
+        uint16_t room     = FFMIN(highroom, lowroom) * 2;
+
+        if (val) {
+            floor1_flag[lo_neigh] = 1;
+            floor1_flag[hi_neigh] = 1;
+            floor1_flag[i]        = 1;
+            if (val >= room) {
+                floor1_final_Y[i] = highroom > lowroom
+                                    ? val - lowroom + predicted
+                                    : predicted - val + highroom - 1;
+            } else {
+                floor1_final_Y[i] = val & 1
+                                    ? predicted - (val + 1) / 2
+                                    : predicted + val / 2;
+            }
+        } else {
+            floor1_flag[i]        = 0;
+            floor1_final_Y[i]     = predicted;
+        }
+    }
+    return nonzero;
+}`,
+  },
+  {
+    name: 'Kostya Shishkov',
+    country: 'Ukraine',
+    flag: '🇺🇦',
+    accent: '#d4954a',   // orange
+    file: 'libavcodec/indeo5.c',
+    year: 2008,
+    code: `/*
+ * Indeo Video Interactive v5 decoder
+ * Copyright (c) 2009 Konstantin Shishkov (GSoC 2008)
+ */
+
+#include "avcodec.h"
+#include "get_bits.h"
+#include "ivi_common.h"
+#include "indeo5data.h"
+
+#define IVI5_PIC_SIZE_ESC   15
+
+static int decode_pic_hdr(IVI45DecContext *ctx, AVCodecContext *avctx)
+{
+    GetBitContext *gb = &ctx->gb;
+    int  pic_size_indx, wb_indx, quant_mat;
+
+    if (get_bits(gb, 5) != 0x1F) {
+        av_log(avctx, AV_LOG_ERROR, "Invalid picture start code\\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    ctx->prev_frame_type = ctx->frame_type;
+    ctx->frame_type      = get_bits(gb, 3);
+    if (ctx->frame_type >= IVI4_FRAMETYPE_NULL_FIRST) {
+        av_log(avctx, AV_LOG_ERROR,
+               "unsupported frame type: %d\\n", ctx->frame_type);
+        return AVERROR_INVALIDDATA;
+    }
+
+    ctx->frame_num = get_bits(gb, 8);
+
+    if (ctx->frame_type == IVI4_FRAMETYPE_INTRA) {
+        pic_size_indx = get_bits(gb, 4);
+        if (pic_size_indx == IVI5_PIC_SIZE_ESC) {
+            ctx->pic_conf.pic_height = get_bits(gb, 13);
+            ctx->pic_conf.pic_width  = get_bits(gb, 13);
+        } else {
+            ctx->pic_conf.pic_height = ivi5_common_pic_sizes[pic_size_indx * 2 + 1];
+            ctx->pic_conf.pic_width  = ivi5_common_pic_sizes[pic_size_indx * 2];
+        }
+
+        ctx->pic_conf.chroma_height = (ctx->pic_conf.pic_height + 3) >> 2;
+        ctx->pic_conf.chroma_width  = (ctx->pic_conf.pic_width  + 3) >> 2;
+
+        if (!ctx->pic_conf.pic_height || !ctx->pic_conf.pic_width) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "picture dimensions: %dx%d\\n",
+                   ctx->pic_conf.pic_width, ctx->pic_conf.pic_height);
+            return AVERROR_INVALIDDATA;
+        }
+
+        ctx->pic_conf.luma_bands   = get_bits(gb, 2) + 1;
+        ctx->pic_conf.chroma_bands = get_bits1(gb) + 1;
+
+        if (ctx->pic_conf.luma_bands != 4 ||
+            ctx->pic_conf.chroma_bands != 1) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "unsupported number of bands: %d luma %d chroma\\n",
+                   ctx->pic_conf.luma_bands, ctx->pic_conf.chroma_bands);
+            return AVERROR_PATCHWELCOME;
+        }
+
+        wb_indx = get_bits(gb, 3);
+        if (wb_indx >= IVI_NUM_WAVELET_TRANSFORMS) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "invalid wavelet transform %d\\n", wb_indx);
+            return AVERROR_INVALIDDATA;
+        }
+        ctx->pic_conf.luma_transform_type   = wb_indx;
+        ctx->pic_conf.chroma_transform_type = wb_indx;
+
+        if (get_bits1(gb)) {
+            /* skip additional info: wavelet filter info */
+            skip_bits(gb, 3);
+        }
+
+        ctx->pic_hdr_size = get_bits1(gb) ? get_bits(gb, 24) : 0;
+        ctx->checksum     = get_bits1(gb) ? get_bits(gb, 16) : 0;
+
+        /* skip reserved bits */
+        skip_bits_long(gb, get_bits(gb, 2) * 8);
+
+        quant_mat  = get_bits(gb, 5);
+        if (quant_mat >= 15) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "invalid quant matrix %d\\n", quant_mat);
+            return AVERROR_INVALIDDATA;
+        }
+        ctx->pic_conf.luma_quant   = quant_mat;
+        ctx->pic_conf.chroma_quant = get_bits(gb, 5);
+    }
+
+    ctx->frame_flags = get_bits(gb, 8);
+    ctx->buf_switch  = get_bits(gb, 2);
+    ctx->dst_buf     = ctx->buf_switch;
+    ctx->ref_buf     = ctx->buf_switch ^ 1;
+
+    if (ctx->frame_type != IVI4_FRAMETYPE_NULL_LAST &&
+        get_bits(gb, 5) != 0) {
+        av_log(avctx, AV_LOG_ERROR,
+               "nonzero padding in frame header\\n");
+        return AVERROR_INVALIDDATA;
+    }
+    return 0;
+}`,
+  },
+  {
+    name: 'Nathan Caldwell',
+    country: 'USA',
+    flag: '🇺🇸',
+    accent: '#cc6b7a',   // rose
+    file: 'libavcodec/amrnbdec.c',
+    year: 2009,
+    code: `/*
+ * AMR narrowband decoder
+ * Copyright (c) 2006-2007 Robert Swain
+ * Copyright (c) 2009 Colin McQuillan / Nathan Caldwell (GSoC)
+ */
+
+#include "avcodec.h"
+#include "libavutil/lfg.h"
+#include "amrnb.h"
+#include "acelp_vectors.h"
+#include "celp_filters.h"
+#include "acelp_pitch_delay.h"
+#include "acelp_filters.h"
+#include "lsp.h"
+
+#define AMR_BLOCK_SIZE    160   /* samples per frame */
+#define AMR_SUBFRAME_SIZE  40   /* samples per subframe */
+
+typedef struct AMRContext {
+    AMRNBFrame         frame;
+    uint8_t            raw_frame_buf[AMR_MAX_CODED_FRAME_SIZE];
+    enum Mode          cur_frame_mode;
+    float              prev_lsf_r[LP_FILTER_ORDER];
+    double             lsp[4][LP_FILTER_ORDER];
+    double             lsp_avg[LP_FILTER_ORDER];
+    float              lpc[4][LP_FILTER_ORDER];
+    float              excitation_buf[PITCH_DELAY_MAX + LP_FILTER_ORDER
+                                      + AMR_SUBFRAME_SIZE + 1];
+    float             *excitation;
+    float              pitch_vector[AMR_SUBFRAME_SIZE];
+    float              fixed_vector[AMR_SUBFRAME_SIZE];
+    float              prediction_error[4];
+    float              prev_excitation[PITCH_DELAY_MAX];
+    float              buf_out[AMR_BLOCK_SIZE];
+    float              samples_in[LP_FILTER_ORDER + AMR_BLOCK_SIZE];
+    AMRNBSubframe      subframe[4];
+    enum Mode          prev_frame_mode;
+    int                prev_frame_homing;
+    int                prev_frame_index;
+    int                voice_quality;
+    float              tilt_coef;
+    float              postfilter_agc;
+    float              high_pass_mem[2];
+    int                pitch_lag_int;
+    AVLFG              prng;
+    ACELPFContext      acelpf_ctx;
+    ACELPVContext      acelpv_ctx;
+    CELPFContext       celpf_ctx;
+    CELPMContext       celpm_ctx;
+} AMRContext;
+
+static void pitch_sharpening(AMRContext *p, int subframe,
+                              enum Mode mode, float *fixed_vector)
+{
+    /* Periodicity enhancement: map the fixed codebook contribution
+     * using the pitch period, sharpening the voiced excitation. */
+    int period = p->pitch_lag_int;
+
+    if (mode == MODE_12k2) {
+        /* MR122: sharpen with a gain depending on voice quality */
+        float b = av_clipf(p->voice_quality * 0.1f, 0.0f, 1.0f);
+        for (int i = period; i < AMR_SUBFRAME_SIZE; i++)
+            fixed_vector[i] += b * fixed_vector[i - period];
+    } else {
+        /* other modes: straightforward pitch enhancement */
+        for (int i = period; i < AMR_SUBFRAME_SIZE; i++)
+            fixed_vector[i] += SHARP_MAX * fixed_vector[i - period];
+    }
+}
+
+static void decode_pitch_vector(AMRContext *ctx,
+                                 const AMRNBSubframe *amr_subframe,
+                                 const int subframe)
+{
+    int pitch_lag, pitch_lag_frac;
+    enum Mode cur_mode = ctx->cur_frame_mode;
+
+    /* Decode pitch lag */
+    if (subframe == 0 || subframe == 2) {
+        if (cur_mode == MODE_12k2) {
+            pitch_lag = ff_amr_decode_pitch_lag_6(
+                &ctx->pitch_lag_int,
+                amr_subframe->p_lag,
+                subframe, 1);
+        } else {
+            pitch_lag = ff_amr_decode_pitch_lag_3(
+                &ctx->pitch_lag_int,
+                amr_subframe->p_lag,
+                subframe, cur_mode != MODE_4k75,
+                cur_mode == MODE_7k95);
+        }
+    } else {
+        /* subframes 1 and 3: relative to previous lag */
+        if (cur_mode == MODE_12k2) {
+            pitch_lag = ff_amr_pitch_lag_decode_relative_6(
+                ctx->pitch_lag_int, amr_subframe->p_lag);
+        } else {
+            pitch_lag = ff_amr_pitch_lag_decode_relative_3(
+                ctx->pitch_lag_int, amr_subframe->p_lag,
+                cur_mode != MODE_4k75);
+        }
+        ctx->pitch_lag_int = pitch_lag;
+    }
+
+    ff_acelp_interpolate(ctx->pitch_vector,
+                         &ctx->excitation[- pitch_lag],
+                         ff_b60_sinc, 6,
+                         pitch_lag_frac * 85 >> 8,
+                         10, AMR_SUBFRAME_SIZE);
+}`,
+  },
+];
+
+// Summer dates
+const DATE_START = new Date(2008, 5, 1).getTime();  // June 1
+const DATE_END   = new Date(2008, 7, 31).getTime(); // Aug 31
+const DUR        = 35; // seconds total
+
+// Grid: 3 columns × 2 rows
+const COLS = 3, ROWS = 2;
+const CELL_W = W / COLS;
+const CELL_H = H / ROWS;
+const TAB_H  = 60;
+const STAT_H = 30;
+const GUT_W  = 52;
+const CODE_Y_LOCAL = TAB_H;
+const CODE_H_LOCAL = CELL_H - TAB_H - STAT_H;
+const LINE_H = 27;
+const FSIZE  = 17;
+const MAX_LINES = Math.floor(CODE_H_LOCAL / LINE_H);
+
+// Each student types at a slightly different rate and has an offset
+// so they don't all scroll together
+const STUDENT_SPEEDS = [1.2, 1.056, 1.14, 1.26, 1.104, 1.176];
+const STUDENT_OFFSETS = [0, 0.04, 0.09, 0.02, 0.06, 0.12]; // start offset 0..1
+
+// Precompute line arrays
+const STUDENT_LINES = STUDENTS.map(s => s.code.split('\n'));
+
+// Grain
+const GR = document.createElement('canvas');
+GR.width = 512; GR.height = 512;
+const GX = GR.getContext('2d');
+function mkGrain(){
+  const id = GX.createImageData(512,512);
+  for(let i=0;i<id.data.length;i+=4){const v=Math.random()*12|0;id.data[i]=id.data[i+1]=id.data[i+2]=v;id.data[i+3]=255;}
+  GX.putImageData(id,0,0);
+}
+
+const MO = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const DW = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+function getDate(p){ return new Date(DATE_START + (DATE_END - DATE_START) * p); }
+
+// Syntax
+const KW_RE  = /\b(static|int|void|const|char|unsigned|return|if|else|for|while|struct|typedef|sizeof|NULL|uint8_t|uint32_t|uint16_t|int16_t|int32_t|int64_t|float|double|short|do|break|switch|case|default|goto|enum|uint8_t|uint32_t)\b/g;
+const TYPE_RE= /\b(AVCodecContext|GetBitContext|AVFrame|SubBand|MatroskaTrack|DCAContext|vorbis_floor|IVI45DecContext|AMRContext|DWTELEM|IDWTELEM|SnowContext|z_stream)\b/g;
+const STR_RE = /"[^"]*"/g;
+const CMT_RE = /\/\*[\s\S]*?\*\/|\/\/.*/g;
+const NUM_RE = /\b(0x[0-9a-fA-F]+|[0-9]+[Uff]?)\b/g;
+const FN_RE  = /\b([a-z_][a-z0-9_]*)\s*(?=\()/g;
+
+function tokenize(raw, accent) {
+  const isCmt = raw.trimStart().startsWith('/*') || raw.trimStart().startsWith('*') || raw.trimStart().startsWith('//');
+  if (isCmt) return [{text: raw, color: '#3a3a3a'}];
+  const marks=[];let m;
+  for(const[re,col] of [[CMT_RE,'#3a3a3a'],[STR_RE,'#666'],[TYPE_RE,'#e0e0e0'],[KW_RE,accent],[FN_RE,'#c8c8c8'],[NUM_RE,accent]]){
+    re.lastIndex=0;
+    while((m=re.exec(raw))!==null)marks.push({s:m.index,e:m.index+m[0].length,color:col,text:m[0]});
+  }
+  marks.sort((a,b)=>a.s-b.s);
+  const clean=[];
+  for(const mk of marks){if(clean.some(u=>mk.s<u.e&&mk.e>u.s))continue;clean.push(mk);}
+  clean.sort((a,b)=>a.s-b.s);
+  const tokens=[];let pos=0;
+  for(const mk of clean){
+    if(mk.s>pos)tokens.push({text:raw.slice(pos,mk.s),color:'#a0a0a0'});
+    tokens.push({text:mk.text,color:mk.color});pos=mk.e;
+  }
+  if(pos<raw.length)tokens.push({text:raw.slice(pos),color:'#a0a0a0'});
+  return tokens;
+}
+
+function dCell(si, elapsed, ts) {
+  const student = STUDENTS[si];
+  const lines   = STUDENT_LINES[si];
+  const col     = si % COLS;
+  const row     = Math.floor(si / COLS);
+  const ox      = col * CELL_W;
+  const oy      = row * CELL_H;
+  const accent  = student.accent;
+
+  // Background
+  X.fillStyle = '#000';
+  X.fillRect(ox, oy, CELL_W, CELL_H);
+
+  // Tab bar
+  X.fillStyle = '#050505';
+  X.fillRect(ox, oy, CELL_W, TAB_H);
+  X.fillStyle = accent;
+  X.fillRect(ox, oy, CELL_W, 2);
+  X.fillStyle = '#111';
+  X.fillRect(ox, oy + TAB_H - 1, CELL_W, 1);
+
+  // Student name
+  X.font = `700 26px ${DISPLAY}`;
+  X.letterSpacing = '0.5px';
+  X.fillStyle = accent;
+  X.textAlign = 'left'; X.textBaseline = 'middle';
+  X.fillText(student.name, ox + GUT_W + 12, oy + TAB_H * 0.38);
+  X.letterSpacing = '0px';
+
+  // Country + flag
+  X.font = `300 18px ${DISPLAY}`;
+  X.fillStyle = '#383838';
+  X.fillText(student.flag + '  ' + student.country + '  ·  GSoC ' + student.year,
+             ox + GUT_W + 12, oy + TAB_H * 0.74);
+
+  // File name right
+  X.font = `300 16px ${MONO}`;
+  X.fillStyle = '#2a2a2a';
+  X.textAlign = 'right';
+  X.fillText(student.file, ox + CELL_W - 12, oy + TAB_H / 2);
+
+  // Gutter
+  X.fillStyle = '#030303';
+  X.fillRect(ox, oy + CODE_Y_LOCAL, GUT_W, CODE_H_LOCAL);
+  X.fillStyle = '#0e0e0e';
+  X.fillRect(ox + GUT_W - 1, oy + CODE_Y_LOCAL, 1, CODE_H_LOCAL);
+
+  // Status bar
+  const sy = oy + CELL_H - STAT_H;
+  X.fillStyle = '#040404'; X.fillRect(ox, sy, CELL_W, STAT_H);
+  X.fillStyle = '#0d0d0d'; X.fillRect(ox, sy, CELL_W, 1);
+  X.fillStyle = accent;    X.fillRect(ox, sy, 90, STAT_H);
+  X.font = `700 13px ${MONO}`; X.fillStyle = '#000';
+  X.textBaseline = 'middle'; X.textAlign = 'left';
+  X.fillText('⎇  gsoc', ox + 8, sy + STAT_H / 2);
+
+  // How many chars typed for this student
+  const speed  = STUDENT_SPEEDS[si];
+  const offset = STUDENT_OFFSETS[si];
+  const prog   = Math.max(0, Math.min((elapsed / DUR - offset) * speed, 1));
+  const totalChars = lines.reduce((s, l) => s + l.length + 1, 0);
+  const typed  = Math.floor(prog * totalChars);
+
+  // Find current line and char
+  let remaining = typed;
+  let curLine = 0, curChars = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const len = lines[i].length + 1;
+    if (remaining <= lines[i].length) { curLine = i; curChars = remaining; break; }
+    remaining -= len;
+    if (remaining <= 0) { curLine = i; curChars = lines[i].length; break; }
+    if (i === lines.length - 1) { curLine = i; curChars = lines[i].length; }
+  }
+
+  const firstLine = Math.max(0, curLine - MAX_LINES + 3);
+
+  // Draw code
+  X.save();
+  X.beginPath();
+  X.rect(ox + GUT_W, oy + CODE_Y_LOCAL, CELL_W - GUT_W, CODE_H_LOCAL);
+  X.clip();
+  X.font = `400 ${FSIZE}px ${MONO}`;
+  X.textBaseline = 'middle'; X.textAlign = 'left';
+
+  for (let vi = 0; vi < MAX_LINES; vi++) {
+    const li = firstLine + vi;
+    if (li >= lines.length) break;
+    const y  = oy + CODE_Y_LOCAL + vi * LINE_H + LINE_H / 2;
+    if (y < oy + CODE_Y_LOCAL || y > oy + CELL_H - STAT_H) continue;
+
+    const isCur = li === curLine;
+    const text  = isCur ? lines[li].slice(0, curChars) : (li < curLine ? lines[li] : '');
+    if (!text && !isCur) continue;
+
+    const tok = tokenize(text, accent);
+    let tx = ox + GUT_W + 10;
+    for (const t of tok) {
+      X.fillStyle = t.color;
+      X.fillText(t.text, tx, y);
+      tx += X.measureText(t.text).width;
+    }
+
+    // Cursor on current line
+    if (isCur && Math.floor(ts / 530) % 2 === 0) {
+      X.fillStyle = accent;
+      X.fillRect(tx + 1, y - 9, 2, 18);
+    }
+
+    // Line number
+    X.font = `300 ${FSIZE * 0.65}px ${MONO}`;
+    X.fillStyle = li === curLine ? '#3a3a3a' : '#1e1e1e';
+    X.textAlign = 'right';
+    X.fillText(String(li + 1), ox + GUT_W - 8, y);
+    X.font = `400 ${FSIZE}px ${MONO}`;
+    X.textAlign = 'left';
+  }
+  X.restore();
+}
+
+// Cell border dividers
+function dGrid() {
+  X.fillStyle = '#141414';
+  // vertical dividers
+  X.fillRect(CELL_W - 1,     0, 2, H);
+  X.fillRect(CELL_W * 2 - 1, 0, 2, H);
+  // horizontal divider
+  X.fillRect(0, CELL_H - 1, W, 2);
+}
+
+// Global date overlay — top center
+function dDateBanner(date, prog) {
+  const bw = 780, bh = 58;
+  const bx = (W - bw) / 2, by = 0;
+
+  X.fillStyle = '#050505';
+  X.fillRect(bx, by, bw, bh);
+  X.fillStyle = '#181818';
+  X.fillRect(bx, bh - 1, bw, 1);
+
+  // GSOC label — left side
+  X.font = `900 17px ${DISPLAY}`;
+  X.letterSpacing = '2px';
+  X.fillStyle = '#222';
+  X.textAlign = 'left'; X.textBaseline = 'middle';
+  X.fillText('GOOGLE SUMMER OF CODE', bx + 18, bh / 2);
+  X.letterSpacing = '0px';
+
+  // Date — right side
+  const d = date;
+  const dateStr = `${DW[d.getDay()]}  ${String(d.getDate()).padStart(2,'0')} ${MO[d.getMonth()]} ${d.getFullYear()}`;
+  X.font = `700 20px ${DISPLAY}`;
+  X.letterSpacing = '3px';
+  X.fillStyle = '#444';
+  X.textAlign = 'right';
+  X.fillText(dateStr, bx + bw - 18, bh / 2);
+  X.letterSpacing = '0px';
+
+  // Progress bar under banner
+  X.fillStyle = '#0a0a0a';
+  X.fillRect(bx, bh, bw, 3);
+  const g = X.createLinearGradient(bx, 0, bx + bw, 0);
+  g.addColorStop(0,   '#1a4a1a');
+  g.addColorStop(0.5, '#4a4a00');
+  g.addColorStop(1,   '#4a3000');
+  X.fillStyle = g;
+  X.fillRect(bx, bh, bw * prog, 3);
+}
+
+function dGrain(el) {
+  mkGrain();
+  X.globalAlpha = 0.02 + 0.006*Math.sin(el*13.7);
+  X.globalCompositeOperation = 'screen';
+  for(let tx=0;tx<W;tx+=512)for(let ty=0;ty<H;ty+=512)X.drawImage(GR,0,0,512,512,tx,ty,512,512);
+  X.globalAlpha=1; X.globalCompositeOperation='source-over';
+}
+
+// ─── LOOP ──────────────────────────────────────────────────────────────────
+
+let running = false, t0 = 0, raf = null;
+
+function frame(ts) {
+  if (!running) return;
+  const elapsed = (ts - t0) / 1000;
+  const prog    = Math.min(elapsed / DUR, 1);
+  const date    = getDate(prog);
+
+  X.fillStyle = '#000'; X.fillRect(0,0,W,H);
+
+  for (let i = 0; i < 6; i++) dCell(i, elapsed, ts);
+
+  dGrid();
+  dDateBanner(date, prog);
+  dGrain(elapsed);
+
+  if (prog < 1) raf = requestAnimationFrame(frame);
+}
+
+function reset() {
+  if (raf) cancelAnimationFrame(raf);
+  running = false;
+  X.fillStyle = '#000'; X.fillRect(0,0,W,H);
+  for (let i = 0; i < 6; i++) dCell(i, 0, 0);
+  dGrid();
+  dDateBanner(getDate(0), 0);
+}
+
+function start() {
+  reset(); running = true; t0 = performance.now();
+  raf = requestAnimationFrame(frame);
+}
+
+document.addEventListener('keydown', e => {
+  if (['r','R','к','К'].includes(e.key)) start();
+});
+document.fonts.ready.then(reset);
+</script>
+</body>
+</html>
